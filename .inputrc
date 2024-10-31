@@ -1,0 +1,9 @@
+# rc for bash to activate zsh-like substring history search
+
+# Respect default shortcuts.
+$include /etc/inputrc
+
+## arrow up
+"\e[A":history-substring-search-backward
+## arrow down
+"\e[B":history-substring-search-forward

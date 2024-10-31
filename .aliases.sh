@@ -1,2 +1,0 @@
-alias glogin='gcloud auth login && gcloud auth application-default login'
-alias gcsql_tunnel='gcloud compute ssh --zone "europe-west4-a" "hypercar-proxy-vm" --tunnel-through-iap --project prj-lg-n-lss-car-dev -- -4 -L5432:localhost:5432 -N -q -f'
