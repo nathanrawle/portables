@@ -1,1 +1,11 @@
-alias glogin='gcloud auth login && gcloud auth application-default login'
+# gcloud auth
+alias gauth='gcloud auth'
+alias gal='gauth login'
+alias gauthapp='gauth application-default'
+alias glogin='gal && gauthapp login'
+
+# gcloud config
+alias gcfg='gcloud config'
+alias gcfg-active='gcfg list'
+alias gcfgs='gcfg configurations list'
+alias gcfga='gcfg configurations activate'

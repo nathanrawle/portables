@@ -51,6 +51,8 @@ zstyle ':z4h:ssh:*' send-extra-files '~/.nanorc' '~/.env.zsh' '~/.vimrc'
 # up-to-date. Cloned files can be used after `z4h init`. This is just an
 # example. If you don't plan to use Oh My Zsh, delete this line.
 z4h install ohmyzsh/ohmyzsh || return
+z4h install marlonrichert/zsh-autocomplete || return
+z4h install zdharma-continuum/fast-syntax-highlighting || return
 
 # Install or update core components (fzf, zsh-autosuggestions, etc.) and
 # initialize Zsh. After this point console I/O is unavailable until Zsh
@@ -75,6 +77,8 @@ z4h load   ohmyzsh/ohmyzsh/plugins/colored-man-pages  # load a plugin
 # z4h load   ohmyzsh/ohmyzsh/plugins/docker  # load a plugin
 z4h load   ohmyzsh/ohmyzsh/plugins/terraform  # load a plugin
 z4h load   ohmyzsh/ohmyzsh/plugins/pyenv  # load a plugin
+z4h load   marlonrichert/zsh-autocomplete
+z4h load   zdharma-continuum/fast-syntax-highlighting
 
 # Define key bindings.
 z4h bindkey undo Ctrl+/   Shift+Tab  # undo the last command line change
