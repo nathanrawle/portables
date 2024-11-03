@@ -57,6 +57,7 @@ zstyle ':omz:update' mode auto      # update automatically without asking
 
 plugins=(git colored-man-pages fast-syntax-highlighting zsh-autosuggestions zsh-autocomplete)
 
+fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src
 source $ZSH/oh-my-zsh.sh
 
 # User configuration
