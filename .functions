@@ -1,0 +1,1 @@
+same-file () { [ $1 -ef $2 ] && echo yes || echo no }

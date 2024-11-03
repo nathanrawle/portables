@@ -133,5 +133,6 @@ autoload -U colors && colors
 
 # load my other configs
 source ~/.env.zsh
+source ~/.functions
 source ~/.aliases
 source ~/.myzshrc

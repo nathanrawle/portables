@@ -70,6 +70,7 @@ export GPG_TTY=$TTY
 
 # Source additional local files if they exist.
 z4h source ~/.env.zsh
+z4h source ~/.functions
 z4h source ~/.aliases
 z4h source ~/.myzshrc
 
