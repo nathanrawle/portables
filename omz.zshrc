@@ -55,7 +55,7 @@ zstyle ':omz:update' mode auto      # update automatically without asking
 # Would you like to use another custom folder than $ZSH/custom?
 # ZSH_CUSTOM=/path/to/new-custom-folder
 
-plugins=(git colored-man-pages zsh-autosuggestions fast-syntax-highlighting zsh-autocomplete)
+plugins=(git colored-man-pages fast-syntax-highlighting zsh-autosuggestions zsh-autocomplete)
 
 source $ZSH/oh-my-zsh.sh
 
