@@ -46,7 +46,7 @@ zstyle ':z4h:ssh:*'                   enable 'no'
 zstyle ':z4h:ssh:*' send-extra-files '~/.nanorc' '~/.env.zsh' '~/.vimrc'
 
 # disable default plugins
-zstyle :z4h:syntax-highlighting channel none
+# zstyle :z4h:syntax-highlighting channel none
 # zstyle :z4h:zsh-completions channel none
 
 # Clone additional Git repositories from GitHub.
@@ -55,8 +55,6 @@ zstyle :z4h:syntax-highlighting channel none
 # up-to-date. Cloned files can be used after `z4h init`. This is just an
 # example. If you don't plan to use Oh My Zsh, delete this line.
 z4h install ohmyzsh/ohmyzsh || return
-z4h install zdharma-continuum/fast-syntax-highlighting || return
-# z4h install marlonrichert/zsh-autocomplete || return
 
 # Install or update core components (fzf, zsh-autosuggestions, etc.) and
 # initialize Zsh. After this point console I/O is unavailable until Zsh
@@ -81,8 +79,6 @@ z4h source ohmyzsh/ohmyzsh/lib/functions.zsh
 z4h source ohmyzsh/ohmyzsh/lib/theme-and-appearance.zsh
 z4h load   ohmyzsh/ohmyzsh/plugins/colored-man-pages
 z4h load   ohmyzsh/ohmyzsh/plugins/git
-z4h load   zdharma-continuum/fast-syntax-highlighting
-# z4h load   marlonrichert/zsh-autocomplete
 
 # Define key bindings.
 z4h bindkey undo Ctrl+/   Shift+Tab  # undo the last command line change

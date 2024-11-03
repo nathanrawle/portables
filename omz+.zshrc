@@ -9,7 +9,7 @@ DISABLE_MAGIC_FUNCTIONS=true
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
 
 ZSH_THEME="powerlevel10k/powerlevel10k"
-plugins=(zsh-syntax-highlighting zsh-autocomplete zsh-autosuggestions)
+plugins=(git colored-man-pages zsh-syntax-highlighting zsh-autocomplete zsh-autosuggestions)
 
 source ~/.oh-my-zsh/oh-my-zsh.sh
 source ~/.p10k.zsh
