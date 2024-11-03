@@ -1,8 +1,13 @@
+# terminal/shell setups
+alias portvar='[ -n PORTABLES ]'
+alias omzmode='portvar && ln -f {$PORTABLES/omz,~/}.zshrc && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && exec zsh'
+alias z4hmode='([ -e ~/.zshenv ] || mv -f ~/{.shh,}.zshenv) && portvar && ln -f {$PORTABLES/z4h,~/}.zshrc && exec zsh'
+
 # gcloud auth
 alias gauth='gcloud auth'
 alias gal='gauth login'
-alias gauthapp='gauth application-default'
-alias glogin='gal && gauthapp login'
+alias gad='gauth application-default'
+alias glogin='gal && gad login'
 
 # gcloud config
 alias gcfg='gcloud config'

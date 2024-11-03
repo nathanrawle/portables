@@ -45,14 +45,18 @@ zstyle ':z4h:ssh:*'                   enable 'no'
 # enabled hosts.
 zstyle ':z4h:ssh:*' send-extra-files '~/.nanorc' '~/.env.zsh' '~/.vimrc'
 
+# disable default plugins
+zstyle :z4h:syntax-highlighting channel none
+# zstyle :z4h:zsh-completions channel none
+
 # Clone additional Git repositories from GitHub.
 #
 # This doesn't do anything apart from cloning the repository and keeping it
 # up-to-date. Cloned files can be used after `z4h init`. This is just an
 # example. If you don't plan to use Oh My Zsh, delete this line.
 z4h install ohmyzsh/ohmyzsh || return
-z4h install marlonrichert/zsh-autocomplete || return
 z4h install zdharma-continuum/fast-syntax-highlighting || return
+# z4h install marlonrichert/zsh-autocomplete || return
 
 # Install or update core components (fzf, zsh-autosuggestions, etc.) and
 # initialize Zsh. After this point console I/O is unavailable until Zsh
@@ -69,16 +73,16 @@ export GPG_TTY=$TTY
 # Source additional local files if they exist.
 z4h source ~/.env.zsh
 z4h source ~/.aliases
+z4h source ~/.myzshrc
 
 # Use additional Git repositories pulled in with `z4h install`.
-z4h source ohmyzsh/ohmyzsh/lib/directories.zsh  # source an individual file
-z4h load   ohmyzsh/ohmyzsh/plugins/git  # load a plugin
-z4h load   ohmyzsh/ohmyzsh/plugins/colored-man-pages  # load a plugin
-# z4h load   ohmyzsh/ohmyzsh/plugins/docker  # load a plugin
-z4h load   ohmyzsh/ohmyzsh/plugins/terraform  # load a plugin
-z4h load   ohmyzsh/ohmyzsh/plugins/pyenv  # load a plugin
-z4h load   marlonrichert/zsh-autocomplete
+z4h source ohmyzsh/ohmyzsh/lib/directories.zsh
+z4h source ohmyzsh/ohmyzsh/lib/functions.zsh
+z4h source ohmyzsh/ohmyzsh/lib/theme-and-appearance.zsh
+z4h load   ohmyzsh/ohmyzsh/plugins/colored-man-pages
+z4h load   ohmyzsh/ohmyzsh/plugins/git
 z4h load   zdharma-continuum/fast-syntax-highlighting
+# z4h load   marlonrichert/zsh-autocomplete
 
 # Define key bindings.
 z4h bindkey undo Ctrl+/   Shift+Tab  # undo the last command line change
@@ -91,10 +95,11 @@ z4h bindkey z4h-cd-down    Shift+Down   # cd into a child directory
 
 # Autoload functions.
 autoload -Uz zmv
+autoload -U colors && colors # Sets color variables for omz plugins
 
 # Define functions and completions.
 function md() { [[ $# == 1 ]] && mkdir -p -- "$1" && cd -- "$1" }
-compdef _directories md
+compdef _directories md mkcd takedir
 
 # Define named directories: ~w <=> Windows home directory on WSL.
 [[ -z $z4h_win_home ]] || hash -d w=$z4h_win_home
