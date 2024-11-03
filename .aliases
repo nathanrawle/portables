@@ -1,6 +1,6 @@
 # terminal/shell setups
 alias portvar='[ -n PORTABLES ]'
-alias omzmode='portvar && ln -f {$PORTABLES/omz,~/}.zshrc && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && exec zsh'
+alias omzmode='portvar && ln -f {$PORTABLES/omz+,~/}.zshrc && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && exec zsh'
 alias z4hmode='([ -e ~/.zshenv ] || mv -f ~/{.shh,}.zshenv) && portvar && ln -f {$PORTABLES/z4h,~/}.zshrc && exec zsh'
 
 # gcloud auth
