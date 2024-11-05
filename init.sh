@@ -27,16 +27,18 @@ my_cfgs () {
 
     local custom=$HOME
 
+    ln -f {$PORTABLES,$custom}/.zprofile
+
     if [[ $1 = 'omz' ]]; then
         custom=${ZSH_CUSTOM:=${ZSH:=$HOME/.oh-my-zsh}/custom}
 
         # environment variables
         ln -f {$PORTABLES/.${HOST/%.*}.,$custom/}env.zsh
 
-        # functions, aliases, .zprofile, and .zshrc snippets that work best outside of actual .zshrc
-        for f in $PORTABLES/.{'functions',aliases,zprofile,p10k.zsh,andfinally.zshrc}(-N);
+        # functions, aliases, and .zshrc snippets that work best outside of actual .zshrc
+        for f in $PORTABLES/.{'functions',aliases,p10k.zsh,andfinally.zshrc}(-N);
         do
-            ln -f $f $custom/${${f:t}#.};
+            ln -f $f $custom/${${f:t}#.}.zsh;
         done
 
         return
@@ -47,7 +49,7 @@ my_cfgs () {
     ln -f {$PORTABLES/.${HOST/%.*},$custom/}.env.zsh
 
     # functions, aliases, .zprofile, and .zshrc snippets that work best outside of actual .zshrc
-    for f in $PORTABLES/.{'functions',aliases,zprofile,p10k.zsh,andfinally.zshrc}(-N);
+    for f in $PORTABLES/.{'functions',aliases,p10k.zsh,andfinally.zshrc}(-N);
     do
         ln -f $f $custom/${f:t};
     done
