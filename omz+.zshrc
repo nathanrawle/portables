@@ -3,8 +3,10 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
-ZSH=~/.oh-my-zsh
-DISABLE_AUTO_UPDATE=true
+export ZSH="$HOME/.oh-my-zsh"
+
+zstyle ':omz:update' mode auto
+
 DISABLE_MAGIC_FUNCTIONS=true
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
 
