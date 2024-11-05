@@ -15,4 +15,3 @@ plugins=(git colored-man-pages zsh-syntax-highlighting zsh-autocomplete zsh-auto
 
 fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src
 source $ZSH/oh-my-zsh.sh
-source ~/.p10k.zsh
