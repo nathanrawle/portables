@@ -11,7 +11,14 @@ DISABLE_MAGIC_FUNCTIONS=true
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
 
 ZSH_THEME="powerlevel10k/powerlevel10k"
-plugins=(git colored-man-pages zsh-syntax-highlighting zsh-autocomplete zsh-autosuggestions)
+plugins=(
+  git
+  colored-man-pages
+  zsh-syntax-highlighting
+  zsh-autocomplete
+  zsh-autosuggestions
+)
 
 fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src
+[[ -e $HOME/.andfinally.zshrc ]] && source $HOME/.andfinally.zshrc
 source $ZSH/oh-my-zsh.sh
