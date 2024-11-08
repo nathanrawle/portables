@@ -1,3 +1,4 @@
 scratch/
 notes/
 .DS_Store
+.venv/
