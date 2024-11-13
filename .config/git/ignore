@@ -1,4 +1,6 @@
+.DS_Store
+
 scratch/
 notes/
-.DS_Store
 .venv/
+.python-version
