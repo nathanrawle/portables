@@ -4,6 +4,18 @@ alias omzmode='portvar && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && ln -
 alias zimmode='portvar && [ -d ~/.zim ] && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && ln -f {$PORTABLES/zim,~/}.zshrc && ln -f {$PORTABLES/,~/}.zimrc && exec zsh'
 alias z4hmode='portvar && ([ -e ~/.zshenv ] || mv -f ~/{.shh,}.zshenv) && ln -f {$PORTABLES/z4h,~/}.zshrc && exec zsh'
 
+# utilities
+alias rnsort='sort -rn'
+alias h='history'
+alias follow='tail -F'
+
+# pipe shortcuts
+alias -g H='| head'
+alias -g T='| tail'
+alias -g G='| grep'
+alias -g L="| less"
+alias -g M="| more"
+
 # gcloud auth
 alias gauth='gcloud auth'
 alias gal='gauth login'
