@@ -49,6 +49,9 @@ zstyle ':z4h:ssh:*' send-extra-files '~/.nanorc' '~/.env.zsh' '~/.vimrc'
 # zstyle :z4h:syntax-highlighting channel none
 # zstyle :z4h:zsh-completions channel none
 
+# bypass fuzzy completion for compctl commands
+zstyle ':completion:*:pyenv:*' use-compctl true
+
 # Clone additional Git repositories from GitHub.
 #
 # This doesn't do anything apart from cloning the repository and keeping it
@@ -69,7 +72,7 @@ path=(~/bin $path)
 export GPG_TTY=$TTY
 
 # Source additional local files if they exist.
-for f in ${HOME:=~}/.{env.zsh,'functions',aliases,andfinally.zshrc}(-N); do z4h source $f; done
+for f in ${HOME:=~}/.{env.zsh,aliases,precompinit.zshrc,andfinally.zshrc}(-N); do z4h source $f; done
 
 # Use additional Git repositories pulled in with `z4h install`.
 z4h source ohmyzsh/ohmyzsh/lib/directories.zsh

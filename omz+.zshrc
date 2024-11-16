@@ -19,6 +19,6 @@ plugins=(
   zsh-autosuggestions
 )
 
-fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src
-[[ -e $HOME/.andfinally.zshrc ]] && source $HOME/.andfinally.zshrc
+fpath+=${ZSH_CUSTOM:-$ZSH/custom}/plugins/zsh-completions/src
+[[ -e $HOME/.precompinit.zshrc ]] && source $HOME/.precompinit.zshrc
 source $ZSH/oh-my-zsh.sh
