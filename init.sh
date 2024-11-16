@@ -54,7 +54,7 @@ my_cfgs () {
     GITCFGDIR=$custom/.config/git
     [[ -d $GITCFGDIR ]] || mkdir -p $GITCFGDIR
     ln -f {$PORTABLES,$custom}/.config/git/ignore
-    git config --global core.excludesfile $GITCFGDIR/ignore
+    git config --global --replace-all core.excludesfile $GITCFGDIR/ignore
 
     # oh-my-zsh specific config (also the default)
     if [[ $# -eq 0 || $1:l = 'omz' ]]; then
