@@ -6,7 +6,27 @@
 0="${${(M)0:#/*}:-$PWD/$0}"
 
 : ${HOME:=~}
-export PORTABLES=${0:P:h}
+MACHINE=${HOST/%.*}
+HERE=${0:P:h}
+
+# bootstrap a .env file for a new machine, or amend an existing one
+ENVFP=$HERE/.${MACHINE:l}.env.zsh
+PRTBLS_LN="PORTABLES=${HERE/#$HOME/~}"
+MYFUNC_LN="MYFUNCS=~/.fns"
+
+if [[ -e $ENVFP ]]; then
+    (
+        fgrep -E '^PORTABLES=' $ENVFP &> /dev/null \
+        || print $PRTBLS_LN >> $ENVFP
+    ) && (
+        fgrep -E '^MYFUNCS=' $ENVFP &> /dev/null \
+        || print $MYFUNC_LN >> $ENVFP
+    )
+else;
+    print -l $PRTBLS_LN $MYFUNC_LN > $ENVFP
+fi
+
+. $ENVFP
 
 brew --version &> /dev/null \
 || [ -d /opt/homebrew ] \
@@ -27,35 +47,47 @@ my_cfgs () {
 
     local custom=$HOME
 
+    # things that always appear in the same place
     ln -f {$PORTABLES,$custom}/.zprofile
+    ln -f {$PORTABLES,$custom}/.precompinit.zshrc
 
-    if [[ $1 = 'omz' ]]; then
+    GITCFGDIR=$custom/.config/git
+    [[ -d $GITCFGDIR ]] || mkdir -p $GITCFGDIR
+    ln -f {$PORTABLES,$custom}/.config/git/ignore
+    git config --global core.excludesfile $GITCFGDIR/ignore
+
+    # oh-my-zsh specific config (also the default)
+    if [[ $# -eq 0 || $1:l = 'omz' ]]; then
         custom=${ZSH_CUSTOM:=${ZSH:=$HOME/.oh-my-zsh}/custom}
 
+        rm $custom/*(.) &> /dev/null
+
         # environment variables
-        ln -f {$PORTABLES/.${HOST/%.*}.,$custom/}env.zsh
+        ln -f {$PORTABLES/.$MACHINE.,$custom/00_}env.zsh
 
         # functions, aliases, and .zshrc snippets that work best outside of actual .zshrc
-        for f in $PORTABLES/.{'functions',aliases,p10k.zsh,andfinally.zshrc}(-N);
+        for f in $PORTABLES/.{aliases,p10k.zsh}(-N);
         do
-            ln -f $f $custom/${${f:t}#.}.zsh;
+            ln -f $f $custom/${${${f:t}#.}%.zsh}.zsh;
         done
+
+        ln -f $PORTABLES/.andfinally.zshrc $custom/zz_andfinally.zsh
 
         return
     
     fi
 
     # environment variables
-    ln -f {$PORTABLES/.${HOST/%.*},$custom/}.env.zsh
+    ln -f {$PORTABLES/.$MACHINE,$custom/}.env.zsh
 
     # functions, aliases, .zprofile, and .zshrc snippets that work best outside of actual .zshrc
-    for f in $PORTABLES/.{'functions',aliases,p10k.zsh,andfinally.zshrc}(-N);
+    for f in $PORTABLES/.{aliases,p10k.zsh,andfinally.zshrc}(-N);
     do
         ln -f $f $custom/${f:t};
     done
 }
 
-if [[ $1 = 'omz' ]]; then
+if [[ $# -eq 0 || $1:l = 'omz' ]]; then
 
     my_cfgs omz
 
