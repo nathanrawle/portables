@@ -1,2 +1,2 @@
-#! /bin/sh
-[ $1 -ef $2 ] && echo yes || echo no
+#! /bin/zsh
+[[ $1 -ef $2 ]] && echo yes || echo no
