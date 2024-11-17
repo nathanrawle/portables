@@ -4,10 +4,19 @@ alias omzmode='portvar && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && ln -
 alias zimmode='portvar && [ -d ~/.zim ] && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && ln -f {$PORTABLES/zim,~/}.zshrc && ln -f {$PORTABLES/,~/}.zimrc && exec zsh'
 alias z4hmode='portvar && ([ -e ~/.zshenv ] || mv -f ~/{.shh,}.zshenv) && ln -f {$PORTABLES/z4h,~/}.zshrc && exec zsh'
 
-# utilities
+# utilities: shell
+alias g='grep'
+alias h='head'
+alias l='ls -lAh'
+alias t='tail'
+alias ft='t -F'
+alias follow='ft'
+alias hist='history'
 alias rnsort='sort -rn'
-alias h='history'
-alias follow='tail -F'
+
+# utilities: python
+alias pw='pyenv which'
+alias pwp='pw python'
 
 # pipe shortcuts
 alias -g H='| head'
