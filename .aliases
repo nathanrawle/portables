@@ -34,5 +34,4 @@ alias glogin='gal && gad login'
 # gcloud config
 alias gcfg='gcloud config'
 alias gcfg-active='gcfg list'
-alias gcfgs='gcfg configurations list'
-alias gcfga='gcfg configurations activate'
+alias gcfgs='gcfg configurations'
