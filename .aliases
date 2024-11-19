@@ -22,6 +22,7 @@ alias pwp='pw python'
 alias -g H='| head'
 alias -g T='| tail'
 alias -g G='| grep'
+alias -g G-i='G -i'
 alias -g L="| less"
 alias -g M="| more"
 
@@ -34,5 +35,4 @@ alias glogin='gal && gad login'
 # gcloud config
 alias gcfg='gcloud config'
 alias gcfg-active='gcfg list'
-alias gcfgs='gcfg configurations list'
-alias gcfga='gcfg configurations activate'
+alias gcfgs='gcfg configurations'
