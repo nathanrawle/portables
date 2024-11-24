@@ -6,6 +6,9 @@ alias z4hmode='portvar && ([ -e ~/.zshenv ] || mv -f ~/{.shh,}.zshenv) && ln -f 
 
 # utilities: shell
 alias g='grep'
+alias gi='grep -i'
+alias ge='grep -E'
+alias gg='grep -Ei'
 alias h='head'
 alias l='ls -lAh'
 alias t='tail'
@@ -13,6 +16,10 @@ alias ft='t -F'
 alias follow='ft'
 alias hist='history'
 alias rnsort='sort -rn'
+
+alias -g andyes='&& print yes'
+alias -g orno='|| print no'
+alias -g istrue='andyes orno'
 
 # utilities: python
 alias pw='pyenv which'
@@ -22,7 +29,9 @@ alias pwp='pw python'
 alias -g H='| head'
 alias -g T='| tail'
 alias -g G='| grep'
-alias -g G-i='G -i'
+alias -g Gi='G -i'
+alias -g Ge='G -E'
+alias -g GG='G -Ei'
 alias -g L="| less"
 alias -g M="| more"
 
@@ -34,5 +43,8 @@ alias glogin='gal && gad login'
 
 # gcloud config
 alias gcfg='gcloud config'
-alias gcfg-active='gcfg list'
-alias gcfgs='gcfg configurations'
+alias gconf='gcfg list'
+alias gconfs='gcfg configurations'
+
+# terraform
+alias tf='terraform'
