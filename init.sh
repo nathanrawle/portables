@@ -43,6 +43,7 @@ zoxide --version &> /dev/null \
 
 my_cfgs () {
 
+    typeset -aU exclfile
     local custom=$HOME
 
     # things that always appear in the same place
@@ -53,7 +54,14 @@ my_cfgs () {
     GITCFGDIR=$custom/.config/git
     [[ -d $GITCFGDIR ]] || mkdir -p $GITCFGDIR
     ln -f {$PORTABLES,$custom}/.config/git/ignore
-    git config --global --replace-all core.excludesfile $GITCFGDIR/ignore
+
+    exclfile=($(git config --global --get-all core.excludesfile))
+    exclfile+=$GITCFGDIR/ignore
+
+    git config --global --unset-all core.excludesfile
+    for f in $exclfile; do
+        git config --global --add core.excludesfile $f
+    done
 
     # oh-my-zsh specific config (also the default)
     if [[ $# -eq 0 || $1:l = 'omz' ]]; then
