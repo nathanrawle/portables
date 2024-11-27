@@ -6,7 +6,7 @@
 0="${${(M)0:#/*}:-$PWD/$0}"
 
 : ${HOME:=~}
-MACHINE=${HOST/%.*}
+MACHINE=${${HOST%%.*}:-${(%):-%m}}
 HERE=${0:P:h}
 
 # bootstrap a .env file for a new machine, or amend an existing one
@@ -15,13 +15,11 @@ PRTBLS_LN="PORTABLES=${HERE/#$HOME/~}"
 MYFUNC_LN="MYFUNCS=~/.fns"
 
 if [[ -e $ENVFP ]]; then
-    (
-        fgrep -E '^PORTABLES=' $ENVFP &> /dev/null \
-        || print $PRTBLS_LN >> $ENVFP
-    ) && (
-        fgrep -E '^MYFUNCS=' $ENVFP &> /dev/null \
-        || print $MYFUNC_LN >> $ENVFP
-    )
+    fgrep -Eq '^PORTABLES=' $ENVFP \
+    || print $PRTBLS_LN >> $ENVFP
+
+    fgrep -Eq '^MYFUNCS=' $ENVFP \
+    || print $MYFUNC_LN >> $ENVFP
 else;
     print -l $PRTBLS_LN $MYFUNC_LN > $ENVFP
 fi
@@ -50,6 +48,7 @@ my_cfgs () {
     # things that always appear in the same place
     ln -f {$PORTABLES,$custom}/.zprofile
     ln -f {$PORTABLES,$custom}/.precompinit.zshrc
+    ln -f {$PORTABLES,$custom}/.vimrc
 
     GITCFGDIR=$custom/.config/git
     [[ -d $GITCFGDIR ]] || mkdir -p $GITCFGDIR
