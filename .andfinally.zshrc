@@ -11,3 +11,6 @@ autoload -U ${fpath[-1]}/*(:t)
 bindkey '\eq' push-line-or-edit  # multi-line push
 bindkey ^U backward-kill-line
 bindkey ^Z kill-whole-line
+
+## named directories
+hash -d portables=$PORTABLES
