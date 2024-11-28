@@ -48,6 +48,7 @@ alias gconfs='gcfg configurations'
 
 # task warrior
 alias todo='task add'
+alias tasks='task list'
 
 # terraform
 alias tf='terraform'
