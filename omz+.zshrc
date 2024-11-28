@@ -6,7 +6,7 @@ fi
 export ZSH="$HOME/.oh-my-zsh"
 
 zstyle ':omz:update' mode auto
-zstyle ':autocomplete:*' delay 0.1
+zstyle ':autocomplete:*' delay 0.5
 
 DISABLE_MAGIC_FUNCTIONS=true
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
