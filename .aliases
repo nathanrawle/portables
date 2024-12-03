@@ -21,7 +21,7 @@ alias -g andyes='&& print yes'
 alias -g orno='|| print no'
 alias -g istrue='andyes orno'
 
-z &> /dev/null && alias cd='z'
+: $(z) &> /dev/null && alias cd='z'
 
 # utilities: python
 alias pw='pyenv which'
