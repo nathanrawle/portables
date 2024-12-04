@@ -31,6 +31,10 @@ brew --version &> /dev/null \
 || [ -f /usr/local/bin/brew ] \
 || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
+brew tap | grep -q 'domt4/autoupdate' \
+|| brew tap 'domt4/autoupdate' \
+&& brew autoupdate  start --upgrade --cleanup --immediate
+
 pyenv --version &> /dev/null  \
 || [ -f /opt/homebrew/bin/pyenv ] \
 || [ -f /usr/local/bin/pyenv ] \
