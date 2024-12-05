@@ -7,9 +7,6 @@ ln -f $PORTABLES/fns/* $MYFUNCS
 [[ $fpath = *$MYFUNCS* ]] || fpath+=$MYFUNCS
 autoload -U ${fpath[-1]}/*(:t)
 
-## add other functions to fpath
-fpath+=~/.zfunc  # used by poetry for completions (if not using OMZ)
-
 ## preferred key bindings
 bindkey '\eq' push-line-or-edit  # multi-line push
 bindkey ^U backward-kill-line
