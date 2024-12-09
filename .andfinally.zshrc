@@ -5,7 +5,7 @@
 [[ -d $MYFUNCS ]] || mkdir -p $MYFUNCS
 ln -f $PORTABLES/fns/* $MYFUNCS
 [[ $fpath = *$MYFUNCS* ]] || fpath+=$MYFUNCS
-autoload -U ${fpath[-1]}/*(:t)
+autoload -U ${MYFUNCS}/*(:t)
 
 ## preferred key bindings
 bindkey '\eq' push-line-or-edit  # multi-line push
@@ -14,3 +14,8 @@ bindkey ^Z kill-whole-line
 
 ## named directories
 hash -d portables=$PORTABLES
+
+[[ -d $PPORTABLES ]] && . $PPORTABLES/$0:t
+
+## ensure $path and $fpath entries are unique
+typeset -U path fpath
