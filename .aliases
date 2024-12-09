@@ -30,8 +30,8 @@ alias -g H='| head'
 alias -g T='| tail'
 alias -g G='| grep'
 alias -g Gi='G -i'
-alias -g Ge='G -E'
-alias -g GG='G -Ei'
+alias -g GE='G -E'
+alias -g GEi='G -Ei'
 alias -g L="| less"
 alias -g M="| more"
 
@@ -46,9 +46,11 @@ alias gcfg='gcloud config'
 alias gconf='gcfg list'
 alias gconfs='gcfg configurations'
 
-# task warrior
+# task/time warrior
 alias todo='task add'
 alias tasks='task list'
+
+alias tw=timew
 
 # terraform
 alias tf='terraform'

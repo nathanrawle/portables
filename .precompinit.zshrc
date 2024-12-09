@@ -3,7 +3,7 @@
 [[ -e '/Users/nathan/google-cloud-sdk/path.zsh.inc' ]] && . '/Users/nathan/google-cloud-sdk/path.zsh.inc'
 [[ -e '/Users/nathan/google-cloud-sdk/completion.zsh.inc' ]] && . '/Users/nathan/google-cloud-sdk/completion.zsh.inc'
 
-# needed by poetry for completions (if not using OMZ plugin)
+# completions not managed by brew or omz
 [[ -d ~/.zfunc ]] && fpath+=~/.zfunc
 
 [[ -e /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"

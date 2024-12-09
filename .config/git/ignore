@@ -3,6 +3,10 @@
 data/
 scratch/
 notes/
+
+.aliases
+.mylocalrc
+
 .venv/
 venv/
 .python-version
