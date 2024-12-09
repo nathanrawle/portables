@@ -1,13 +1,12 @@
 # set up completions and path for installed commands
 
-if [ -f '/Users/nathan/google-cloud-sdk/path.zsh.inc' ]; then . '/Users/nathan/google-cloud-sdk/path.zsh.inc'; fi
-if [ -f '/Users/nathan/google-cloud-sdk/completion.zsh.inc' ]; then . '/Users/nathan/google-cloud-sdk/completion.zsh.inc'; fi
+[[ -e '/Users/nathan/google-cloud-sdk/path.zsh.inc' ]] && . '/Users/nathan/google-cloud-sdk/path.zsh.inc'
+[[ -e '/Users/nathan/google-cloud-sdk/completion.zsh.inc' ]] && . '/Users/nathan/google-cloud-sdk/completion.zsh.inc'
 
 # needed by poetry for completions (if not using OMZ plugin)
-fpath+=~/.zfunc
+[[ -d ~/.zfunc ]] && fpath+=~/.zfunc
 
-eval "$(/opt/homebrew/bin/brew shellenv)"
-eval "$(zoxide init zsh)"
-eval "$(pyenv init -)"
-eval "$(register-python-argcomplete pipx)"
-direnv version &> /dev/null && eval "$(direnv hook zsh)"
+[[ -e /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
+hash | grep -qE ^zoxide= && eval "$(zoxide init zsh)"
+hash | grep -qE ^pyenv= && eval "$(pyenv init -)"
+hash | grep -qE ^direnv= && eval "$(direnv hook zsh)"
