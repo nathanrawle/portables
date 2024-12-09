@@ -33,7 +33,8 @@ brew --version &> /dev/null \
 
 brew tap | grep -q 'domt4/autoupdate' \
 || brew tap 'domt4/autoupdate' \
-&& brew autoupdate  start --upgrade --cleanup --immediate
+&& brew autoupdate status 2> /dev/null | grep -q 'and running.' \
+|| brew autoupdate start --upgrade --cleanup --immediate
 
 pyenv --version &> /dev/null  \
 || [ -f /opt/homebrew/bin/pyenv ] \
