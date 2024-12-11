@@ -132,4 +132,4 @@ unset key
 autoload -U colors && colors
 
 # load my other configs
-for f in ${HOME:=~}/.{env.zsh,'functions',aliases,andfinally.zshrc}(-N); do source $f; done
+for f in ${HOME:=~}/.{env.zsh,'functions',aliases,andfinally.zsh}(-N); do source $f; done

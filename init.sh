@@ -83,7 +83,7 @@ my_cfgs () {
             ln -f $f $custom/${${${f:t}#.}%.zsh}.zsh;
         done
 
-        ln -f $PORTABLES/.andfinally.zshrc $custom/zz_andfinally.zsh
+        ln -f $PORTABLES/.andfinally.zsh $custom/zz_andfinally.zsh
 
         return
     
@@ -93,7 +93,7 @@ my_cfgs () {
     ln -f {$PORTABLES/.$MACHINE,$custom/}.env.zsh
 
     # functions, aliases, .zprofile, and .zshrc snippets that work best outside of actual .zshrc
-    for f in $PORTABLES/.{aliases,p10k.zsh,andfinally.zshrc}(-N);
+    for f in $PORTABLES/.{aliases,p10k.zsh,andfinally.zsh}(-N);
     do
         ln -f $f $custom/${f:t};
     done

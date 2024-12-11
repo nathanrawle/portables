@@ -18,6 +18,8 @@ alias follow='ft'
 alias hist='history'
 alias rnsort='sort -rn'
 
+alias relink='relink -q && exec zsh'
+
 alias -g andyes='&& print yes'
 alias -g orno='|| print no'
 alias -g istrue='andyes orno'
