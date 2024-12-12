@@ -13,9 +13,11 @@ bindkey ^U backward-kill-line
 bindkey ^Z kill-whole-line
 
 ## named directories
+hash -d code=~/code
+hash -d homebrew=$HOMEBREW_PREFIX
 hash -d portables=$PORTABLES
 
-[[ -d $PPORTABLES ]] && . $PPORTABLES/$0:t
+[[ -d $PPORTABLES/.andfinally.zsh ]] && . $PPORTABLES/.andfinally.zsh
 
 ## ensure $path and $fpath entries are unique
 typeset -U path fpath
