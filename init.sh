@@ -53,7 +53,7 @@ my_cfgs () {
 
     # things that always appear in the same place
     ln -f {$PORTABLES,$custom}/.zprofile
-    ln -f {$PORTABLES,$custom}/.precompinit.zshrc
+    ln -f {$PORTABLES,$custom}/.precompinit.zsh
     ln -f {$PORTABLES,$custom}/.vimrc
 
     GITCFGDIR=$custom/.config/git

@@ -72,7 +72,7 @@ path=(~/bin $path)
 export GPG_TTY=$TTY
 
 # Source additional local files if they exist.
-for f in ${HOME:=~}/.{env.zsh,aliases,precompinit.zshrc,andfinally.zsh}(-N); do z4h source $f; done
+for f in ${HOME:=~}/.{env.zsh,aliases,precompinit.zsh,andfinally.zsh}(-N); do z4h source $f; done
 
 # Use additional Git repositories pulled in with `z4h install`.
 z4h source ohmyzsh/ohmyzsh/lib/directories.zsh

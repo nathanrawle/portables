@@ -21,5 +21,5 @@ plugins=(
 )
 
 fpath+=${ZSH_CUSTOM:-$ZSH/custom}/plugins/zsh-completions/src
-[[ -e $HOME/.precompinit.zshrc ]] && source $HOME/.precompinit.zshrc
+[[ -e $HOME/.precompinit.zsh ]] && source $HOME/.precompinit.zsh
 source $ZSH/oh-my-zsh.sh
