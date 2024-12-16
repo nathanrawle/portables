@@ -60,3 +60,10 @@ alias tws='timew summary'
 
 # terraform
 alias tf='terraform'
+alias tfi='tf init'
+alias tfo='tf output'
+alias tfp='tf plan'
+alias tfa='tf apply'
+alias tfv='tf validate'
+alias tfmt='tf fmt'
+alias tffmt=tfmt
