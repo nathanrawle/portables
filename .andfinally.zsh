@@ -21,3 +21,12 @@ hash -d portables=$PORTABLES
 
 ## ensure $path and $fpath entries are unique
 typeset -U path fpath
+
+## cowsay
+local cs_mods cs_opt=r
+if (( RANDOM % 2 )); then
+  cs_mods=( b d g p s t w y )
+  cs_opt=${cs_mods[$(( RANDOM % ${#cs_mods} + 1 ))]}
+fi
+fortune | cowsay -"$cs_opt" -n
+unset cs_mods cs_opt
