@@ -128,6 +128,17 @@ for key ('j') bindkey -M vicmd ${key} history-substring-search-down
 unset key
 # }}} End configuration added by Zim install
 
+# This affects every invocation of `less`.
+#
+#   -i   case-insensitive search unless search string contains uppercase letters
+#   -R   color
+#   -F   exit if there is less than one page of content
+#   -X   keep content on screen after exit
+#   -M   show more info at the bottom prompt line
+#   -x4  tabs are 4 instead of 8
+#   -W   temporarily highlight the first new line after foreward movement
+export LESS='-iRFXMx4W'
+
 # Sets color variables for omz plugins
 autoload -U colors && colors
 
