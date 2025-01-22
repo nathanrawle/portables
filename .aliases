@@ -27,6 +27,8 @@ alias -g istrue='andyes orno'
 # utilities: python
 alias pw='pyenv which'
 alias pwp='pw python'
+alias pylatest='pyenv install --list | grep -E '\''^\s*\d\.\d{1,2}\.\d+$'\'' | sort -t '\''.'\'' -k 1bn -k 2n -k 3n | tail -1'
+alias pil='pyenv install $(pylatest)'
 
 # pipe shortcuts
 alias -g H='| head'
@@ -39,8 +41,8 @@ alias -g L="| less"
 alias -g M="| more"
 
 # dbt
-alias dds='nohup dbt docs serve < /dev/null &> ${DDT::=/tmp/dbt-docs-serve-$(date -I)} && print "docs served in background" || print "something went wrong. Check $DDT"'
-alias killdocs='(( ${DBT_DOCS_PNUM::="$(pgrep -a -f '\''dbt docs serve'\'')"} )) && kill $DBT_DOCS_PNUM'
+alias serve-dbtdocs='{ nohup dbt docs serve < /dev/null &> /tmp/dbt-docs-serve-$(date -I) & } && print "docs served in background" || print "something went wrong. Check /tmp/dbt-docs-serve-$(date -I)"'
+alias killdocs='(( ${DBT_DOCS_PNUM:="$(pgrep -a -f '\''dbt docs serve'\'')"} )) && kill $DBT_DOCS_PNUM'
 
 # gcloud auth
 alias gauth='gcloud auth'
@@ -60,7 +62,7 @@ alias tasks='task list'
 alias tw=timew
 alias twd='timew day'
 alias tww='timew week'
-alias tws='timew summary'
+alias tws='timew summary :ids'
 
 # terraform
 alias tf='terraform'
