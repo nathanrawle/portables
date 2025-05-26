@@ -5,7 +5,13 @@
 MACHINE=${${HOST%%.*}:-${(%):-%m}}
 
 # links into home directory
-homedirdots=(.zprofile .precompinit.zsh .vimrc .config/git/ignore)
+homedirdots=(
+  .zprofile
+  .precompinit.zsh
+  .vimrc
+  .config/git/ignore
+  "Library/Application Support/Code/User/settings.json"
+)
 
 for f in $homedirdots; do
   ln -f {$PORTABLES,$HOME}/$f

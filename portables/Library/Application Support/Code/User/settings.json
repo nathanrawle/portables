@@ -1,0 +1,41 @@
+{
+    "explorer.confirmDragAndDrop": false,
+    "terminal.integrated.inheritEnv": false,
+    "python.terminal.activateEnvironment": false,
+    "editor.suggestSelection": "first",
+    "vsintellicode.modify.editor.suggestSelection": "automaticallyOverrodeDefaultValue",
+    "workbench.startupEditor": "none",
+    "jupyter.askForKernelRestart": false,
+    "autoDocstring.docstringFormat": "numpy",
+    "git.autofetch": true,
+    "notebook.formatOnSave.enabled": true,
+    "notebook.codeActionsOnSave": {
+        "source.fixAll.ruff": "explicit",
+        "source.organizeImports.ruff": "explicit"
+    },
+    "[python]": {
+        "editor.formatOnType": true,
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "always",
+            "source.organizeImports": "always"
+        },
+        "editor.defaultFormatter": "charliermarsh.ruff",
+    },
+    "editor.formatOnSave": true,
+    "update.showReleaseNotes": false,
+    "redhat.telemetry.enabled": false,
+    "explorer.confirmDelete": false,
+    "terminal.integrated.enableMultiLinePasteWarning": "never",
+    "git.confirmSync": false,
+    "files.associations": {
+        ".vimrc": "Vimscript"
+    },
+    "terminal.integrated.fontFamily": "MesloLGS NF",
+    "editor.minimap.showSlider": "always",
+    "editor.minimap.enabled": false,
+    "terminal.integrated.commandsToSkipShell": [
+        "-workbench.action.quickOpenView"
+    ],
+    "terminal.integrated.copyOnSelection": true,
+}
