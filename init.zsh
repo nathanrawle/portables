@@ -16,11 +16,13 @@ PRTBLS_LN="PORTABLES=${PORTS_DIR/#$HOME/~}"
 MYFUNC_LN="MYFUNCS=~/.fns"
 
 if [[ -e $ENVFP ]]; then
-    fgrep -Eq '^PORTABLES=' $ENVFP \
-    || print $PRTBLS_LN >> $ENVFP
+    fgrep -Eq $PRTBLS_LN $ENVFP \
+    || sed -Ei '' '/^PORTABLES=/d' $ENVFP \
+    && print $PRTBLS_LN >> $ENVFP
 
-    fgrep -Eq '^MYFUNCS=' $ENVFP \
-    || print $MYFUNC_LN >> $ENVFP
+    fgrep -Eq $MYFUNC_LN $ENVFP \
+    || sed -Ei '' '/^MYFUNCS=/d' $ENVFP \
+    && print $MYFUNC_LN >> $ENVFP
 else;
     print -l $PRTBLS_LN $MYFUNC_LN > $ENVFP
 fi
@@ -90,7 +92,7 @@ my_cfgs () {
         ln -f $PORTABLES/.andfinally.zsh $custom/zz_andfinally.zsh
 
         return
-    
+
     fi
 
     # environment variables
@@ -116,23 +118,23 @@ if [[ $# -eq 0 || $1:l = 'omz' ]]; then
     [ -d ${ZSH_CUSTOM:=$ZSH/custom}/plugins/zsh-syntax-highlighting ] \
     || git clone https://www.github.com/zsh-users/zsh-syntax-highlighting \
     $ZSH_CUSTOM/plugins/zsh-syntax-highlighting
-    
+
     [ -d $ZSH_CUSTOM/plugins/zsh-completions ] \
     || git clone https://www.github.com/zsh-users/zsh-completions \
     $ZSH_CUSTOM/plugins/zsh-completions
-    
+
     [ -d $ZSH_CUSTOM/plugins/zsh-autosuggestions ] \
     || git clone https://www.github.com/zsh-users/zsh-autosuggestions \
     $ZSH_CUSTOM/plugins/zsh-autosuggestions
-    
+
     [ -d $ZSH_CUSTOM/plugins/zsh-autocomplete ] \
     || git clone https://www.github.com/marlon-richert/zsh-autocomplete \
     $ZSH_CUSTOM/plugins/zsh-autocomplete
-    
+
     [ -d $ZSH_CUSTOM/themes/powerlevel10k ] \
     || git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
     $ZSH_CUSTOM/themes/powerlevel10k
-    
+
 
     # set up the necessaries
     ln -f {$PORTABLES/omz+,$HOME/}.zshrc
