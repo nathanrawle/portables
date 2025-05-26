@@ -17,15 +17,16 @@ homedirdots=(
 )
 
 for f in $homedirdots; do
-  ln -f {$PORTABLES,$HOME}/$f
+  mkdir -p $f:h
+  ln -f {,$HOME/}$f
 done
 
 # links into omz custom directory
-ln -f $PORTABLES/.aliases $ZSH_CUSTOM/aliases.zsh
-ln -f {$PORTABLES/.$MACHINE.,$ZSH_CUSTOM/00_}env.zsh
-ln -f {$PORTABLES/.,$ZSH_CUSTOM/}p10k.zsh
-ln -f {$PORTABLES/.,$ZSH_CUSTOM/zz_}andfinally.zsh
+ln -f .aliases $ZSH_CUSTOM/aliases.zsh
+ln -f {.$MACHINE.,$ZSH_CUSTOM/00_}env.zsh
+ln -f {.,$ZSH_CUSTOM/}p10k.zsh
+ln -f {.,$ZSH_CUSTOM/zz_}andfinally.zsh
 
-ln -f {$PORTABLES/omz+,$HOME/}.zshrc
+ln -f {omz+,$HOME/}.zshrc
 
 [[ $1 = '-q' ]] || print 'Now run `exec zsh`'
