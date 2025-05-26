@@ -11,6 +11,7 @@ homedirdots=(
   .zprofile
   .precompinit.zsh
   .vimrc
+  .editorconfig
   .config/**/*(.)
   Library/**/*(.)
 )

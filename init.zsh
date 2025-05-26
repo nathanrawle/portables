@@ -58,6 +58,7 @@ my_cfgs () {
     ln -f {$PORTABLES,$custom}/.zprofile
     ln -f {$PORTABLES,$custom}/.precompinit.zsh
     ln -f {$PORTABLES,$custom}/.vimrc
+    ln -f {$PORTABLES,$custom}/.editorconfig
 
     GITCFGDIR=$custom/.config/git
     [[ -d $GITCFGDIR ]] || mkdir -p $GITCFGDIR
