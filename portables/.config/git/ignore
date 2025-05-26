@@ -4,6 +4,8 @@ data/
 scratch/
 notes/
 
+.env
+.myenv
 .myaliases
 .mylocalrc
 .myenv
@@ -13,3 +15,5 @@ notes/
 .venv/
 venv/
 .python-version
+
+.vscode/*

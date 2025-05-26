@@ -1,0 +1,53 @@
+[tool.ruff.lint]
+  select = [
+    "B",   # flake8-bugbear
+    "C90", # McCabe complexity checks
+    "D",   # pydocstyle (docstring conventions)
+    "E",   # pycodestyle Errors
+    "F",   # pyflakes
+    "I",   # isort
+    "SIM", # flake8-simplify
+    "UP",  # pyupgrade
+    "W",   # pycodestyle Warnings
+  ]
+  ignore = [
+    "D400", # First docstring line should end with a period
+    "D401", # First docstring line should be in imperative mood
+  ]
+
+  [tool.ruff.lint.pydocstyle]
+    convention = "numpy"
+
+[tool.sqlfluff.core]
+  dialect = "bigquery"
+
+[tool.sqlfluff.indentation]
+  # https://docs.sqlfluff.com/en/stable/configuration/layout.html#configuring-indent-locations
+  allow_implicit_indents = true
+  indented_on_contents   = false
+  indented_then          = false
+
+[tool.sqlfluff.layout.type.alias_expression]
+  # https://docs.sqlfluff.com/en/stable/configuration/layout.html#aligned-elements
+  align_scope    = "bracketed"
+  align_within   = "select_clause"
+  spacing_before = "align"
+
+[tool.sqlfluff.layout.type.comma]
+  line_position = "leading"
+
+[tool.sqlfluff.layout.type.else_clause]
+  keyword_line_position = "leading"
+
+[tool.sqlfluff.layout.type.join_clause]
+  keyword_line_position = "leading"
+
+[tool.sqlfluff.layout.type.when_clause]
+  keyword_line_position = "leading"
+
+[tool.sqlfluff.rules.capitalisation]
+  functions.extended_capitalisation_policy   = "upper"
+  identifiers.extended_capitalisation_policy = "consistent"
+  keywords.capitalisation_policy             = "upper"
+  literals.capitalisation_policy             = "upper"
+  types.extended_capitalisation_policy       = "upper"

@@ -1,41 +1,212 @@
 {
-  "explorer.confirmDragAndDrop": false,
-  "terminal.integrated.inheritEnv": false,
-  "python.terminal.activateEnvironment": false,
-  "editor.suggestSelection": "first",
-  "vsintellicode.modify.editor.suggestSelection": "automaticallyOverrodeDefaultValue",
-  "workbench.startupEditor": "none",
-  "jupyter.askForKernelRestart": false,
-  "autoDocstring.docstringFormat": "numpy",
-  "git.autofetch": true,
-  "notebook.formatOnSave.enabled": true,
-  "notebook.codeActionsOnSave": {
-    "source.fixAll.ruff": "explicit",
-    "source.organizeImports.ruff": "explicit"
-  },
-  "[python]": {
-    "editor.formatOnType": true,
-    "editor.formatOnSave": true,
-    "editor.codeActionsOnSave": {
-      "source.fixAll": "always",
-      "source.organizeImports": "always"
+    "workbench.colorTheme": "Default Dark Modern",
+    "workbench.startupEditor": "none",
+    "security.allowedUNCHosts": [
+        "wsl.localhost"
+    ],
+    "explorer.confirmDragAndDrop": false,
+    "notebook.output.scrolling": true,
+    "notebook.cellToolbarVisibility": "hover",
+    "notebook.formatOnSave.enabled": true,
+    "notebook.codeActionsOnSave": {
+        "notebook.source.fixAll": "explicit",
+        "notebook.source.organizeImports": "explicit"
     },
-    "editor.defaultFormatter": "charliermarsh.ruff",
-  },
-  "editor.formatOnSave": true,
-  "update.showReleaseNotes": false,
-  "redhat.telemetry.enabled": false,
-  "explorer.confirmDelete": false,
-  "terminal.integrated.enableMultiLinePasteWarning": "never",
-  "git.confirmSync": false,
-  "files.associations": {
-    ".vimrc": "Vimscript"
-  },
-  "terminal.integrated.fontFamily": "MesloLGS NF",
-  "editor.minimap.showSlider": "always",
-  "editor.minimap.enabled": false,
-  "terminal.integrated.commandsToSkipShell": [
-    "-workbench.action.quickOpenView"
-  ],
-  "terminal.integrated.copyOnSelection": true,
+    "[python]": {
+        "editor.formatOnType": true,
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "explicit",
+            "source.organizeImports": "explicit"
+        },
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    },
+    "git.autofetch": true,
+    "git.confirmSync": false,
+    "explorer.confirmDelete": false,
+    "files.associations": {
+        "dbt/{,dbt_packages,macros,models,scripts,tests}/**/*.sql": "jinja-sql",
+        "dbt/{,dbt_packages,macros,models,scripts,tests}/**/*.y{,a}ml": "jinja-yaml",
+        ".github/workflows/**/*.y{,a}ml": "github-actions-workflow",
+        "*.aliases": "shellscript",
+        ".vimrc": "Vimscript"
+    },
+    "redhat.telemetry.enabled": true,
+    "editor.renderWhitespace": "all",
+    "search.useGlobalIgnoreFiles": true,
+    "jupyter.askForKernelRestart": false,
+    "githubPullRequests.createOnPublishBranch": "never",
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "diffEditor.maxComputationTime": 0,
+    "editor.minimap.showSlider": "always",
+    "settingsSync.ignoredExtensions": [
+        "ms-vscode.js-debug-companion"
+    ],
+    "terminal.integrated.enableMultiLinePasteWarning": "never",
+    "githubPullRequests.pullBranch": "never",
+    "diffEditor.ignoreTrimWhitespace": false,
+    "gitlens.ai.experimental.model": "openai:gpt-4o",
+    "vs-kubernetes": {
+        "vscode-kubernetes.helm-path-mac": "/Users/nathan/.vs-kubernetes/tools/helm/darwin-arm64/helm",
+        "vscode-kubernetes.kubectl-path-mac": "/Users/nathan/.vs-kubernetes/tools/kubectl/kubectl",
+        "vscode-kubernetes.minikube-path-mac": "/Users/nathan/.vs-kubernetes/tools/minikube/darwin-arm64/minikube"
+    },
+    "makefile.configureOnOpen": true,
+    "sqltools.connections": [],
+    "editor.minimap.enabled": false,
+    "[jinja-sql]": {
+        "editor.defaultFormatter": "dorzey.vscode-sqlfluff",
+        "editor.formatOnSave": true
+    },
+    "git.replaceTagsWhenPull": true,
+    "workbench.editorAssociations": {
+        "*.copilotmd": "vscode.markdown.preview.editor",
+        "file:/**/*.parquet": "jupyter-data-wrangler",
+        "file:/**/*.xlsx": "jupyter-data-wrangler"
+    },
+    "dataWrangler.enabledFileTypes": {
+        "jsonl": true
+    },
+    "dataWrangler.experiments.copilot.enabled": false,
+    "terminal.integrated.fontFamily": "MesloLGS NF",
+    "githubIssues.queries": [
+        {
+            "label": "My Issues",
+            "query": "is:open assignee:${user} repo:${owner}/${repository}",
+            "groupBy": [
+                "milestone"
+            ]
+        },
+        {
+            "label": "Created Issues",
+            "query": "author:${user} state:open repo:${owner}/${repository} sort:created-desc"
+        },
+        {
+            "label": "Recent Issues",
+            "query": "state:open repo:${owner}/${repository} sort:updated-desc"
+        },
+        {
+            "label": "Closed Issues",
+            "query": "state:closed repo:${owner}/${repository} sort:updated-desc"
+        }
+    ],
+    "githubPullRequests.queries": [
+        {
+            "label": "Waiting For My Review",
+            "query": "repo:${owner}/${repository} is:open review-requested:${user}"
+        },
+        {
+            "label": "Assigned To Me",
+            "query": "repo:${owner}/${repository} is:open assignee:${user}"
+        },
+        {
+            "label": "Created By Me",
+            "query": "repo:${owner}/${repository} is:open author:${user}"
+        },
+        {
+            "label": "Created By Me and Closed",
+            "query": "repo:${owner}/${repository} is:closed author:${user}"
+        }
+    ],
+    "terminal.integrated.confirmOnExit": "hasChildProcesses",
+    "terminal.integrated.confirmOnKill": "always",
+    "terminal.integrated.copyOnSelection": true,
+    "terminal.integrated.enableImages": true,
+    "terminal.integrated.env.osx": {},
+    "terminal.integrated.profiles.osx": {
+        "bash": {
+            "path": "bash",
+            "args": [
+                "-l"
+            ],
+            "icon": "terminal-bash"
+        },
+        "zsh": {
+            "path": "zsh",
+            "args": [
+                "-l"
+            ]
+        },
+        "fish": {
+            "path": "fish",
+            "args": [
+                "-l"
+            ]
+        },
+        "tmux": {
+            "path": "tmux",
+            "icon": "terminal-tmux"
+        },
+        "pwsh": {
+            "path": "pwsh",
+            "icon": "terminal-powershell"
+        }
+    },
+    "terminal.integrated.scrollback": 10000,
+    "terminal.integrated.suggest.builtinCompletions": {
+        "pwshCode": true,
+        "pwshGit": true
+    },
+    "ruff.importStrategy": "useBundled",
+    "sqltools.autoOpenSessionFiles": false,
+    "sqltools.results.location": "none",
+    "sqltools.results.reuseTabs": "connection",
+    "[sql]": {
+        "editor.defaultFormatter": "dorzey.vscode-sqlfluff"
+    },
+    "dataWrangler.defaultViewingFilterOptions": "advanced",
+    "[yaml]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 2,
+        "editor.autoIndent": "keep",
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.defaultColorDecorators": "auto",
+        "editor.quickSuggestions": {
+            "other": true,
+            "comments": false,
+            "strings": true
+        }
+    },
+    "[jinja-yaml]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 2,
+        "editor.autoIndent": "keep",
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.defaultColorDecorators": "auto",
+        "editor.quickSuggestions": {
+            "other": true,
+            "comments": false,
+            "strings": true
+        }
+    },
+    "github.copilot.selectedCompletionModel": "gpt-4o-copilot",
+    "terraform.experimentalFeatures.validateOnSave": true,
+    "terraform.codelens.referenceCount": true,
+    "terraform.experimentalFeatures.prefillRequiredFields": true,
+    "altimate.onboardedMcpServer": true,
+    "evenBetterToml.formatter": {
+        "allowedBlankLines": 2,
+        "alignComments": true,
+        "alignEntries": true,
+        "arrayAutoCollapse": true,
+        "arrayAutoExpand": true,
+        "columnWidth": 88,
+        "compactArrays": true,
+        "indentEntries": true,
+        "indentString": "  ",
+        "indentTables": true,
+        "reorderArrays": true,
+        "reorderInlineTables": true,
+        "reorderKeys": true,
+        "trailingNewline": true,
+    },
+    "terminal.integrated.inheritEnv": false,
+    "editor.suggestSelection": "first",
+    "vsintellicode.modify.editor.suggestSelection": "automaticallyOverrodeDefaultValue",
+    "autoDocstring.docstringFormat": "numpy",
+    "editor.formatOnSave": true,
+    "update.showReleaseNotes": false,
+    "terminal.integrated.commandsToSkipShell": [
+        "-workbench.action.quickOpenView"
+    ],
 }

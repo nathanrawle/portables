@@ -30,6 +30,8 @@ fi
 brew --version &> /dev/null \
 || [ -d /opt/homebrew ] \
 || [ -f /usr/local/bin/brew ] \
+&& brew update \
+&& brew upgrade \
 || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 brew tap | grep -q 'domt4/autoupdate' \

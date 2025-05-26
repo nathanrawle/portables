@@ -25,10 +25,17 @@ alias -g orno='|| print no'
 alias -g istrue='andyes orno'
 
 # utilities: python
+alias wp='which python'
 alias pw='pyenv which'
 alias pwp='pw python'
 alias pylatest='pyenv install --list | grep -E '\''^\s*\d\.\d{1,2}\.\d+$'\'' | sort -t '\''.'\'' -k 1bn -k 2n -k 3n | tail -1'
 alias pil='pyenv install $(pylatest)'
+
+# git overrides
+alias gs='git switch'
+alias gsc='git switch -c'
+alias gs-='git switch -'
+alias gsm='git switch main'
 
 # pipe shortcuts
 alias -g H='| head'
@@ -42,13 +49,20 @@ alias -g M="| more"
 
 # dbt
 alias serve-dbtdocs='{ nohup dbt docs serve < /dev/null &> /tmp/dbt-docs-serve-$(date -I) & } && print "docs served in background" || print "something went wrong. Check /tmp/dbt-docs-serve-$(date -I)"'
-alias killdocs='(( ${DBT_DOCS_PNUM:="$(pgrep -a -f '\''dbt docs serve'\'')"} )) && kill $DBT_DOCS_PNUM'
+alias killdocs='pkill -a -f dbt\ docs\ serve'
 
 # gcloud auth
 alias gauth='gcloud auth'
 alias gal='gauth login'
 alias gad='gauth application-default'
-alias glogin='gal && gad login'
+alias glad='gad login'
+alias glogin='gal && glad'
+
+alias gol='gal --login-config=$HOME/.config/gcloud/blume_login_config.json'
+alias glod='glad --login-config=$HOME/.config/gcloud/blume_login_config.json'
+alias glogon='gol && glod'
+
+alias glogall='glogin && glogon'
 
 # gcloud config
 alias gcfg='gcloud config'
