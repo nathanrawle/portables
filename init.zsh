@@ -8,10 +8,11 @@
 : ${HOME:=~}
 MACHINE=${${HOST%%.*}:-${(%):-%m}}
 HERE=${0:P:h}
+PORTS_DIR="$HERE/portables"
 
 # bootstrap a .env file for a new machine, or amend an existing one
-ENVFP=$HERE/.${MACHINE:l}.env.zsh
-PRTBLS_LN="PORTABLES=${HERE/#$HOME/~}"
+ENVFP=$PORTS_DIR/.${MACHINE:l}.env.zsh
+PRTBLS_LN="PORTABLES=${PORTS_DIR/#$HOME/~}"
 MYFUNC_LN="MYFUNCS=~/.fns"
 
 if [[ -e $ENVFP ]]; then

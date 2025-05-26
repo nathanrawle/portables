@@ -4,8 +4,16 @@
 : ${ZSH_CUSTOM:=${ZSH:=$HOME/.oh-my-zsh}/custom}
 MACHINE=${${HOST%%.*}:-${(%):-%m}}
 
+cd $PORTABLES
+
 # links into home directory
-homedirdots=(.zprofile .precompinit.zsh .vimrc .config/git/ignore)
+homedirdots=(
+  .zprofile
+  .precompinit.zsh
+  .vimrc
+  .config/**/*(.)
+  Library/**/*(.)
+)
 
 for f in $homedirdots; do
   ln -f {$PORTABLES,$HOME}/$f

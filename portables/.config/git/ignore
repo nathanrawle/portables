@@ -8,6 +8,9 @@ notes/
 .myenv
 .myaliases
 .mylocalrc
+.myenv
+.my.env
+.env
 
 .venv/
 venv/

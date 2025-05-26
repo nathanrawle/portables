@@ -1,3 +1,3 @@
-PORTABLES=~/code/portables
+PORTABLES=~/code/portables/portables
 PPORTABLES=~/code/pportables
 MYFUNCS=~/.fns
