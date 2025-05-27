@@ -16,13 +16,15 @@ PRTBLS_LN="PORTABLES=${PORTS_DIR/#$HOME/~}"
 MYFUNC_LN="MYFUNCS=~/.fns"
 
 if [[ -e $ENVFP ]]; then
-    fgrep -Eq $PRTBLS_LN $ENVFP \
-    || sed -Ei '' '/^PORTABLES=/d' $ENVFP \
-    && print $PRTBLS_LN >> $ENVFP
+    if ! fgrep -Eq $PRTBLS_LN $ENVFP; then
+      sed -Ei '' '/^PORTABLES=/d' $ENVFP
+      print $PRTBLS_LN >> $ENVFP
+    fi
 
-    fgrep -Eq $MYFUNC_LN $ENVFP \
-    || sed -Ei '' '/^MYFUNCS=/d' $ENVFP \
-    && print $MYFUNC_LN >> $ENVFP
+    if ! fgrep -Eq $MYFUNC_LN $ENVFP; then
+      sed -Ei '' '/^MYFUNCS=/d' $ENVFP
+      print $MYFUNC_LN >> $ENVFP
+    fi
 else;
     print -l $PRTBLS_LN $MYFUNC_LN > $ENVFP
 fi
