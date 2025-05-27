@@ -1,3 +1,7 @@
+# 1. Remove older command from the history if a duplicate is to be added.
+# 2. Include hidden files (files beginning with a `.`, i.e. dotfiles) in expansions.
+setopt hist_ignore_all_dups glob_dots
+
 # Activate Powerlevel10k Instant Prompt.
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
