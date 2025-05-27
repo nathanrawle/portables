@@ -20,9 +20,17 @@ export ZSH="$HOME/.oh-my-zsh"
 #   -W   temporarily highlight the first new line after foreward movement
 export LESS='-iRFXMx4W'
 
-zstyle ':omz:update' mode auto
+# Give myself time to type
 zstyle ':autocomplete:*' delay 0.5
+
+# Allow browsing unlimited history
 zstyle ':autocomplete:history-search-backward:*' list-lines -1
+
+# Workaround for `zsh: do you wish to see all x possibilities…?`
+zstyle ':completion:*' group-name ''
+
+# Oh My Zsh auto-update
+zstyle ':omz:update' mode auto
 
 DISABLE_MAGIC_FUNCTIONS=true
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
