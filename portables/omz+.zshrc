@@ -18,6 +18,7 @@ export LESS='-iRFXMx4W'
 
 zstyle ':omz:update' mode auto
 zstyle ':autocomplete:*' delay 0.5
+zstyle ':autocomplete:history-search-backward:*' list-lines -1
 
 DISABLE_MAGIC_FUNCTIONS=true
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
