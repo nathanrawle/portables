@@ -17,7 +17,7 @@ homedirdots=(
 )
 
 for f in $homedirdots; do
-  mkdir -p $f:h
+  mkdir -p $HOME/$f:h
   ln -f {,$HOME/}$f
 done
 
