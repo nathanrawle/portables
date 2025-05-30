@@ -24,7 +24,7 @@ export LESS='-iRFXMx4W'
 zstyle ':autocomplete:*' delay 0.5
 
 # Allow browsing unlimited history
-zstyle ':autocomplete:history-search-backward:*' list-lines -1
+zstyle ':autocomplete:history-search-backward:*' list-lines 100
 
 # Workaround for `zsh: do you wish to see all x possibilities…?`
 zstyle ':completion:*' group-name ''
