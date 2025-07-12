@@ -4,12 +4,14 @@
 : ${ZSH_CUSTOM:=${ZSH:=$HOME/.oh-my-zsh}/custom}
 MACHINE=${${HOST%%.*}:-${(%):-%m}}
 
+OLD_PWD=$PWD
 cd $PORTABLES
 
 # links into home directory
 homedirdots=(
   .zprofile
   .precompinit.zsh
+  .p10k.zsh
   .vimrc
   .editorconfig
   .config/**/*(.)
@@ -23,10 +25,12 @@ done
 
 # links into omz custom directory
 ln -f .aliases $ZSH_CUSTOM/aliases.zsh
-ln -f {.$MACHINE.,$ZSH_CUSTOM/00_}env.zsh
 ln -f {.,$ZSH_CUSTOM/}p10k.zsh
+ln -f {.$MACHINE.,$ZSH_CUSTOM/00_}env.zsh
 ln -f {.,$ZSH_CUSTOM/zz_}andfinally.zsh
 
 ln -f {omz+,$HOME/}.zshrc
+
+cd $OLD_PWD
 
 [[ $1 = '-q' ]] || print 'Now run `exec zsh`'

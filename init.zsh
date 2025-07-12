@@ -61,6 +61,7 @@ my_cfgs () {
     # things that always appear in the same place
     ln -f {$PORTABLES,$custom}/.zprofile
     ln -f {$PORTABLES,$custom}/.precompinit.zsh
+    ln -f {$PORTABLES,$custom}/.p10k.zsh
     ln -f {$PORTABLES,$custom}/.vimrc
     ln -f {$PORTABLES,$custom}/.editorconfig
 
