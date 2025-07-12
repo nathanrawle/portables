@@ -28,5 +28,5 @@ if (( RANDOM % 2 )); then
   cs_mods=( b d g p s t w y )
   cs_opt=${cs_mods[$(( RANDOM % ${#cs_mods} + 1 ))]}
 fi
-# fortune | cowsay -"$cs_opt" -n
+fortune | cowsay -"$cs_opt" -n
 unset cs_mods cs_opt
