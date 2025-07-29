@@ -1,5 +1,7 @@
 #! /bin/zsh
 
+set +e
+
 # Handle $0 according to the standard:
 # https://zdharma-continuum.github.io/Zsh-100-Commits-Club/Zsh-Plugin-Standard.html
 0="${${ZERO:-${0:#$ZSH_ARGZERO}}:-${(%):-%N}}"
@@ -12,17 +14,17 @@ PORTS_DIR="$HERE/portables"
 
 # bootstrap a .env file for a new machine, or amend an existing one
 ENVFP=$PORTS_DIR/.${MACHINE:l}.env.zsh
-PRTBLS_LN="PORTABLES=${PORTS_DIR/#$HOME/~}"
-MYFUNC_LN="MYFUNCS=~/.fns"
+PRTBLS_LN="export PORTABLES=${PORTS_DIR/#$HOME/~}"
+MYFUNC_LN="export MYFUNCS=~/.fns"
 
 if [[ -e $ENVFP ]]; then
     if ! fgrep -Eq $PRTBLS_LN $ENVFP; then
-      sed -Ei '' '/^PORTABLES=/d' $ENVFP
+      sed -Ei '' '/^(export )?PORTABLES=/d' $ENVFP
       print $PRTBLS_LN >> $ENVFP
     fi
 
     if ! fgrep -Eq $MYFUNC_LN $ENVFP; then
-      sed -Ei '' '/^MYFUNCS=/d' $ENVFP
+      sed -Ei '' '/^(export )?MYFUNCS=/d' $ENVFP
       print $MYFUNC_LN >> $ENVFP
     fi
 else;
@@ -32,8 +34,8 @@ fi
 . $ENVFP
 
 brew --version &> /dev/null \
-|| [ -d /opt/homebrew ] \
-|| [ -f /usr/local/bin/brew ] \
+|| ([ -d /opt/homebrew ] && path+=/opt/homebrew) \
+|| ([ -f /usr/local/bin/brew ] && path+=/usr/local/bin) \
 && brew update \
 && brew upgrade \
 || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -41,7 +43,7 @@ brew --version &> /dev/null \
 brew tap | grep -q 'domt4/autoupdate' \
 || brew tap 'domt4/autoupdate' \
 && brew autoupdate status 2> /dev/null | grep -q 'and running.' \
-|| brew autoupdate start --upgrade --cleanup --immediate
+|| brew autoupdate start --upgrade --cleanup --immediate --greedy
 
 pyenv --version &> /dev/null  \
 || [ -f /opt/homebrew/bin/pyenv ] \
@@ -53,98 +55,40 @@ zoxide --version &> /dev/null \
 || [ -f /usr/local/bin/zoxide ] \
 || brew install zoxide
 
-my_cfgs () {
+# make sure omz is installed
+omz version &> /dev/null \
+|| [ -d ${ZSH:=$HOME/.oh-my-zsh} ] \
+|| sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
 
-    typeset -aU exclfile
-    local custom=$HOME
+# zsh-syntax-highlighting zsh-completions zsh-autosuggestions zsh-autocomplete powerlevel10k
+[ -d ${ZSH_CUSTOM:=$ZSH/custom}/plugins/zsh-syntax-highlighting ] \
+|| git clone https://www.github.com/zsh-users/zsh-syntax-highlighting \
+$ZSH_CUSTOM/plugins/zsh-syntax-highlighting
 
-    # things that always appear in the same place
-    ln -f {$PORTABLES,$custom}/.zprofile
-    ln -f {$PORTABLES,$custom}/.precompinit.zsh
-    ln -f {$PORTABLES,$custom}/.p10k.zsh
-    ln -f {$PORTABLES,$custom}/.vimrc
-    ln -f {$PORTABLES,$custom}/.editorconfig
+[ -d $ZSH_CUSTOM/plugins/zsh-completions ] \
+|| git clone https://www.github.com/zsh-users/zsh-completions \
+$ZSH_CUSTOM/plugins/zsh-completions
 
-    GITCFGDIR=$custom/.config/git
-    [[ -d $GITCFGDIR ]] || mkdir -p $GITCFGDIR
-    ln -f {$PORTABLES,$custom}/.config/git/ignore
+[ -d $ZSH_CUSTOM/plugins/zsh-autosuggestions ] \
+|| git clone https://www.github.com/zsh-users/zsh-autosuggestions \
+$ZSH_CUSTOM/plugins/zsh-autosuggestions
 
-    exclfile=($(git config --global --get-all core.excludesfile))
-    exclfile+=$GITCFGDIR/ignore
+[ -d $ZSH_CUSTOM/plugins/zsh-autocomplete ] \
+|| git clone https://www.github.com/marlon-richert/zsh-autocomplete \
+$ZSH_CUSTOM/plugins/zsh-autocomplete
 
-    git config --global --unset-all core.excludesfile
-    for f in $exclfile; do
-        git config --global --add core.excludesfile $f
-    done
+[ -d $ZSH_CUSTOM/themes/powerlevel10k ] \
+|| git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
+$ZSH_CUSTOM/themes/powerlevel10k
 
-    # oh-my-zsh specific config (also the default)
-    if [[ $# -eq 0 || $1:l = 'omz' ]]; then
-        custom=${ZSH_CUSTOM:=${ZSH:=$HOME/.oh-my-zsh}/custom}
+rm ${ZSH_CUSTOM}/*(.N) &> /dev/null
 
-        rm $custom/*(.) &> /dev/null
+"$PORTS_DIR"/fns/relink -q
 
-        # environment variables
-        ln -f {$PORTABLES/.$MACHINE.,$custom/00_}env.zsh
+git config --global --unset-all core.excludesfile
+git config --global --add core.excludesfile "$HOME"/.config/git/ignore
+git config --global --add core.excludesfile "$PORTS_DIR"/.config/git/ignore
 
-        # functions, aliases, and .zshrc snippets that work best outside of actual .zshrc
-        for f in $PORTABLES/.{aliases,p10k.zsh}(-N);
-        do
-            ln -f $f $custom/${${${f:t}#.}%.zsh}.zsh;
-        done
+echo 'Success! Now restart your shell…'
 
-        ln -f $PORTABLES/.andfinally.zsh $custom/zz_andfinally.zsh
-
-        return
-
-    fi
-
-    # environment variables
-    ln -f {$PORTABLES/.$MACHINE,$custom/}.env.zsh
-
-    # functions, aliases, .zprofile, and .zshrc snippets that work best outside of actual .zshrc
-    for f in $PORTABLES/.{aliases,p10k.zsh,andfinally.zsh}(-N);
-    do
-        ln -f $f $custom/${f:t};
-    done
-}
-
-if [[ $# -eq 0 || $1:l = 'omz' ]]; then
-
-    my_cfgs omz
-
-    # make sure it's installed
-    omz version &> /dev/null \
-    || [ -d ${ZSH:=$HOME/.oh-my-zsh} ] \
-    || sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-
-    # zsh-syntax-highlighting zsh-completions zsh-autosuggestions zsh-autocomplete powerlevel10k
-    [ -d ${ZSH_CUSTOM:=$ZSH/custom}/plugins/zsh-syntax-highlighting ] \
-    || git clone https://www.github.com/zsh-users/zsh-syntax-highlighting \
-    $ZSH_CUSTOM/plugins/zsh-syntax-highlighting
-
-    [ -d $ZSH_CUSTOM/plugins/zsh-completions ] \
-    || git clone https://www.github.com/zsh-users/zsh-completions \
-    $ZSH_CUSTOM/plugins/zsh-completions
-
-    [ -d $ZSH_CUSTOM/plugins/zsh-autosuggestions ] \
-    || git clone https://www.github.com/zsh-users/zsh-autosuggestions \
-    $ZSH_CUSTOM/plugins/zsh-autosuggestions
-
-    [ -d $ZSH_CUSTOM/plugins/zsh-autocomplete ] \
-    || git clone https://www.github.com/marlon-richert/zsh-autocomplete \
-    $ZSH_CUSTOM/plugins/zsh-autocomplete
-
-    [ -d $ZSH_CUSTOM/themes/powerlevel10k ] \
-    || git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
-    $ZSH_CUSTOM/themes/powerlevel10k
-
-
-    # set up the necessaries
-    ln -f {$PORTABLES/omz+,$HOME/}.zshrc
-    [ ! -e $HOME/.zshenv ] || mv $HOME/{,.shh}.zshenv
-
-    echo 'Success! Now restart your shell…'
-
-    exit
-
-fi
+exit

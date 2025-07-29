@@ -14,8 +14,8 @@ homedirdots=(
   .p10k.zsh
   .vimrc
   .editorconfig
-  .config/**/*(.)
-  Library/**/*(.)
+  .config/**/*(.N)
+  Library/**/*(.N)
 )
 
 for f in $homedirdots; do

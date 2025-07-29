@@ -1,3 +1,3 @@
-PORTABLES=~/code/portables/portables
-PPORTABLES=~/code/pportables
-MYFUNCS=~/.fns
+export PORTABLES=~/code/portables/portables
+export PPORTABLES=~/code/pportables
+export MYFUNCS=~/.fns
