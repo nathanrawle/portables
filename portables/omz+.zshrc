@@ -23,8 +23,14 @@ export LESS='-iRFXMx4W'
 # Give myself time to type
 zstyle ':autocomplete:*' delay 0.5
 
-# Allow browsing unlimited history
-zstyle ':autocomplete:history-search-backward:*' list-lines 100
+# Allow browsing more history
+zstyle -e ':autocomplete:*:*' list-lines 'reply=( $(( 0.8 * LINES )) )'
+zstyle -e ':autocomplete:history-search-backward:*' list-lines 'reply=( $(( LINES < 30 ? 27 : 0.9 * LINES )) )'
+
+# First insert the common prefix, then substring
+zstyle ':completion:*:*' matcher-list 'm:{[:lower:]-}={[:upper:]_}' '+r:|[.]=**'
+zstyle ':autocomplete:*complete*:*' insert-unambiguous yes
+
 
 # Workaround for `zsh: do you wish to see all x possibilities…?`
 zstyle ':completion:*' group-name ''
