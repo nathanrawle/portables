@@ -1,0 +1,116 @@
+#! /bin/zsh
+
+source "$HOME/.config/myconfigs/pam.sh"
+
+# Parse command line arguments
+# collect positional args if you need them
+positional=()
+entitlement_ids=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -e|--entitlements)
+      ENTITLEMENT_NAMES="$2"
+      ENTITLEMENTS_ARG=1
+      ;;
+    -j|--justification)
+      JUSTIFICATION="$2"
+      shift 2
+      ;;
+    -d|--duration)
+      DURATION="$2"
+      shift 2
+      ;;
+    -r|--resource)
+      RESOURCE="$2"
+      shift 2
+      ;;
+    -p|--project)
+      RESOURCE_TYPE=projects
+      RESOURCE_ID="$2"
+      shift 2
+      ;;
+    -f|--folder)
+      RESOURCE_TYPE=folders
+      RESOURCE_ID="$2"
+      shift 2
+      ;;
+    -o|--organization)
+      RESOURCE_TYPE=organizations
+      RESOURCE_ID="$2"
+      shift 2
+      ;;
+    --)   # end of options
+      shift
+      break
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+    */*/locations/*/entitlements/*)
+      entitlement_ids+=("$1")
+      shift
+      ;;
+    *)
+      positional+=("$1")  # save positional
+      shift
+      ;;
+  esac
+done
+
+DURATION=${DURATION:-$DEFAULT_DURATION}
+JUSTIFICATION=${JUSTIFICATION:-$DEFAULT_JUSTIFICATION}
+LOCATION=${LOCATION:-${DEFAULT_LOCATION:-global}}
+
+if (( ${#positional[@]} == 1 )); then
+  res_key=${positional[1]}
+  pam_params=(${=pams[$res_key]})
+  RESOURCE_TYPE=${pam_params[1]}
+  RESOURCE_ID=${pam_params[2]}
+  if (( $ENTITLEMENTS_ARG )); then
+    entitlement_names=(${=ENTITLEMENT_NAMES})
+  elif (( ${#pam_params[@]:2} > 0 )); then
+    entitlement_names=${pam_params[@]:2}
+  else
+    entitlement_names=("${default_entitlements[@]}")
+  fi
+fi
+
+if (( ${#entitlement_names[@]} == 0 )); then
+  (( $ENTITLEMENTS_ARG )) \
+  && entitlement_names=(${=ENTITLEMENT_NAMES}) \
+  || entitlement_names=("${default_entitlements[@]}")
+fi
+
+for etm_nm in "${entitlement_names[@]}"; do
+  entitlement_ids+=(
+    "$RESOURCE_TYPE/$RESOURCE_ID/locations/$LOCATION/entitlements/$etm_nm"
+  )
+done
+
+if (( DEBUG )); then
+  print -l \
+  $DURATION \
+  $JUSTIFICATION \
+  $LOCATION \
+  "${positional[@]}" \
+  $res_key \
+  "${pam_params[@]}" \
+  $RESOURCE_TYPE \
+  $RESOURCE_ID \
+  "${entitlement_names[@]}" \
+  "${entitlement_ids[@]}"
+
+  unset DURATION JUSTIFICATION LOCATION positional pam_params RESOURCE_TYPE RESOURCE_ID entitlement_names entitlement_ids
+  return 1
+fi
+
+for etm in "${entitlement_ids[@]}"; do
+  gcloud pam grants create \
+    --entitlement=$etm \
+    --requested-duration=$DURATION \
+    --justification=$JUSTIFICATION
+done
+
+unset DURATION JUSTIFICATION LOCATION positional pam_params RESOURCE_TYPE RESOURCE_ID entitlement_names entitlement_ids
