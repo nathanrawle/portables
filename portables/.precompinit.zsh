@@ -22,5 +22,5 @@ export NVM_DIR="$HOME/.nvm"
 && . "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
 
 # put go binaries in path:
-[[ -d "${GOPATH:-~/go}/bin" ]] \
+[[ -d "${GOPATH:=$HOME/go}/bin" ]] \
 && path+="$GOPATH/bin"
