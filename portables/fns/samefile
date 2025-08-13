@@ -1,8 +1,8 @@
 #! /bin/zsh
 local -i notfound=0
 
-[[ ! -e $1 ]] && print $1 does not exist && notfound+=1
-[[ ! -e $2 ]] && print $2 does not exist && notfound+=1
+[[ ! -e "$1" ]] && print "$1" does not exist && notfound+=1
+[[ ! -e "$2" ]] && print "$2" does not exist && notfound+=1
 (( notfound )) && return $notfound
 
-[[ $1 -ef $2 ]] && print yes || print no
+[[ "$1" -ef "$2" ]] && print yes || print no
