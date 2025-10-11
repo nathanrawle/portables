@@ -31,5 +31,13 @@
     {
         "key": "cmd+k shift+cmd+right",
         "command": "-workbench.action.moveEditorRightInGroup"
+    },
+    {
+        "key": "shift+cmd+0",
+        "command": "workbench.action.zoomReset"
+    },
+    {
+        "key": "cmd+numpad0",
+        "command": "-workbench.action.zoomReset"
     }
 ]
