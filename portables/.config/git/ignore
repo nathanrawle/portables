@@ -8,12 +8,12 @@ notes/
 .myenv
 .myaliases
 .mylocalrc
-.myenv
 .my.env
-.env
 
 .venv/
 venv/
 .python-version
 
 .vscode/*
+
+.act/

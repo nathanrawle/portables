@@ -3,14 +3,14 @@
 setopt hist_ignore_all_dups glob_dots
 
 # Activate Powerlevel10k Instant Prompt.
-if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]] \
+&& [[ "${PROMPT_FW}" == "p10k" && "${ZSH_THEME}" == **p*10k** ]]; then
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
 export ZSH="$HOME/.oh-my-zsh"
 
-# This affects every invocation of `less`.
-#
+# This affects every invocation of `less` and makes it way better:
 #   -i   case-insensitive search unless search string contains uppercase letters
 #   -R   color
 #   -F   exit if there is less than one page of content
@@ -41,7 +41,6 @@ zstyle ':omz:update' mode auto
 DISABLE_MAGIC_FUNCTIONS=true
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
 
-ZSH_THEME="powerlevel10k/powerlevel10k"
 plugins=(
   git
   colored-man-pages
@@ -49,6 +48,10 @@ plugins=(
   zsh-autocomplete
   zsh-autosuggestions
 )
+
+[[ "${PROMPT_FW}" == "starship" ]] \
+&& plugins+=("starship") \
+|| [[ -z "${ZSH_THEME}" ]] && ZSH_THEME="random"
 
 fpath+=${ZSH_CUSTOM:-$ZSH/custom}/plugins/zsh-completions/src
 [[ -e $HOME/.precompinit.zsh ]] && source $HOME/.precompinit.zsh
