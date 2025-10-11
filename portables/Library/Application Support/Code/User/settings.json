@@ -1,4 +1,18 @@
 {
+  "[dockercompose]": {
+    "editor.autoIndent": "advanced",
+    "editor.defaultFormatter": "redhat.vscode-yaml",
+    "editor.insertSpaces": true,
+    "editor.quickSuggestions": {
+      "comments": false,
+      "other": true,
+      "strings": true
+    },
+    "editor.tabSize": 2
+  },
+  "[github-actions-workflow]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml"
+  },
   "[jinja-sql]": {
     "editor.defaultFormatter": "dorzey.vscode-sqlfluff",
     "editor.formatOnSave": true
@@ -67,6 +81,7 @@
     }
   ],
   "autoDocstring.docstringFormat": "numpy",
+  "chatgpt.config": {},
   "dataWrangler.defaultViewingFilterOptions": "advanced",
   "dataWrangler.enabledFileTypes": {
     "jsonl": true
@@ -74,6 +89,7 @@
   "dataWrangler.experiments.copilot.enabled": false,
   "diffEditor.ignoreTrimWhitespace": false,
   "diffEditor.maxComputationTime": 0,
+  "docker.extension.enableComposeLanguageServer": false,
   "editor.autoIndentOnPaste": true,
   "editor.formatOnSave": true,
   "editor.indentSize": "tabSize",
@@ -136,6 +152,8 @@
       "query": "state:closed repo:${owner}/${repository} sort:updated-desc"
     }
   ],
+  "githubLocalActions.actCommand": "gh act",
+  "githubLocalActions.dockerDesktopPath": "/Applications/Docker.app",
   "githubPullRequests.createOnPublishBranch": "never",
   "githubPullRequests.pullBranch": "never",
   "githubPullRequests.queries": [
@@ -239,6 +257,7 @@
   },
   "vsintellicode.modify.editor.suggestSelection": "automaticallyOverrodeDefaultValue",
   "workbench.colorTheme": "Default Dark Modern",
+  "workbench.editor.showTabs": "none",
   "workbench.editorAssociations": {
     "*.copilotmd": "vscode.markdown.preview.editor",
     "file:/**/*.parquet": "jupyter-data-wrangler",
