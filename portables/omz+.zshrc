@@ -4,8 +4,9 @@ setopt hist_ignore_all_dups glob_dots
 
 # Activate Powerlevel10k Instant Prompt.
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]] \
-&& [[ "${PROMPT_FW}" == "p10k" && "${ZSH_THEME}" == **p*10k** ]]; then
-  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+&& [[ "${PROMPT_FW}" == "p10k" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" \
+  && ZSH_THEME="powerlevel10k/powerlevel10k"
 fi
 
 export ZSH="$HOME/.oh-my-zsh"
