@@ -21,17 +21,29 @@ export ZSH="$HOME/.oh-my-zsh"
 #   -W   temporarily highlight the first new line after foreward movement
 export LESS='-iRFXMx4W'
 
-# Give myself time to type
-zstyle ':autocomplete:*' delay 0.5
-
 # Allow browsing more history
-zstyle -e ':autocomplete:*:*' list-lines 'reply=( $(( 0.8 * LINES )) )'
-zstyle -e ':autocomplete:history-search-backward:*' list-lines 'reply=( $(( LINES < 30 ? 27 : 0.9 * LINES )) )'
+zstyle -e ':autocomplete:*:*' list-lines 'reply=( $(( 0.75 * LINES )) )'
+# zstyle -e ':autocomplete:history-search-backward:*' list-lines 'reply=( $(( LINES < 30 ? 27 : 0.9 * LINES )) )'
 
-# First insert the common prefix, then substring
-zstyle ':completion:*:*' matcher-list 'm:{[:lower:]-}={[:upper:]_}' '+r:|[.]=**'
+# Common prefix / substring
+# -------------------------
+# all Tab widgets
 zstyle ':autocomplete:*complete*:*' insert-unambiguous yes
+# all history widgets
+zstyle ':autocomplete:*history*:*' insert-unambiguous yes
+# ^S
+zstyle ':autocomplete:menu-search:*' insert-unambiguous yes
+# Insert prefix first, then substring
+zstyle ':completion:*:*' matcher-list 'm:{[:lower:]-}={[:upper:]_}' '+r:|[.]=**'
 
+# Start each command line in history search mode
+# ----------------------------------------------
+# I have defined the alias `hisb` to toggle this on and off and I think I prefer to
+# keep this off by default but to have it on by default uncomment the line:
+# zstyle ':autocomplete:*' default-context history-incremental-search-backward
+
+# Give myself time to type
+zstyle ':autocomplete:*' delay 0.2
 
 # Workaround for `zsh: do you wish to see all x possibilities…?`
 zstyle ':completion:*' group-name ''

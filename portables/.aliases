@@ -5,6 +5,7 @@ alias zimmode='portvar && [ -d ~/.zim ] && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh
 alias z4hmode='portvar && ([ -e ~/.zshenv ] || mv -f ~/{.shh,}.zshenv) && ln -f {$PORTABLES/z4h,~/}.zshrc && exec zsh'
 
 # utilities: shell
+alias cd-='cd -' # for times when `pushdminus` might be unset
 alias g='grep'
 alias gi='grep -i'
 alias ge='grep -E'
@@ -87,3 +88,6 @@ alias tfa='tf apply'
 alias tfv='tf validate'
 alias tfmt='tf fmt'
 alias tffmt=tfmt
+
+# zsh-autocomplete
+alias hisb="zstyle -t ':autocomplete:*' default-context '' && zstyle ':autocomplete:*' default-context history-incremental-search-backward || zstyle ':autocomplete:*' default-context ''"
