@@ -91,6 +91,7 @@
   "diffEditor.maxComputationTime": 0,
   "docker.extension.enableComposeLanguageServer": false,
   "editor.autoIndentOnPaste": true,
+  "editor.fontFamily": "MesloLGS NF",
   "editor.formatOnSave": true,
   "editor.indentSize": "tabSize",
   "editor.minimap.enabled": false,
