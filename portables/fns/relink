@@ -20,8 +20,8 @@ homedirdots=(
 )
 
 for f in "${homedirdots[@]}"; do
-  mkdir -p "$HOME"/"$f":h
-  ln -f {,"$HOME"/}"$f"
+  mkdir -p "$HOME/$f:h"
+  ln -f {,"$HOME/"}"$f"
 done
 
 ln -f {omz+,"$HOME"/}.zshrc

@@ -55,17 +55,59 @@ brew tap | grep -q 'domt4/autoupdate' \
 && brew autoupdate status 2> /dev/null | grep -q 'and running.' \
 || brew autoupdate start --upgrade --cleanup --immediate --greedy
 
+typeset -aU missing
+
 echo "Setup: pyenv"
 pyenv --version &> /dev/null  \
-|| brew install pyenv
+|| missing+='pyenv'
 
 echo "Setup: zoxide"
 zoxide --version &> /dev/null \
-|| brew install zoxide
+|| missing+='zoxide'
 
 echo "Setup: starship prompt"
 starship --version &> /dev/null \
-|| brew install starship
+|| missing+='starship'
+
+echo "Setup: NeoVim"
+nvim --version &> /dev/null \
+|| missing+='neovim'
+
+echo "Setup: LuaRocks"
+nvim --version &> /dev/null \
+|| missing+='luarocks'
+
+echo "Setup: LazyGit"
+lazygit --version &> /dev/null \
+|| missing+='lazygit'
+
+echo "Setup: ripgrep"
+rg --version &> /dev/null \
+|| missing+='ripgrep'
+
+echo "Setup: fd"
+fd --version &> /dev/null \
+|| missing+='fd'
+
+[[ -n $missing ]] \
+&& brew install $missing
+
+echo "Setup: Install/Update Node Version Manager"
+curl -s -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+echo "Setup: Node.js"
+nvm install --lts
+nvm use --lts
+
+echo "Setup: Tree-sitter CLI"
+npm install -g tree-sitter-cli
+
+echo "Setup: LazyVim"
+if [[ ! -e ~/.config/nvim/lua/lazy.lua ]]; then
+  mv ~/.config/nvim{,.bak}
+  git clone https://github.com/LazyVim/starter ~/.config/nvim
+  rm -rf ~/.config/nvim/.git
+fi
 
 # make sure omz is installed
 echo "Setup: Oh My Zsh!"
