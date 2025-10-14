@@ -103,35 +103,59 @@ fd --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='fd'
 
+echo "Setup: Homebrew: tree-sitter-cli check"
+tree-sitter --version &> /dev/null \
+&& echo "✅ already installed." \
+|| missing+='tree-sitter-cli'
+
+echo "Setup: Homebrew: ImageMagick check"
+magick --version &> /dev/null \
+&& echo "✅ already installed." \
+|| missing+='imagemagick'
+
+echo "Setup: Homebrew: ghostscript check"
+command gs --version &> /dev/null \
+&& echo "✅ already installed." \
+|| missing+='ghostscript'
+
+echo "Setup: Homebrew: tectonic check"
+tectonic --version &> /dev/null \
+&& echo "✅ already installed." \
+|| missing+='tectonic'
+
+echo "Setup: Homebrew: mermaid-cli check"
+mmdc -V &> /dev/null \
+&& echo "✅ already installed." \
+|| missing+='mermaid-cli'
+
 [[ -n $missing ]] \
-&& echo "Setup: Homebrew: installing missing packages"
-&& print -l "${missing[@]}"
-&& brew install $missing
+&& echo "Setup: Homebrew: installing missing packages" \
+&& print -l "${missing[@]}" \
+&& brew install $missing \
 || echo "Setup: Homebrew: everything already installed; nothing to do!"
+
+echo "Setup: uv"
+uv tool upgrade --all
 
 echo "Setup: uv: ruff"
 ruff --version \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || uv tool install ruff
 
 echo "Setup: uv: SQLFluff"
 sqlfluff --version \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || uv tool install sqlfluff
 
 echo "Setup: Install/Update Node Version Manager"
+NVM_SH_PATH="$HOME/.nvm/nvm.sh"
 curl -s -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 . "$HOME/.nvm/nvm.sh"
 echo "Setup: Node.js"
 nvm install --lts
 
-echo "Setup: Tree-sitter CLI"
-tree-sitter --version &> /dev/null \
-&& echo "✅ already installed." \
-|| npm install -g tree-sitter-cli
-
 echo "Setup: LazyVim"
-if [[ -e ~/.config/nvim/lua/config/lazy.lua ]]; then
+if [[ -s ~/.config/nvim/lua/config/lazy.lua ]]; then
   echo "✅ already installed."
 else
   NVIM_CONF=".config/nvim"
