@@ -20,6 +20,7 @@ alias hist='history'
 alias rnsort='sort -rn'
 
 alias relink='relink -q && read '\''?Do you want to restart the shell now? (Y|n) '\''&& [[ ! ${(L)REPLY[1]} = n ]] && exec zsh'
+alias reshell='exec $SHELL'
 
 alias -g andyes='&& print yes'
 alias -g orno='|| print no'
