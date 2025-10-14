@@ -58,48 +58,66 @@ brew tap | grep -q 'domt4/autoupdate' \
 
 typeset -aU missing
 
-echo "Setup: pyenv"
+echo "Setup: Homebrew: uv check"
+uv --version &> /dev/null \
+&& echo "✅ already installed." \
+|| missing+='uv'
+
+echo "Setup: Homebrew: pyenv check"
 pyenv --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='pyenv'
 
-echo "Setup: zoxide"
+echo "Setup: Homebrew: zoxide check"
 zoxide --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='zoxide'
 
-echo "Setup: starship prompt"
+echo "Setup: Homebrew: starship prompt check"
 starship --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='starship'
 
-echo "Setup: NeoVim"
+echo "Setup: Homebrew: NeoVim check"
 nvim --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='neovim'
 
-echo "Setup: LuaRocks"
+echo "Setup: Homebrew: LuaRocks check"
 luarocks --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='luarocks'
 
-echo "Setup: LazyGit"
+echo "Setup: Homebrew: LazyGit check"
 lazygit --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='lazygit'
 
-echo "Setup: ripgrep"
+echo "Setup: Homebrew: ripgrep check"
 rg --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='ripgrep'
 
-echo "Setup: fd"
+echo "Setup: Homebrew: fd check"
 fd --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='fd'
 
 [[ -n $missing ]] \
+&& echo "Setup: Homebrew: installing missing packages"
+&& print -l "${missing[@]}"
 && brew install $missing
+|| echo "Setup: Homebrew: everything already installed; nothing to do!"
+
+echo "Setup: uv: ruff"
+ruff --version \
+&& echo "✅ already installed."
+|| uv tool install ruff
+
+echo "Setup: uv: SQLFluff"
+sqlfluff --version \
+&& echo "✅ already installed."
+|| uv tool install sqlfluff
 
 echo "Setup: Install/Update Node Version Manager"
 curl -s -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
