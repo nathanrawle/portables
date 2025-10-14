@@ -43,6 +43,7 @@ fi
 
 echo "Setup: Homebrew"
 brew --version &> /dev/null \
+&& echo "✅ already installed."
 || ([[ -d /opt/homebrew ]] && path+=/opt/homebrew) \
 || ([[ -f /usr/local/bin/brew ]] && path+=/usr/local/bin) \
 || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
@@ -58,35 +59,43 @@ brew tap | grep -q 'domt4/autoupdate' \
 typeset -aU missing
 
 echo "Setup: pyenv"
-pyenv --version &> /dev/null  \
+pyenv --version &> /dev/null \
+&& echo "✅ already installed."
 || missing+='pyenv'
 
 echo "Setup: zoxide"
 zoxide --version &> /dev/null \
+&& echo "✅ already installed."
 || missing+='zoxide'
 
 echo "Setup: starship prompt"
 starship --version &> /dev/null \
+&& echo "✅ already installed."
 || missing+='starship'
 
 echo "Setup: NeoVim"
 nvim --version &> /dev/null \
+&& echo "✅ already installed."
 || missing+='neovim'
 
 echo "Setup: LuaRocks"
-nvim --version &> /dev/null \
+luarocks --version &> /dev/null \
+&& echo "✅ already installed."
 || missing+='luarocks'
 
 echo "Setup: LazyGit"
 lazygit --version &> /dev/null \
+&& echo "✅ already installed."
 || missing+='lazygit'
 
 echo "Setup: ripgrep"
 rg --version &> /dev/null \
+&& echo "✅ already installed."
 || missing+='ripgrep'
 
 echo "Setup: fd"
 fd --version &> /dev/null \
+&& echo "✅ already installed."
 || missing+='fd'
 
 [[ -n $missing ]] \
@@ -94,17 +103,20 @@ fd --version &> /dev/null \
 
 echo "Setup: Install/Update Node Version Manager"
 curl -s -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-
+. "$HOME/.nvm/nvm.sh"
 echo "Setup: Node.js"
 nvm install --lts
-nvm use --lts
 
 echo "Setup: Tree-sitter CLI"
 npm install -g tree-sitter-cli
 
 echo "Setup: LazyVim"
-if [[ ! -e ~/.config/nvim/lua/lazy.lua ]]; then
-  mv ~/.config/nvim{,.bak}
+if [[ ! -e ~/.config/nvim/lua/config/lazy.lua ]]; then
+  NVIM_CONF=".config/nvim"
+  [[ -d ~"/$NVIM_CONF.bak" ]] \
+  && mv {~,"$(mktemp)"}/"$NVIM_CONF.bak"
+  mv -f ~/.config/nvim{/*,.bak}
+  rm -rf ~/.config/nvim
   git clone https://github.com/LazyVim/starter ~/.config/nvim
   rm -rf ~/.config/nvim/.git
 fi
@@ -169,4 +181,4 @@ git config --global --add core.excludesfile "$PORTS_DIR"/.config/git/ignore
 
 echo 'Setup: Success! Now restart zshell with `exec zsh`…'
 
-exit
+return
