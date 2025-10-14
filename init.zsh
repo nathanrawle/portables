@@ -43,7 +43,7 @@ fi
 
 echo "Setup: Homebrew"
 brew --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || ([[ -d /opt/homebrew ]] && path+=/opt/homebrew) \
 || ([[ -f /usr/local/bin/brew ]] && path+=/usr/local/bin) \
 || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
@@ -60,42 +60,42 @@ typeset -aU missing
 
 echo "Setup: pyenv"
 pyenv --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || missing+='pyenv'
 
 echo "Setup: zoxide"
 zoxide --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || missing+='zoxide'
 
 echo "Setup: starship prompt"
 starship --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || missing+='starship'
 
 echo "Setup: NeoVim"
 nvim --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || missing+='neovim'
 
 echo "Setup: LuaRocks"
 luarocks --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || missing+='luarocks'
 
 echo "Setup: LazyGit"
 lazygit --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || missing+='lazygit'
 
 echo "Setup: ripgrep"
 rg --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || missing+='ripgrep'
 
 echo "Setup: fd"
 fd --version &> /dev/null \
-&& echo "✅ already installed."
+&& echo "✅ already installed." \
 || missing+='fd'
 
 [[ -n $missing ]] \
@@ -108,10 +108,14 @@ echo "Setup: Node.js"
 nvm install --lts
 
 echo "Setup: Tree-sitter CLI"
-npm install -g tree-sitter-cli
+tree-sitter --version &> /dev/null \
+&& echo "✅ already installed." \
+|| npm install -g tree-sitter-cli
 
 echo "Setup: LazyVim"
-if [[ ! -e ~/.config/nvim/lua/config/lazy.lua ]]; then
+if [[ -e ~/.config/nvim/lua/config/lazy.lua ]]; then
+  echo "✅ already installed."
+else
   NVIM_CONF=".config/nvim"
   [[ -d ~"/$NVIM_CONF.bak" ]] \
   && mv {~,"$(mktemp)"}/"$NVIM_CONF.bak"
@@ -124,11 +128,16 @@ fi
 # make sure omz is installed
 echo "Setup: Oh My Zsh!"
 : ${ZSH:="$HOME/.oh-my-zsh"}
+ZSH_CLI="${ZSH}/lib/cli.zsh"
 
-[[ -d "${ZSH}" ]] \
+[[ -s "${ZSH_CLI}" ]] \
+&& . "${ZSH_CLI}" &> /dev/null \
+&& omz version &> /dev/null \
+&& echo "✅ already installed." \
 || sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 
 # install plugins and themes
+echo "Setup: Oh My Zsh plugins and themes"
 : ${ZSH_CUSTOM:="${ZSH}/custom"}
 
 # zsh-syntax-highlighting
