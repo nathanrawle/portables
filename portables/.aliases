@@ -55,21 +55,15 @@ alias killdocs='pkill -a -f dbt\ docs\ serve'
 
 # gcloud auth
 alias gauth='gcloud auth'
-alias gal='gauth login'
-alias gad='gauth application-default'
-alias glad='gad login'
-alias glogin='gal && glad'
-
-alias gol='gal --login-config=$HOME/.config/gcloud/blume_login_config.json'
-alias glod='glad --login-config=$HOME/.config/gcloud/blume_login_config.json'
-alias glogon='gol && glod'
-
-alias glogall='glogin && glogon'
+alias gal='gcloud auth login --login-config=$HOME/.config/gcloud/blume_login_config.json'
+alias gadl='gcloud auth application-default login --login-config=$HOME/.config/gcloud/blume_login_config.json'
+alias glogin='gal && gadl'
 
 # gcloud config
-alias gcfg='gcloud config'
-alias gconf='gcfg list'
-alias gconfs='gcfg configurations'
+alias gconf='gcloud config'
+alias gcfg='gcloud config list'
+alias gconfs='gcloud config configurations'
+alias gcfgs='gcloud config configurations list'
 
 # task/time warrior
 alias todo='task add'

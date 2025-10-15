@@ -58,7 +58,7 @@ format = "$all$fill $status$battery$line_break$character"
   symbol = " "
 
 [gcloud]
-  format = 'on [$symbol$active(:$project)(\($region\))]($style) '
+  format = '[$symbol$active(:$project)(\($region\))]($style) '
   symbol = "󰊭 "
   [gcloud.project_aliases]
     sunlit-alloy-444818-j2 = 'sunlit-alloy'
