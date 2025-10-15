@@ -1,5 +1,7 @@
+format = "$all$fill $status$battery$line_break$character"
+
 [aws]
-  symbol = "  "
+  symbol = " "
 
 [buf]
   symbol = " "
@@ -29,7 +31,12 @@
   symbol = " "
 
 [directory]
+  # fish_style_pwd_dir_length = 3
   read_only = " 󰌾"
+
+[direnv]
+  disabled = false
+  symbol   = "󱨉 "
 
 [docker_context]
   symbol = " "
@@ -43,12 +50,16 @@
 [fennel]
   symbol = " "
 
+[fill]
+  style  = "black"
+  symbol = "·"
+
 [fossil_branch]
   symbol = " "
 
 [gcloud]
-  format = 'on [$symbol$active:($project)(\($region\))]($style) '
-  symbol = " "
+  format = 'on [$symbol$active(:$project)(\($region\))]($style) '
+  symbol = "󰊭 "
   [gcloud.project_aliases]
     sunlit-alloy-444818-j2 = 'sunlit-alloy'
 
@@ -172,7 +183,7 @@
   symbol = "󰏗 "
 
 [python]
-  symbol = " "
+  symbol = "󰌠 "
 
 [rlang]
   symbol = "󰟔 "
@@ -186,8 +197,18 @@
 [scala]
   symbol = " "
 
+[status]
+  disabled   = false
+  format     = '[$symbol$common_meaning$signal_name$maybe_int]($style) '
+  map_symbol = true
+  pipestatus = true
+  symbol     = '✘ '
+
 [swift]
   symbol = " "
+
+[terraform]
+  symbol = "󱁢 "
 
 [zig]
   symbol = " "
