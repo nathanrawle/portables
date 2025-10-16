@@ -1,4 +1,4 @@
-format = "$all$fill $status$battery$line_break$character"
+format = "$all$fill $status$direnv$battery$line_break$character"
 
 [aws]
   symbol = " "
@@ -36,6 +36,7 @@ format = "$all$fill $status$battery$line_break$character"
 
 [direnv]
   disabled = false
+  format   = "[$symbol$loaded/$allowed]($style) "
   symbol   = "󱨉 "
 
 [docker_context]
@@ -208,7 +209,8 @@ format = "$all$fill $status$battery$line_break$character"
   symbol = " "
 
 [terraform]
-  symbol = "󱁢 "
+  disabled = false
+  symbol   = "󱁢 "
 
 [zig]
   symbol = " "
