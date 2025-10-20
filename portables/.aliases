@@ -86,3 +86,4 @@ alias tffmt=tfmt
 
 # zsh-autocomplete
 alias hisb="zstyle -t ':autocomplete:*' default-context '' && zstyle ':autocomplete:*' default-context history-incremental-search-backward || zstyle ':autocomplete:*' default-context ''"
+alias pycal='python -m calendar'
