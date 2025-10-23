@@ -72,6 +72,7 @@ alias tasks='task list'
 alias tw=timew
 alias twd='timew day'
 alias tww='timew week'
+alias twm='timew month'
 alias tws='timew summary :ids'
 alias twa='timew start'
 alias two='timew stop'
