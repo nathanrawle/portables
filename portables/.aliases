@@ -73,6 +73,8 @@ alias tw=timew
 alias twd='timew day'
 alias tww='timew week'
 alias tws='timew summary :ids'
+alias twa='timew start'
+alias two='timew stop'
 
 # terraform
 alias tf='terraform'
