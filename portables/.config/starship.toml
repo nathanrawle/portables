@@ -71,7 +71,16 @@ format = "$all$fill $status$direnv$battery$line_break$character"
   tag_symbol = '  '
 
 [git_status]
-  format = '([$all_status$ahead_behind]($style) )'
+  # ordered by appearance in format
+  ahead     = '⇡${count}'
+  behind    = '⇣${count}'
+  diverged  = '⇕⇡${ahead_count}⇣${behind_count}'
+  format    = '([$all_status$ahead_behind]($style) )'
+  modified  = '~${count}'
+  staged    = '+${count}'
+  stashed   = '*${count}'
+  style     = 'green bold'
+  untracked = '?${count}'
 
 [golang]
   symbol = " "
