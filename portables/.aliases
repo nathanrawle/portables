@@ -65,6 +65,11 @@ alias gcfg='gcloud config list'
 alias gconfs='gcloud config configurations'
 alias gcfgs='gcloud config configurations list'
 
+alias gce='gcloud compute'
+alias gcia='gcloud compute instances start'
+alias gcio='gcloud compute instances stop'
+alias gssh='gcloud beta compute ssh'
+
 # task/time warrior
 alias todo='task add'
 alias tasks='task list'
@@ -72,10 +77,15 @@ alias tasks='task list'
 alias tw=timew
 alias twd='timew day'
 alias tww='timew week'
+alias twwl='timew week :lastweek'
 alias twm='timew month'
 alias tws='timew summary :ids'
 alias twa='timew start'
+alias twx='timew cancel'
 alias two='timew stop'
+alias twc='timew continue'
+alias twt='timew track'
+alias twmv='timew move'
 
 # terraform
 alias tf='terraform'

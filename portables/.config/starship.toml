@@ -1,228 +1,226 @@
 format = "$all$fill $status$direnv$battery$line_break$character"
 
 [aws]
-  symbol = " "
+symbol = " "
 
 [buf]
-  symbol = " "
+symbol = " "
 
 [bun]
-  symbol = " "
+symbol = " "
 
 [c]
-  symbol = " "
+symbol = " "
 
 [cpp]
-  symbol = " "
+symbol = " "
 
 [cmake]
-  symbol = " "
+symbol = " "
 
 [conda]
-  symbol = " "
+symbol = " "
 
 [crystal]
-  symbol = " "
+symbol = " "
 
 [dart]
-  symbol = " "
+symbol = " "
 
 [deno]
-  symbol = " "
+symbol = " "
 
 [directory]
-  # fish_style_pwd_dir_length = 3
-  read_only = " 󰌾"
+# fish_style_pwd_dir_length = 3
+read_only = " 󰌾"
 
 [direnv]
-  disabled = false
-  format   = "[$symbol$loaded/$allowed]($style) "
-  symbol   = "󱨉 "
+disabled = false
+format = "[$symbol$loaded/$allowed]($style) "
+symbol = "󱨉 "
 
 [docker_context]
-  symbol = " "
+symbol = " "
 
 [elixir]
-  symbol = " "
+symbol = " "
 
 [elm]
-  symbol = " "
+symbol = " "
 
 [fennel]
-  symbol = " "
+symbol = " "
 
 [fill]
-  style  = "black"
-  symbol = "·"
+style = "black"
+symbol = "·"
 
 [fossil_branch]
-  symbol = " "
+symbol = " "
 
 [gcloud]
-  format = '[$symbol$active(:$project)(\($region\))]($style) '
-  symbol = "󰊭 "
-  [gcloud.project_aliases]
-    sunlit-alloy-444818-j2 = 'sunlit-alloy'
+format = '[$symbol$active(:$project)(\($region\))]($style) '
+symbol = "󰊭 "
+[gcloud.project_aliases]
+sunlit-alloy-444818-j2 = 'sunlit-alloy'
 
 [git_branch]
-  symbol = " "
+symbol = " "
 
 [git_commit]
-  tag_symbol = '  '
+tag_symbol = '  '
 
 [git_status]
-  # ordered by appearance in format
-  ahead     = '⇡${count}'
-  behind    = '⇣${count}'
-  diverged  = '⇕⇡${ahead_count}⇣${behind_count}'
-  format    = '([$all_status$ahead_behind]($style) )'
-  modified  = '~${count}'
-  staged    = '+${count}'
-  stashed   = '*${count}'
-  style     = 'green bold'
-  untracked = '?${count}'
+ahead = '${count}⇡'
+behind = '${count}⇣'
+diverged = '⇕${ahead_count}⇡${behind_count}⇣'
+format = '([$all_status$ahead_behind]($style) )'
+modified = '${count}~'
+staged = '${count}+'
+stashed = '${count}*'
+untracked = '${count}?'
 
 [golang]
-  symbol = " "
+symbol = " "
 
 [guix_shell]
-  symbol = " "
+symbol = " "
 
 [haskell]
-  symbol = " "
+symbol = " "
 
 [haxe]
-  symbol = " "
+symbol = " "
 
 [hg_branch]
-  symbol = " "
+symbol = " "
 
 [hostname]
-  ssh_symbol = " "
+ssh_symbol = " "
 
 [java]
-  symbol = " "
+symbol = " "
 
 [julia]
-  symbol = " "
+symbol = " "
 
 [kotlin]
-  symbol = " "
+symbol = " "
 
 [lua]
-  symbol = " "
+symbol = " "
 
 [memory_usage]
-  symbol = "󰍛 "
+symbol = "󰍛 "
 
 [meson]
-  symbol = "󰔷 "
+symbol = "󰔷 "
 
 [nim]
-  symbol = "󰆥 "
+symbol = "󰆥 "
 
 [nix_shell]
-  symbol = " "
+symbol = " "
 
 [nodejs]
-  symbol = " "
+symbol = " "
 
 [ocaml]
-  symbol = " "
+symbol = " "
 
 [os.symbols]
-  AlmaLinux        = " "
-  Alpaquita        = " "
-  Alpine           = " "
-  Amazon           = " "
-  Android          = " "
-  Arch             = " "
-  Artix            = " "
-  CachyOS          = " "
-  CentOS           = " "
-  Debian           = " "
-  DragonFly        = " "
-  Emscripten       = " "
-  EndeavourOS      = " "
-  Fedora           = " "
-  FreeBSD          = " "
-  Garuda           = "󰛓 "
-  Gentoo           = " "
-  HardenedBSD      = "󰞌 "
-  Illumos          = "󰈸 "
-  Kali             = " "
-  Linux            = " "
-  Mabox            = " "
-  Macos            = " "
-  Manjaro          = " "
-  Mariner          = " "
-  MidnightBSD      = " "
-  Mint             = " "
-  NetBSD           = " "
-  NixOS            = " "
-  Nobara           = " "
-  OpenBSD          = "󰈺 "
-  OracleLinux      = "󰌷 "
-  Pop              = " "
-  Raspbian         = " "
-  RedHatEnterprise = " "
-  Redhat           = " "
-  Redox            = "󰀘 "
-  RockyLinux       = " "
-  SUSE             = " "
-  Solus            = "󰠳 "
-  Ubuntu           = " "
-  Unknown          = " "
-  Void             = " "
-  Windows          = "󰍲 "
-  openSUSE         = " "
+AlmaLinux = " "
+Alpaquita = " "
+Alpine = " "
+Amazon = " "
+Android = " "
+Arch = " "
+Artix = " "
+CachyOS = " "
+CentOS = " "
+Debian = " "
+DragonFly = " "
+Emscripten = " "
+EndeavourOS = " "
+Fedora = " "
+FreeBSD = " "
+Garuda = "󰛓 "
+Gentoo = " "
+HardenedBSD = "󰞌 "
+Illumos = "󰈸 "
+Kali = " "
+Linux = " "
+Mabox = " "
+Macos = " "
+Manjaro = " "
+Mariner = " "
+MidnightBSD = " "
+Mint = " "
+NetBSD = " "
+NixOS = " "
+Nobara = " "
+OpenBSD = "󰈺 "
+OracleLinux = "󰌷 "
+Pop = " "
+Raspbian = " "
+RedHatEnterprise = " "
+Redhat = " "
+Redox = "󰀘 "
+RockyLinux = " "
+SUSE = " "
+Solus = "󰠳 "
+Ubuntu = " "
+Unknown = " "
+Void = " "
+Windows = "󰍲 "
+openSUSE = " "
 
 [package]
-  symbol = "󰏗 "
+symbol = "󰏗 "
 
 [perl]
-  symbol = " "
+symbol = " "
 
 [php]
-  symbol = " "
+symbol = " "
 
 [pijul_channel]
-  symbol = " "
+symbol = " "
 
 [pixi]
-  symbol = "󰏗 "
+symbol = "󰏗 "
 
 [python]
-  symbol = "󰌠 "
+symbol = "󰌠 "
 
 [rlang]
-  symbol = "󰟔 "
+symbol = "󰟔 "
 
 [ruby]
-  symbol = " "
+symbol = " "
 
 [rust]
-  symbol = "󱘗 "
+symbol = "󱘗 "
 
 [scala]
-  symbol = " "
+symbol = " "
 
 [status]
-  disabled   = false
-  format     = '[$symbol$common_meaning$signal_name$maybe_int]($style) '
-  map_symbol = true
-  pipestatus = true
-  symbol     = '✘ '
+disabled = false
+format = '[$symbol$common_meaning$signal_name$maybe_int]($style) '
+map_symbol = true
+pipestatus = true
+symbol = '✘ '
 
 [swift]
-  symbol = " "
+symbol = " "
 
 [terraform]
-  disabled = false
-  symbol   = "󱁢 "
+disabled = false
+symbol = "󱁢 "
 
 [zig]
-  symbol = " "
+symbol = " "
 
 [gradle]
-  symbol = " "
+symbol = " "
