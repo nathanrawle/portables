@@ -48,3 +48,6 @@ cursor-style-blink = false
 shell-integration-features = no-cursor
 
 macos-option-as-alt = left
+
+keybind = global:alt+`=toggle_quick_terminal
+
