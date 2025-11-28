@@ -3,6 +3,10 @@
 -- Add any additional keymaps here
 
 -- vimeogen keymaps
+
+vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv", { silent = true, desc = "Move Selection Down" })
+vim.keymap.set("v", "K", ":m '<-2<CR>gv=gv", { silent = true, desc = "Move Selection Up" })
+
 vim.keymap.set("n", "J", "mzJ`z", { desc = "Join Lines" })
 vim.keymap.set("n", "<C-d>", "<C-d>zz", { desc = "Half Window Down" })
 vim.keymap.set("n", "<C-u>", "<C-u>zz", { desc = "Half Window Up" })
@@ -14,10 +18,5 @@ vim.keymap.set("n", "=ap", "ma=ap'a", { desc = "Fix Block Indent" })
 vim.keymap.set("x", "<leader>p", [["_dP]], { desc = "Void and Paste" })
 vim.keymap.set({ "n", "v" }, "<leader>vd", '"_d', { desc = "Delete to Void Buffer" })
 
-vim.keymap.set(
-  "n",
-  "<Esc><C-l>",
-  [[:%s/\<<C-r><C-w>\>/<C-r><C-w>/gI<Left><Left><Left>]],
-  { desc = "Global Replace Word" }
-)
+vim.keymap.set("n", "<C-S-L>", [[:%s/\<<C-r><C-w>\>/<C-r><C-w>/gI<Left><Left><Left>]], { desc = "Global Replace Word" })
 vim.keymap.set("n", "<leader>X", "<cmd>!chmod +x %<CR>", { silent = true, desc = "Make current file executable" })
