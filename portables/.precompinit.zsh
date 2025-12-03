@@ -21,6 +21,17 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] \
 && . "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
 
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+# Added by dbt Fusion extension (ensure dbt binary dir on PATH)
+if [[ ":$PATH:" != *":/Users/nathan/.local/bin:"* ]]; then
+  export PATH=/Users/nathan/.local/bin:"$PATH"
+fi
+# Added by dbt Fusion extension
+alias dbtf=/Users/nathan/.local/bin/dbt
+
 # put go binaries in path:
 [[ -d "${GOPATH:=$HOME/go}/bin" ]] \
 && path+="$GOPATH/bin"
+
