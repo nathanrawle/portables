@@ -18,7 +18,7 @@ enable-normalization-opposite-orientation-for-nested-containers = true
 accordion-padding = 30
 
 # Possible values: tiles|accordion
-default-root-container-layout = 'tiles'
+default-root-container-layout = 'accordion'
 
 # Possible values: horizontal|vertical|auto
 # 'auto' means: wide monitor (anything wider than high) gets horizontal orientation,
@@ -210,3 +210,41 @@ alt-shift-l = ['join-with right', 'mode main']
 down = 'volume down'
 up = 'volume up'
 shift-down = ['volume set 0', 'mode main']
+
+[workspace-to-monitor-force-assignment]
+1 = ['dell p2425he']
+2 = ['dell s2425hsm', 'dell p2425he']
+V = ['dell s2425hsm', 'dell p2425he']
+
+[[on-window-detected]]
+if.during-aerospace-startup = true
+if.app-id = 'company.thebrowser.Browser'
+run = ['move-node-to-workspace 1']
+
+[[on-window-detected]]
+if.app-id = 'com.mitchellh.ghostty'
+run = ['move-node-to-workspace 2']
+
+[[on-window-detected]]
+if.app-id = 'com.microsoft.VSCode'
+run = ['move-node-to-workspace V']
+
+[[on-window-detected]]
+if.app-id = 'com.microsoft.Teams2'
+run = ['move-node-to-workspace M']
+
+[[on-window-detected]]
+if.app-id = 'com.microsoft.Outlook'
+run = ['move-node-to-workspace O']
+
+[[on-window-detected]]
+if.app-id = 'com.tinyspeck.slackmacgap'
+run = ['move-node-to-workspace S']
+
+[[on-window-detected]]
+if.app-id = 'com.openai.chat'
+run = ['move-node-to-workspace C']
+
+[[on-window-detected]]
+if.app-id = 'net.pulsesecure.Pulse-Secure'
+run = 'layout floating'
