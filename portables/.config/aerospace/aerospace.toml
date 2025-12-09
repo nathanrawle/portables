@@ -223,6 +223,10 @@ if.app-id = 'com.mitchellh.ghostty'
 run = ['move-node-to-workspace 2']
 
 [[on-window-detected]]
+if.app-name-regex-substring = 'Excalidraw'
+run = ['move-node-to-workspace D']
+
+[[on-window-detected]]
 if.app-id = 'com.microsoft.VSCode'
 run = ['move-node-to-workspace V']
 
