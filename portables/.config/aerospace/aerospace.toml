@@ -209,9 +209,9 @@ up = 'volume up'
 shift-down = ['volume set 0', 'mode main']
 
 [workspace-to-monitor-force-assignment]
-1 = ['dell p2724deb', 'dell p2425he']
-2 = ['dell p2723d', 'dell s2425hsm', 'dell p2425he']
-V = ['dell p2723d', 'dell s2425hsm', 'dell p2425he']
+1 = ['DELL P3424WEB', 'dell p2724deb', 'dell p2425he']
+2 = ['DELL P3424WEB', 'dell p2723d', 'dell s2425hsm', 'dell p2425he']
+V = ['DELL P3424WEB', 'dell p2723d', 'dell s2425hsm', 'dell p2425he']
 
 [[on-window-detected]]
 if.during-aerospace-startup = true
