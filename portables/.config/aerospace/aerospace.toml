@@ -223,6 +223,16 @@ if.app-id = 'com.mitchellh.ghostty'
 run = ['move-node-to-workspace 2']
 
 [[on-window-detected]]
+if.app-id = 'com.apple.TV'
+run = ['move-node-to-workspace T']
+check-further-callbacks = true
+
+[[on-window-detected]]
+if.app-id = 'com.apple.TV'
+if.window-title-regex-substring = '^[^T][^V]$'
+run = ['layout floating']
+
+[[on-window-detected]]
 if.app-name-regex-substring = 'Excalidraw'
 run = ['move-node-to-workspace D']
 
