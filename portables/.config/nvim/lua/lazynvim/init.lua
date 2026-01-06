@@ -19,7 +19,7 @@ require("lazy").setup({
     { import = "lazynvim.plugins" },
   },
   -- Configure any other settings here. See the documentation for more details.
-  -- install = { colorscheme = { "habamax" } },
+  install = { colorscheme = { "rose-pine", "tokyonight-night", "habamax" } },
   -- automatically check for plugin updates
   checker = { enabled = true, notify = false },
 })
