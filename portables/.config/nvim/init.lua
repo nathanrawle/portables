@@ -14,6 +14,7 @@ vim.g.ts_ensure_installed = {
   "markdown_inline",
   "python",
   "query",
+  "terraform",
   "vim",
   "vimdoc",
 }
