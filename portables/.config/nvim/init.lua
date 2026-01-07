@@ -17,7 +17,7 @@ vim.g.ts_ensure_installed = {
   "vim",
   "vimdoc",
 }
-vim.g.mti_ensure_installed = {
+vim.g.lsp_ensure_installed = {
   "stylua", -- Used to format Lua code
   "ruff",
   "terraform-ls",
