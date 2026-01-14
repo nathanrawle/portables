@@ -31,7 +31,17 @@ fi
 # Added by dbt Fusion extension
 alias dbtf=/Users/nathan/.local/bin/dbt
 
+# put go in path:
+[[ -d "/usr/local/go/bin" ]] \
+&& path+="/usr/local/go/bin"
+
 # put go binaries in path:
 [[ -d "${GOPATH:=$HOME/go}/bin" ]] \
 && path+="$GOPATH/bin"
 
+# Added by dbt Fusion extension (ensure dbt binary dir on PATH)
+if [[ ":$PATH:" != *":/Users/nathan/.local/bin:"* ]]; then
+  export PATH=/Users/nathan/.local/bin:"$PATH"
+fi
+# Added by dbt Fusion extension
+alias dbtf=/Users/nathan/.local/bin/dbt
