@@ -1,5 +1,5 @@
 vim.g.mapleader = " "
-vim.g.maplocalleader = "\\"
+vim.g.maplocalleader = " "
 vim.g.have_nerd_font = true
 vim.g.default_colorscheme = "tokyonight"
 vim.g.ts_ensure_installed = {
@@ -25,9 +25,17 @@ vim.g.lsp_ensure_installed = {
   "gh-actions-language-server",
   "actionlint",
 }
+vim.g.never_show = {
+  ".DS_Store",
+}
+vim.g.picker_no_show = vim.list_extend({
+  ".git/",
+  ".venv/",
+  "node_modules/",
+}, vim.g.never_show)
 
+require("netrwopts")
 require("options")
-require("keymaps")
 require("autocommands")
-
 require("lazynvim.init")
+require("keymaps")
