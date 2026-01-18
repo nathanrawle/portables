@@ -1,4 +1,18 @@
-#! /bin/zsh
+#! /usr/bin/env zsh
 
-sed -E "s@^$HOME@~@; s@([^/])[^/]*/@\1/@g" <<< $1
+# load named directories into hash table
+[[ -e ~/.named_dirs.zsh ]] && . ~/.named_dirs.zsh
+
+# path shortening
+abrvdir=${(D)${~1}:P}
+
+if (( $#abrvdir > 16 )); then
+  print -r "${abrvdir%%/*}/…/${abrvdir##*/}"
+  exit
+fi
+
+print -r "$abrvdir"
+
+# bash-friendly snippet if I ever decide to implement a fallback
+# sed -E "s@^$HOME@~@; s@([^/])[^/]*/@\1/@g" <<< $1
 
