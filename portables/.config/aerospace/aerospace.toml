@@ -231,6 +231,7 @@ check-further-callbacks = true
 if.app-id = 'com.apple.TV'
 if.window-title-regex-substring = '^[^T][^V]$'
 run = ['layout floating']
+check-further-callbacks = true
 
 [[on-window-detected]]
 if.app-name-regex-substring = 'Excalidraw'
