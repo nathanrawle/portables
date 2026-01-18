@@ -15,6 +15,7 @@ homedirdots=(
   .p10k.zsh
   .vimrc
   .editorconfig
+  .named_dirs.zsh
   .config/**/*(.N)
   Library/**/*(.N)
 )

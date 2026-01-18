@@ -18,11 +18,8 @@ bindkey               "$terminfo[kcbt]" menu-select
 bindkey -M menuselect              '^I' menu-complete
 bindkey -M menuselect "$terminfo[kcbt]" reverse-menu-complete
 
-## named directories
-hash -d code=~/code
-hash -d homebrew=$HOMEBREW_PREFIX
-hash -d portables=$PORTABLES
 
+[[ -e $PORTABLES/.named_dirs.zsh ]] && . $PORTABLES/.named_dirs.zsh
 [[ -e $PPORTABLES/.andfinally.zsh ]] && . $PPORTABLES/.andfinally.zsh
 
 ## ensure $path and $fpath entries are unique
