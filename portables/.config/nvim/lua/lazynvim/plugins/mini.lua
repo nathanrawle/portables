@@ -7,8 +7,8 @@ return { -- Collection of various small independent plugins/modules
     -- Add/delete/replace surroundings (brackets, quotes, etc.)
     require("mini.surround").setup({
       mappings = {
-        add = "+s", -- Add surrounding in Normal and Visual modes
-        delete = "ds", -- Delete surrounding
+        add = "+a", -- Add surrounding in Normal and Visual modes
+        delete = "-s", -- Delete surrounding
         find = "gs", -- Find surrounding (to the right)
         find_left = "gS", -- Find surrounding (to the left)
         highlight = "<leader>h", -- Highlight surrounding
