@@ -6,3 +6,4 @@ hash -d omz=$ZSH
 hash -d cfg=~/.config
 hash -d nvimcfg=~/.config/nvim
 
+[[ -d $PPORTABLES ]] && . $PPORTABLES/.named-dirs.zsh

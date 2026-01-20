@@ -7,7 +7,7 @@
 abrvdir=${(D)${~1}}
 
 if (( $#abrvdir > 16 )); then
-  if (( ${#${(s:/:)abbrvdir}} == 2 ))
+  if (( ${#${(s:/:)abbrvdir}} == 2 )); then
     print "$abrvdir"
     exit
   fi
