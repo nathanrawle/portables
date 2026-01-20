@@ -18,8 +18,9 @@ bindkey               "$terminfo[kcbt]" menu-select
 bindkey -M menuselect              '^I' menu-complete
 bindkey -M menuselect "$terminfo[kcbt]" reverse-menu-complete
 
-
-[[ -e $PORTABLES/.named_dirs.zsh ]] && . $PORTABLES/.named_dirs.zsh
+# Named directories and private .andfinally.zsh
+[[ -e $PORTABLES/.named-dirs.zsh ]] && . $PORTABLES/.named-dirs.zsh
+[[ -e $PPORTABLES/.named-dirs.zsh ]] && . $PPORTABLES/.named-dirs.zsh
 [[ -e $PPORTABLES/.andfinally.zsh ]] && . $PPORTABLES/.andfinally.zsh
 
 ## ensure $path and $fpath entries are unique
