@@ -110,7 +110,6 @@ aliases=(
 plugins=(
   git
   bashmarks
-  pyenv
   gcloud
 )
 

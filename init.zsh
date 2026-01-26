@@ -63,11 +63,6 @@ uv --version &> /dev/null \
 && echo "✅ already installed." \
 || missing+='uv'
 
-echo "Setup: Homebrew: pyenv check"
-pyenv --version &> /dev/null \
-&& echo "✅ already installed." \
-|| missing+=('pyenv' 'pyenv-virtualenv')
-
 echo "Setup: Homebrew: zoxide check"
 zoxide --version &> /dev/null \
 && echo "✅ already installed." \
