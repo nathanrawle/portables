@@ -9,6 +9,7 @@
   (#eq? @k_steps "steps")
   value: (block_node
     (block_sequence
+      _*
       (block_sequence_item
         (block_node
           (block_mapping
