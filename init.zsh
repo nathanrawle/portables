@@ -149,19 +149,6 @@ curl -s -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | ba
 echo "Setup: Node.js"
 nvm install --lts
 
-echo "Setup: LazyVim"
-if [[ -s ~/.config/nvim/lua/config/lazy.lua ]]; then
-  echo "✅ already installed."
-else
-  NVIM_CONF=".config/nvim"
-  [[ -d ~"/$NVIM_CONF.bak" ]] \
-  && mv {~,"$(mktemp)"}/"$NVIM_CONF.bak"
-  mv -f ~/.config/nvim{/*,.bak}
-  rm -rf ~/.config/nvim
-  git clone https://github.com/LazyVim/starter ~/.config/nvim
-  rm -rf ~/.config/nvim/.git
-fi
-
 # make sure omz is installed
 echo "Setup: Oh My Zsh!"
 : ${ZSH:="$HOME/.oh-my-zsh"}
@@ -217,7 +204,7 @@ P_FPATH="${ZSH_CUSTOM}/themes/powerlevel10k"
 || git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
 "${P_FPATH}"
 
-rm "${ZSH_CUSTOM}"/*(.N) &> /dev/null
+rm -f "${ZSH_CUSTOM}"/*(.N) &> /dev/null
 
 "${PORTS_DIR}/fns/relink" -q
 
