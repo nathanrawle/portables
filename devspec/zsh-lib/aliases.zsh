@@ -19,7 +19,9 @@ alias follow='ft'
 alias hist='history'
 alias rnsort='sort -rn'
 
-alias relink='relink -q && read '\''?Do you want to restart the shell now? (Y|n) '\''&& [[ ! ${(L)REPLY[1]} = n ]] && exec zsh'
+alias relink='relink -q && read 
+?Do you want to restart the shell now? (Y|n) 
+&& [[ ! ${(L)REPLY[1]} = n ]] && exec zsh'
 alias reshell='exec $SHELL'
 
 alias -g andyes='&& print yes'
@@ -30,7 +32,7 @@ alias -g istrue='andyes orno'
 alias wp='which python'
 alias pw='pyenv which'
 alias pwp='pw python'
-alias pylatest='pyenv install --list | grep -E '\''^\s*\d\.\d{1,2}\.\d+$'\'' | sort -t '\''.'\'' -k 1bn -k 2n -k 3n | tail -1'
+alias pylatest='pyenv install --list | grep -E "^\s*\d\.\d{1,2}\.\d+$" | sort -t "." -k 1bn -k 2n -k 3n | tail -1'
 alias pil='pyenv install $(pylatest)'
 
 # git overrides
@@ -103,4 +105,3 @@ alias pycal='python -m calendar'
 
 alias nvim-ks='NVIM_APPNAME="nvim-ks" nvim'
 alias lzvim='NVIM_APPNAME="nvim-lz" nvim'
-
