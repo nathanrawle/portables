@@ -1,15 +1,14 @@
 #!/bin/sh
 case "$1" in
-    deps)
-        # On macOS, we can install with brew. On Linux, we'll use the installer script.
-        if [ "$(uname -s)" = "Darwin" ]; then
-            echo "uv"
+    install)
+        if ! command -v uv >/dev/null 2>&1; then
+          case "$OS" in
+            Darwin) echo "syspkgmgr:uv" ;;
+            *) echo "self-install" ;;
+          esac
         fi
         ;;
-    config)
-        if ! command -v uv >/dev/null 2>&1; then
-            echo "Installing uv..."
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-        fi
+    self-install)
+        curl -LsSf https://astral.sh/uv/install.sh | sh
         ;;
 esac

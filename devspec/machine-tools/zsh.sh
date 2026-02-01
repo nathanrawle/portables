@@ -3,27 +3,17 @@
 # Installs Zsh and its configurations.
 
 case "$1" in
-    deps)
-        echo "zsh"
-        echo "git"
-        echo "curl"
-        ;;
+    install) echo syspkgmgr:zsh ;;
     config)
         # Install Oh My Zsh if it's not already installed
         if [ ! -d "$HOME/.oh-my-zsh" ]; then
             echo "Installing Oh My Zsh..."
-            # The installer will back up an existing .zshrc, which we want.
             sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-        else
-            echo "Oh My Zsh already installed."
         fi
 
         # Define the custom directory for OMZ plugins and themes
         ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
 
-        # Install/update OMZ plugins
-        echo "Installing/updating Oh My Zsh plugins..."
-        
         # zsh-syntax-highlighting
         ZSH_SYNTAX_HIGHLIGHT_DIR="$ZSH_CUSTOM/plugins/zsh-syntax-highlighting"
         if [ -d "$ZSH_SYNTAX_HIGHLIGHT_DIR" ]; then

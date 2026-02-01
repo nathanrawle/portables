@@ -1,5 +1,4 @@
 #!/bin/sh
 case "$1" in
-    deps) echo "zoxide" ;; 
-    config) ;; 
+    install) command -v zoxide >/dev/null 2>&1 || echo syspkgmgr:zoxide ;;
 esac
