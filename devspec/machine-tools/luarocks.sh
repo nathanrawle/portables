@@ -1,5 +1,4 @@
 #!/bin/sh
 case "$1" in
-    deps) echo "luarocks" ;; 
-    config) ;; 
+    install) command -v luarocks >/dev/null 2&>1 || echo syspkgmgr:luarocks ;;
 esac

@@ -1,5 +1,4 @@
 #!/bin/sh
 case "$1" in
-    deps) echo "starship" ;; 
-    config) ;; 
+    install) command -v starship >/dev/null 2>&1 || echo syspkgmgr:starship ;; 
 esac

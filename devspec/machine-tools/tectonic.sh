@@ -1,5 +1,4 @@
 #!/bin/sh
 case "$1" in
-    deps) echo "tectonic" ;; 
-    config) ;; 
+    install) command -v tectonic >/dev/null 2>&1 || echo syspkgmgr:tectonic ;;
 esac

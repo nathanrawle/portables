@@ -4,92 +4,80 @@
 # It is the final step in the configuration pass.
 
 case "$1" in
-    deps)
-        # Symlinking has no system package dependencies.
-        ;;
     config)
         HERE="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)"
-        DEV_SPEC_DIR="$(cd -- "$HERE/../" >/dev/null 2>&1 && pwd)"
-        HOME_DIR="$HOME"
+        DEV_SPEC="$(cd -- "$HERE/../" >/dev/null 2>&1 && pwd)"
+        PORTABLE_HOME=$DEV_SPEC/home
+
+        if [ -n "${HOST-}" ]; then
+          MACHINE=${HOST%%.*}
+        else
+          MACHINE=$(hostname 2>/dev/null) || MACHINE=mystery-box
+          MACHINE=${MACHINE%%.*}
+        fi
 
         echo "Creating symlinks..."
 
         # --- 1. Link top-level dotfiles ---
-        toplevel_files=".zshrc .zprofile .editorconfig .inputrc"
-
         echo "Linking top-level dotfiles..."
-        for file in $toplevel_files; do
-            source="$DEV_SPEC_DIR/$file"
-            destination="$HOME_DIR/$file"
-            
-            if [ -e "$source" ]; then
-                ln -sf "$source" "$destination"
-                echo "  Linked $source -> $destination"
-            fi
+        for file in $PORTABLE_HOME/*; do
+            [ -f "$file" ] || continue
+            source="$file"
+            destination="$HOME/$file"
+            ln -sf "$source" "$destination"
+            echo "  Linked $source -> $destination"
         done
 
         # --- 2. Link contents of .config directory ---
-        CONFIG_SOURCE_DIR="$DEV_SPEC_DIR/.config"
-        CONFIG_DEST_DIR="$HOME_DIR/.config"
+        PORTABLE_DOTCONFIG="$PORTABLE_HOME/.config"
+        HOME_DOTCONFIG="$HOME/.config"
 
-        if [ -d "$CONFIG_SOURCE_DIR" ]; then
-            echo "Linking contents of .config..."
-            mkdir -p "$CONFIG_DEST_DIR"
-            
-            for item in "$CONFIG_SOURCE_DIR"/*; do
+        mkdir -p $HOME_DOTCONFIG
+
+            for item in "$PORTABLE_DOTCONFIG"/*; do
                 item_name=$(basename "$item")
-                source="$item"
-                destination="$CONFIG_DEST_DIR/$item_name"
-                
-                ln -sf "$source" "$destination"
-                echo "  Linked $source -> $destination"
+                destination="$HOME_DOTCONFIG/$item_name"
+
+                ln -sf "$item" "$destination"
+                echo "  Linked $item -> $destination"
             done
-        fi
 
         # --- 3. Link contents of Library directory (macOS) ---
         if [ "$(uname -s)" = "Darwin" ]; then
-            LIBRARY_SOURCE_DIR="$DEV_SPEC_DIR/Library"
-            LIBRARY_DEST_DIR="$HOME_DIR/Library"
+            PORTABLE_LIBRARY="$DEV_SPEC/Library"
+            HOME_LIBRARY="$HOME/Library"
 
-            if [ -d "$LIBRARY_SOURCE_DIR" ]; then
+            if [ -d "$PORTABLE_LIBRARY" ]; then
                 echo "Linking contents of Library..."
-                mkdir -p "$LIBRARY_DEST_DIR"
+                mkdir -p "$HOME_LIBRARY"
 
-                for item in "$LIBRARY_SOURCE_DIR"/*; do
+                for item in "$PORTABLE_LIBRARY"/*; do
                     item_name=$(basename "$item")
-                    source="$item"
-                    destination="$LIBRARY_DEST_DIR/$item_name"
-                    
+                    destination="$HOME_LIBRARY/$item_name"
+
                     mkdir -p "$(dirname "$destination")"
-                    ln -sf "$source" "$destination"
-                    echo "  Linked $source -> $destination"
+                    ln -sf "$item" "$destination"
+                    echo "  Linked $item -> $destination"
                 done
             fi
         fi
 
         # --- 4. Link contents of fns directory ---
-        FNS_SOURCE_DIR="$DEV_SPEC_DIR/fns"
-        FNS_DEST_DIR="$HOME_DIR/.fns"
+        PORTABLE_DOTFUNS="$DEV_SPEC/.funs"
+        HOME_DOTFUNS="$HOME/.funs"
 
-        if [ -d "$FNS_SOURCE_DIR" ]; then
+        if [ -d "$PORTABLE_DOTFUNS" ]; then
             echo "Linking contents of fns to ~/.fns..."
-            mkdir -p "$FNS_DEST_DIR"
+            mkdir -p "$HOME_DOTFUNS"
 
-            for item in "$FNS_SOURCE_DIR"/*; do
+            for item in "$PORTABLE_DOTFUNS"/*; do
                 item_name=$(basename "$item")
-                source="$item"
-                destination="$FNS_DEST_DIR/$item_name"
-                
-                ln -sf "$source" "$destination"
-                echo "  Linked $source -> $destination"
+                destination="$HOME_DOTFUNS/$item_name"
+
+                ln -sf "$item" "$destination"
+                echo "  Linked $item -> $destination"
             done
         fi
-
-        # --- 5. Configure global git excludesfile ---
-        echo "Configuring global git excludesfile..."
-        # We remove all first to prevent duplicates, then add the one we want.
-        git config --global --unset-all core.excludesfile || true # Ignore error if not set
-        git config --global --add core.excludesfile "$CONFIG_DEST_DIR/git/ignore"
 
         echo "Symlinking complete."
         ;;
