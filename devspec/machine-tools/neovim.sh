@@ -1,5 +1,5 @@
 #!/bin/sh
 case "$1" in
-    deps) echo "neovim" ;; 
+    install) command -v nvim >/dev/null 2&>1 || echo syspkgmgr:neovim ;; 
     config) ;; 
 esac

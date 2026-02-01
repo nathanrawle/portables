@@ -1,5 +1,4 @@
 #!/bin/sh
 case "$1" in
-    deps) echo "ripgrep" ;; 
-    config) ;; 
+    install) command -v rg >/dev/null 2>&1 || echo syspkgmgr:ripgrep ;; 
 esac

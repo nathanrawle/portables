@@ -24,10 +24,15 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
     . "$NVM_DIR/nvm.sh"  # This loads nvm
 fi
 
+if [ -d "$HOME/.npm-global" ]; then
+  export PATH="$PATH:$HOME/.npm-global/bin"
+fi
+
 # Go environment
 if [ -d "/usr/local/go/bin" ]; then
     path+=("/usr/local/go/bin")
 fi
+
 if [ -d "${GOPATH:=$HOME/go}/bin" ]; then
     path+=("$GOPATH/bin")
 fi
@@ -36,4 +41,3 @@ fi
 if [[ ":$PATH:" != *":/Users/nathan/.local/bin:"* ]]; then
   export PATH=/Users/nathan/.local/bin:"$PATH"
 fi
-alias dbtf=/Users/nathan/.local/bin/dbt
