@@ -30,7 +30,7 @@ case "$1" in
       HOME_DOTCONFIG="$HOME/.config"
 
       for item in "$PORTABLE_DOTCONFIG"/{.[!.]*,*}; do
-        [ "$item" = ".\[!.\]*" ] && continue
+        [ "${item##*/}"  = ".[!.]*" ] && continue
         destination="$HOME_DOTCONFIG/${item##*/}"
         ln -sf "$item" "$destination" \
           && echo "  Linked $item -> $destination"
@@ -45,7 +45,7 @@ case "$1" in
             echo "Linking contents of Library..."
 
             for item in "$PORTABLE_LIBRARY"/{.[!.]*,*}; do
-              [ "$item" = ".\[!.\]*" ] && continue
+              [ "${item##*/}"  = ".[!.]*" ] && continue
               destination="$HOME_LIBRARY/${item##*/}"
               ln -sf "$item" "$destination" \
                 && echo "  Linked $item -> $destination"
@@ -61,7 +61,7 @@ case "$1" in
           echo "Linking functions"
           mkdir -p "$HOME_DOTFUNS"
           for item in "$PORTABLE_DOTFUNS"/{.[!.]*,*}; do
-            [ "$item" = ".\[!.\]*" ] && continue
+            [ "${item##*/}" = ".[!.]*" ] && continue
             destination="$HOME_DOTFUNS/${item##*/}"
 
             ln -sf "$item" "$destination" \
