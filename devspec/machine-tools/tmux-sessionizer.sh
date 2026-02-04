@@ -9,6 +9,7 @@ case "$1" in
     [[ -x "$sess_path" ]] || chmod +x "$sess_path"
     mkdir -p ~/.local/scripts
     ln -sf "$sess_path"/tmux-sessionizer ~/.local/scripts/tmux-sessionizer
+    ;;
   config)
     [[ :"$PATH": = *.local/scripts/?:* ]] \
     || echo "make sure ~/.local/scripts gets added to your path"
