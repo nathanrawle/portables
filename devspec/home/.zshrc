@@ -1,6 +1,13 @@
 # This file is the orchestrator for the Zsh startup sequence.
 # It should only contain comments and source statements.
 
+if [ -n "${HOST-}" ]; then
+  MACHINE=${HOST%%.*}
+else
+  MACHINE=$(hostname 2>/dev/null) || MACHINE=mystery-box
+  MACHINE=${MACHINE%%.*}
+fi
+
 # Find the devspec directory, assuming this script is symlinked to the home directory.
 # A default is provided for robustness.
 if [ -L "$0" ]; then
@@ -10,7 +17,9 @@ else
 fi
 
 PORTABLE_HOME="$DEV_SPECS/home"
-
+if [ -f "$PORTABLE_HOME/.$MACHINE.env.zsh" ]; then
+  source "$PORTABLE_HOME/.$MACHINE.env.zsh"
+fi
 # 1. Configure Oh My Zsh variables (theme, plugins, etc.)
 source "$PORTABLE_HOME/omz-config.zsh"
 

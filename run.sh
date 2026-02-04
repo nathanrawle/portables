@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 set -e
 echo "Starting setup..."
@@ -57,6 +57,8 @@ case "$OS" in
 esac
 
 HERE="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)"
+echo "$HERE"
+echo "$(dirname -- "$0")"
 MACHINE_TOOLS="$HERE/devspec/machine-tools"
 
 # Prime the sudo timestamp
@@ -144,9 +146,6 @@ fi
 if [ -n "$syspkgmgr_install_cmds" ]; then
     core_tools=""
     ext_tools=""
-    # Note: syspkgmgr_install_cmds is space-separated, not newline-separated.
-    # Using a for loop with IFS set for this is safe because the items are package names,
-    # not paths, and we don't expect spaces within them or globbing issues.
     for item in $syspkgmgr_install_cmds; do
       case $item in
         *:*) ext_tools="${ext_tools:+$ext_tools }${item#*:}" ;; 
