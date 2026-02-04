@@ -2,14 +2,6 @@
 
 export ZSH="$HOME/.oh-my-zsh"
 
-# Set Zsh theme. Can be overridden by p10k setup.
-# PROMPT_FW should be set in a machine-specific env file.
-if [ "$PROMPT_FW" = "starship" ]; then
-    plugins+=("starship")
-else
-    ZSH_THEME="powerlevel10k/powerlevel10k"
-fi
-
 # Oh My Zsh auto-update
 zstyle ':omz:update' mode auto
 
@@ -21,6 +13,16 @@ plugins=(
   zsh-autocomplete
   zsh-autosuggestions
 )
+
+# Set Zsh theme. Can be overridden by p10k setup.
+# PROMPT_FW should be set in a machine-specific env file.
+if [ "$PROMPT_FW" = "starship" ]; then
+    plugins+=("starship")
+  elif [[ -f ~/.p10k.zsh ]]; then
+    ZSH_THEME="powerlevel10k/powerlevel10k"
+  else
+    ZSH_THEME="random"
+fi
 
 # Add path for zsh-completions
 fpath+=${ZSH_CUSTOM:-$ZSH/custom}/plugins/zsh-completions/src

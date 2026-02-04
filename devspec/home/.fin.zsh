@@ -4,8 +4,8 @@
 # In the new model, the symlinking of functions is handled by the main symlink script.
 # We just need to ensure the path is set and the functions are autoloaded.
 if [ -d "$HOME/.fns" ]; then
-    fpath+=("$HOME/.fns")
-    autoload -U $HOME/.fns/*(:t)
+    fpath+=("$HOME/.funs")
+    autoload -U $HOME/.funs/*(:t)
 fi
 
 ## Ensure $path and $fpath entries are unique

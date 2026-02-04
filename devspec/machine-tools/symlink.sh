@@ -54,11 +54,11 @@ case "$1" in
         fi
 
         # --- 4. Link contents of fns directory ---
-        PORTABLE_DOTFUNS="$DEV_SPEC/.funs"
+        PORTABLE_DOTFUNS="$PORTABLE_HOME/.funs"
         HOME_DOTFUNS="$HOME/.funs"
 
         if [ -d "$PORTABLE_DOTFUNS" ]; then
-            echo "Linking contents of fns to ~/.fns..."
+            echo "Linking functions"
             mkdir -p "$HOME_DOTFUNS"
             for item in "$PORTABLE_DOTFUNS"/{.[!.]*,*}; do
 	        [ "$item" = ".\[!.\]*" ] && continue
@@ -70,6 +70,5 @@ case "$1" in
         fi
 
         echo "Symlinking complete."
-	cd "$OLDPWD"
         ;;
 esac
