@@ -3,7 +3,11 @@
 # Installs Zsh and its configurations.
 
 case "$1" in
-    install) echo syspkgmgr:zsh ;;
+    install) 
+        if ! command -v zsh >/dev/null 2>&1; then
+            echo syspkgmgr:zsh
+        fi
+        ;;
     config)
         # Install Oh My Zsh if it's not already installed
         if [ ! -d "$HOME/.oh-my-zsh" ]; then
