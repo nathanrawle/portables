@@ -25,3 +25,6 @@ vim.keymap.set("x", "<leader>p", [["_dP]]) -- Paste over selection to void
 vim.keymap.set({ "n", "v" }, "<leader>d", [["_d]]) -- delete to void
 vim.keymap.set("n", "<M-C-L>", [[:%s/\<<C-r><C-w>\>/<C-r><C-w>/gI<Left><Left><Left>]])
 vim.keymap.set("n", "<leader>x", "<cmd>!chmod +x %<CR>", { silent = true })
+
+-- tmux sessionizer
+vim.keymap.set("n", "<C-f>", "<cmd>silent !tmux neww tmux-sessionizer<CR>")

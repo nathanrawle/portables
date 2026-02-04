@@ -11,3 +11,8 @@ bindkey               "$terminfo[kcbt]" menu-select
 bindkey -M menuselect              '^I' menu-complete
 bindkey -M menuselect "$terminfo[kcbt]" reverse-menu-complete
 
+bindkey -s ^f "tmux-sessionizer\n"
+bindkey -s '\ej' "tmux-sessionizer -s 0\n"
+bindkey -s '\ek' "tmux-sessionizer -s 1\n"
+bindkey -s '\el' "tmux-sessionizer -s 2\n"
+
