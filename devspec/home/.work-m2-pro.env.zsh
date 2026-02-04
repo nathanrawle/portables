@@ -1,6 +1,6 @@
-export PORTABLES=~/code/portables/portables
+export PORTABLES=~/code/portables
 export PPORTABLES=~/code/pportables
-export MYFUNCS=~/.fns
+export MYFUNCS=~/.funs
 export PROMPT_FW="starship"
 export EDITOR=nvim
 export GOPRIVATE=github.com/libertyblume/*
