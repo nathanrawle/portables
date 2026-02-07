@@ -12,15 +12,15 @@ alias ge='grep -E'
 alias gei='grep -Ei'
 alias qg='grep -q'
 alias h='head'
-alias l='ls -lLFAh'
+alias l='ls -lAh'
 alias t='tail'
 alias ft='t -F'
 alias follow='ft'
 alias hist='history'
 alias rnsort='sort -rn'
 
-alias relink='relink -q && read 
-?Do you want to restart the shell now? (Y|n) 
+alias relink='relink -q && read
+?Do you want to restart the shell now? (Y|n)
 && [[ ! ${(L)REPLY[1]} = n ]] && exec zsh'
 alias reshell='exec $SHELL'
 
