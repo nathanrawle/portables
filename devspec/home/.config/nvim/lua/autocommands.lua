@@ -9,9 +9,10 @@ vim.api.nvim_create_autocmd("TextYankPost", {
 
 -- Open netrw when starting `nvim` with no file args (i.e. `nvim`), in the current cwd.
 -- Does NOT interfere with: `nvim file`, `nvim dir`, piped stdin, dashboards, special buffers, etc.
+local my_augroup = vim.api.nvim_create_augroup("my-autocommands", { clear = true })
 vim.api.nvim_create_autocmd("VimEnter", {
   desc = "Open NetRW by default when nvim is called without arguments",
-  group = vim.api.nvim_create_augroup("my-autocommands", { clear = true }),
+  group = my_augroup,
   callback = function()
     -- Don't interfere if files/args were provided.
     if vim.fn.argc() ~= 0 then
@@ -50,5 +51,17 @@ vim.api.nvim_create_autocmd("VimEnter", {
     end
 
     vim.cmd("silent! Explore")
+  end,
+})
+
+vim.api.nvim_create_autocmd("BufEnter", {
+  group = my_augroup,
+  desc = "Set nicer keymaps in read-only buffers",
+  callback = function(args)
+    if vim.bo.modifiable then
+      return
+    end
+    vim.keymap.set("n", "d", "<C-D>", { desc = "Half-page down", buffer = args.buf, silent = true })
+    vim.keymap.set("n", "u", "<C-U>", { desc = "Half-page up", buffer = args.buf, silent = true })
   end,
 })
