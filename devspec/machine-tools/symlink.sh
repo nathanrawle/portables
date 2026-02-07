@@ -32,7 +32,8 @@ case "$1" in
       for item in "$PORTABLE_DOTCONFIG"/{.[!.]*,*}; do
         [ "${item##*/}"  = ".[!.]*" ] && continue
         destination="$HOME_DOTCONFIG/${item##*/}"
-        ln -sf "$item" "$destination" \
+        rm -rf "$destination"
+        ln -shf "$item" "$destination" \
           && echo "  Linked $item -> $destination"
         done
 
@@ -47,7 +48,8 @@ case "$1" in
             for item in "$PORTABLE_LIBRARY"/{.[!.]*,*}; do
               [ "${item##*/}"  = ".[!.]*" ] && continue
               destination="$HOME_LIBRARY/${item##*/}"
-              ln -sf "$item" "$destination" \
+              rm -rf "$destination"
+              ln -shf "$item" "$destination" \
                 && echo "  Linked $item -> $destination"
               done
           fi
@@ -63,8 +65,8 @@ case "$1" in
           for item in "$PORTABLE_DOTFUNS"/{.[!.]*,*}; do
             [ "${item##*/}" = ".[!.]*" ] && continue
             destination="$HOME_DOTFUNS/${item##*/}"
-
-            ln -sf "$item" "$destination" \
+            rm -rf "$destination"
+            ln -shf "$item" "$destination" \
               && echo "  Linked $item -> $destination"
             done
         fi
