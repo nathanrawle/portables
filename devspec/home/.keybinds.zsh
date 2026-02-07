@@ -3,7 +3,6 @@
 bindkey '\eq'             push-line-or-edit  # multi-line push
 bindkey ^U                backward-kill-line
 bindkey ^Z                kill-whole-line
-bindkey -s ^F             "tmux-sessionizer\n"
 
 ### tab to cycle through menu completions
 bindkey                            '^I' menu-select

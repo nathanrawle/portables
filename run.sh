@@ -57,8 +57,6 @@ case "$OS" in
 esac
 
 HERE="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)"
-echo "$HERE"
-echo "$(dirname -- "$0")"
 MACHINE_TOOLS="$HERE/devspec/machine-tools"
 
 # Prime the sudo timestamp
@@ -148,8 +146,8 @@ if [ -n "$syspkgmgr_install_cmds" ]; then
     ext_tools=""
     for item in $syspkgmgr_install_cmds; do
       case $item in
-        *:*) ext_tools="${ext_tools:+$ext_tools }${item#*:}" ;; 
-        *)   core_tools="${core_tools:+$core_tools }$item" ;; 
+        *:*) ext_tools="${ext_tools:+$ext_tools }${item#*:}" ;;
+        *)   core_tools="${core_tools:+$core_tools }$item" ;;
       esac
     done
 
