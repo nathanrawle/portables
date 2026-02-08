@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+echo "         \"\$0\" -> $0"
+echo " dirname \"\$0\" -> $(dirname "$0")"
+echo "basename \"\$0\" -> $(basename "$0")"
+echo "realpath \"\$0\" -> $(realpath "$0")"
+if [ -L "$0" ]; then
+  echo "readlink \"\$0\" -> $(readlink "$0")"
+fi
