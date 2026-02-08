@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 echo "Starting setup..."
@@ -9,37 +9,40 @@ PKG_MANAGER_UPDATE=""
 PKG_MANAGER_INSTALL=""
 PKG_MANAGER_EXT_INSTALL=""
 
-HOME="${$HOME:-~}"
+if [ -z "$HOME" ]; then
+  HOME="$(realpath ~)"
+fi
 
 if [ -z "${HOST-}" ]; then
   export HOST=$(hostname 2>/dev/null) || export HOST=mystery-host
 fi
-MACHINE=${HOST%%.*}
-[ MACHINE = "mystery-host" ] && export MACHINE=scoobs-van
 
-HERE="${0:P:h}"
-PORTS_DIR="$HERE/portables"
-
-# bootstrap a .env file for a new machine, or amend an existing one
-ENVFP="$PORTS_DIR/.${MACHINE:l}.env.zsh"
-PRTBLS_LN="export PORTABLES=${PORTS_DIR/#$HOME/~}"
-MYFUNC_LN="export MYFUNCS=~/.fns"
-
-if [[ -e "$ENVFP" ]]; then
-    if ! fgrep -Eq "$PRTBLS_LN" "$ENVFP"; then
-      sed -Ei '' '/^(export )?PORTABLES=/d' "$ENVFP"
-      print "$PRTBLS_LN" >> "$ENVFP"
-    fi
-
-    if ! fgrep -Eq "$MYFUNC_LN" "$ENVFP"; then
-      sed -Ei '' '/^(export )?MYFUNCS=/d' "$ENVFP"
-      print "$MYFUNC_LN" >> "$ENVFP"
-    fi
-else;
-    print -l "$PRTBLS_LN" "$MYFUNC_LN" > "$ENVFP"
+if [ $HOST = "mystery-host" ]; then
+  MACHINE=scoobs-van
+else
+  MACHINE=${HOST%%.*}
 fi
 
-. "$ENVFP"
+THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
+HERE="$(dirname "$THIS")"
+MACHINE_TOOLS="$HERE/devspec/machine-tools"
+PORTABLE_HOME="$HERE/devspec/home"
+
+# bootstrap a .env file for a new machine, or amend an existing one
+machine=$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')
+MACHENV="$PORTABLE_HOME/.$machine.env"
+PRTBLS_LN="export PORTABLES=${HERE/#$HOME/"~"}"
+
+if [[ -e "$MACHENV" ]]; then
+    if ! fgrep -Eq "$PRTBLS_LN" "$MACHENV"; then
+      sed -Ei '' '/^(export )?PORTABLES=/d' "$MACHENV"
+      echo "$PRTBLS_LN" >> "$MACHENV"
+    fi
+else
+    echo "$PRTBLS_LN" > "$MACHENV"
+fi
+
+. "$MACHENV"
 
 case "$OS" in
     Darwin)
@@ -87,9 +90,6 @@ case "$OS" in
         exit 1
         ;;
 esac
-
-HERE="$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)"
-MACHINE_TOOLS="$HERE/devspec/machine-tools"
 
 # Prime the sudo timestamp
 if echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then

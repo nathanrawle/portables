@@ -1,0 +1,9 @@
+# zsh-autocomplete configuration
+zstyle ':autocomplete:*' delay 0.2
+zstyle ':autocomplete:*complete*:*' insert-unambiguous yes
+zstyle ':autocomplete:*history*:*' insert-unambiguous yes
+zstyle ':autocomplete:menu-search:*' insert-unambiguous yes
+zstyle ':completion:*' group-name ''
+zstyle ':completion:*:*' matcher-list 'm:{[:lower:]-}={[:upper:]_}' '+r:|[.]=**'
+zstyle -e ':autocomplete:*:*' list-lines 'reply=( $(( 0.75 * LINES )) )'
+

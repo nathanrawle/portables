@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-
+#!/usr/bin/env sh
 echo "         \"\$0\" -> $0"
 echo " dirname \"\$0\" -> $(dirname "$0")"
 echo "basename \"\$0\" -> $(basename "$0")"

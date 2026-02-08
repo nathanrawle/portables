@@ -25,7 +25,7 @@ if [ "$PROMPT_FW" = "starship" ]; then
 fi
 
 # Add path for zsh-completions
-fpath+=${ZSH_CUSTOM:-$ZSH/custom}/plugins/zsh-completions/src
+fpath+=( ${ZSH_CUSTOM:-$ZSH/custom}/plugins/zsh-completions/src )
 
 # Set to this value to manual rebind keys for zsh-autosuggestions
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
