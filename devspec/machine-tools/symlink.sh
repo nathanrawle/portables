@@ -30,11 +30,11 @@ case "$1" in
       HOME_DOTCONFIG="$HOME/.config"
 
       for item in "$PORTABLE_DOTCONFIG"/{.[!.]*,*}; do
-        [ "${item##*/}"  = ".[!.]*" ] && continue
+        [ -f "$item" ] || [ -d "$item" ] || continue
         destination="$HOME_DOTCONFIG/${item##*/}"
         rm -rf "$destination"
         ln -shf "$item" "$destination" \
-          && echo "  Linked $item -> $destination"
+        && echo "  Linked $item -> $destination"
         done
 
         # --- 3. Link contents of Library directory (macOS) ---
@@ -46,30 +46,31 @@ case "$1" in
             echo "Linking contents of Library..."
 
             for item in "$PORTABLE_LIBRARY"/{.[!.]*,*}; do
-              [ "${item##*/}"  = ".[!.]*" ] && continue
+              [ -f "$item" ] || [ -d "$item" ] || continue
               destination="$HOME_LIBRARY/${item##*/}"
               rm -rf "$destination"
               ln -shf "$item" "$destination" \
-                && echo "  Linked $item -> $destination"
+              && echo "  Linked $item -> $destination"
               done
           fi
         fi
 
         # --- 4. Link contents of fns directory ---
-        PORTABLE_DOTFUNS="$PORTABLE_HOME/.funs"
-        HOME_DOTFUNS="$HOME/.funs"
-
-        if [ -d "$PORTABLE_DOTFUNS" ]; then
-          echo "Linking functions"
-          mkdir -p "$HOME_DOTFUNS"
-          for item in "$PORTABLE_DOTFUNS"/{.[!.]*,*}; do
-            [ "${item##*/}" = ".[!.]*" ] && continue
-            destination="$HOME_DOTFUNS/${item##*/}"
-            rm -rf "$destination"
-            ln -shf "$item" "$destination" \
+        for fundir in .pfuns .bfuns .zfuns; do
+          PORTABLE_FUNDIR="$PORTABLE_HOME/$fundir"
+          if [ -d "$PORTABLE_FUNDIR" ]; then
+            HOME_FUNDIR=$HOME/$fundir
+            echo "Linking $fundir functions"
+            mkdir -p "$HOME_FUNDIR"
+            for item in "$PORTABLE_FUNDIR"/{.[!.]*,*}; do
+              [ -f "$item" ] || continue
+              destination="$HOME_FUNDIR/${item##*/}"
+              rm -rf "$destination"
+              ln -shf "$item" "$destination" \
               && echo "  Linked $item -> $destination"
             done
-        fi
+          fi
+        done
 
         echo "Symlinking complete."
         ;;
