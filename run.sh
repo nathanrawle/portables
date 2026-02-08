@@ -9,6 +9,38 @@ PKG_MANAGER_UPDATE=""
 PKG_MANAGER_INSTALL=""
 PKG_MANAGER_EXT_INSTALL=""
 
+HOME="${$HOME:-~}"
+
+if [ -z "${HOST-}" ]; then
+  export HOST=$(hostname 2>/dev/null) || export HOST=mystery-host
+fi
+MACHINE=${HOST%%.*}
+[ MACHINE = "mystery-host" ] && export MACHINE=scoobs-van
+
+HERE="${0:P:h}"
+PORTS_DIR="$HERE/portables"
+
+# bootstrap a .env file for a new machine, or amend an existing one
+ENVFP="$PORTS_DIR/.${MACHINE:l}.env.zsh"
+PRTBLS_LN="export PORTABLES=${PORTS_DIR/#$HOME/~}"
+MYFUNC_LN="export MYFUNCS=~/.fns"
+
+if [[ -e "$ENVFP" ]]; then
+    if ! fgrep -Eq "$PRTBLS_LN" "$ENVFP"; then
+      sed -Ei '' '/^(export )?PORTABLES=/d' "$ENVFP"
+      print "$PRTBLS_LN" >> "$ENVFP"
+    fi
+
+    if ! fgrep -Eq "$MYFUNC_LN" "$ENVFP"; then
+      sed -Ei '' '/^(export )?MYFUNCS=/d' "$ENVFP"
+      print "$MYFUNC_LN" >> "$ENVFP"
+    fi
+else;
+    print -l "$PRTBLS_LN" "$MYFUNC_LN" > "$ENVFP"
+fi
+
+. "$ENVFP"
+
 case "$OS" in
     Darwin)
         echo "Detected macOS."
