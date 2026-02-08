@@ -191,6 +191,7 @@ fi
 if [ -n "$pip_install_cmds" ]; then
     install_list=$(printf "%s\n" $pip_install_cmds | sort -u | xargs)
     echo "Installing user-local pip packages: $install_list"
+    python3 -m pip install -U pip
     python3 -m pip install --user $install_list
     echo "Running pip package configurations..."
     while IFS= read -r tool_script; do
