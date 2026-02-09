@@ -1,10 +1,11 @@
-[[ -x "/opt/homebrew/bin/brew" ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
+export HOMEBREW_NO_ENV_HINTS=1
+[[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
 
-[[ -f "~/google-cloud-sdk/path.zsh.inc" ]] \
-&& . "~/google-cloud-sdk/path.zsh.inc"
+[[ -f ~/google-cloud-sdk/path.zsh.inc ]] \
+&& . ~/google-cloud-sdk/path.zsh.inc
 
-[[ -f "~/google-cloud-sdk/completion.zsh.inc" ]] \
-&& . "~/google-cloud-sdk/completion.zsh.inc"
+[[ -f ~/google-cloud-sdk/completion.zsh.inc ]] \
+&& . ~/google-cloud-sdk/completion.zsh.inc
 
 command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh --no-cmd)"
@@ -30,7 +31,7 @@ path+=( "$localbin" "$localscripts" )
 for fundir in zfuns bfuns pfuns; do
   if [ -d "$HOME/.$fundir" ]; then
     fpath+=( "$HOME/.$fundir" )
-    autoload -U "$HOME/.$fundir/*(:t)"
+    autoload -U $HOME/.$fundir/*(:t)
   fi
 done
 
