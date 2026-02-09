@@ -105,3 +105,8 @@ alias pycal='python -m calendar'
 
 alias nvim-ks='NVIM_APPNAME="nvim-ks" nvim'
 alias lzvim='NVIM_APPNAME="nvim-lz" nvim'
+
+alias monty='source ~/monty/.venv/bin/activate'
+alias py=' ~/monty/.venv/bin/python'
+alias bpy='~/monty/.venv/bin/bpython'
+alias ipy='~/monty/.venv/bin/ipython'

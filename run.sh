@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
 set -e
 echo "Starting setup..."
@@ -9,15 +9,15 @@ PKG_MANAGER_UPDATE=""
 PKG_MANAGER_INSTALL=""
 PKG_MANAGER_EXT_INSTALL=""
 
-if [ -z "$HOME" ]; then
+if [[ -z "$HOME" ]]; then
   HOME="$(realpath ~)"
 fi
 
-if [ -z "${HOST-}" ]; then
+if [[ -z "${HOST-}" ]]; then
   HOST="$(hostname 2>/dev/null)" || HOST=mystery-host
 fi
 
-if [ $HOST = "mystery-host" ]; then
+if [[ $HOST = "mystery-host" ]]; then
   MACHINE=scoobs-van
 else
   MACHINE=${HOST%%.*}
@@ -33,7 +33,7 @@ PORTABLE_HOME="$HERE/devspec/home"
 # bootstrap a .env file for a new machine, or amend an existing one
 machine=$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')
 MACHENV="$PORTABLE_HOME/.$machine.env"
-PRTBLS_LN="export PORTABLES=${HERE/#$HOME/"~"}"
+PRTBLS_LN="export PORTABLES=""${HERE/#$HOME/~}"
 
 if [[ -e "$MACHENV" ]]; then
     if ! fgrep -Eq "$PRTBLS_LN" "$MACHENV"; then
@@ -58,7 +58,7 @@ case "$OS" in
         ;;
     Linux)
         echo "Detected Linux."
-        if [ -f /etc/os-release ]; then
+        if [[ -f /etc/os-release ]]; then
             . /etc/os-release
             case "$ID" in
                 ubuntu|debian|pop)
@@ -156,7 +156,7 @@ done
 
 # --- 2. Execution Phase ---
 
-if [ -n "$self_install_scripts" ]; then
+if [[ -n "$self_install_scripts" ]]; then
     echo "Running self-installers..."
     while IFS= read -r tool_script; do
       sh "$tool_script" self-install
@@ -164,19 +164,19 @@ if [ -n "$self_install_scripts" ]; then
     done <<< "$self_install_scripts"
 fi
 
-if [ -n "$uv_install_cmds" ] && [ ! " $syspkgmgr_install_cmds " = *" uv "* ]; then
-  if [ "$OS" = Darwin ]; then
+if [[ -n "$uv_install_cmds" ]] && [[ ! " $syspkgmgr_install_cmds " = *" uv "* ]]; then
+  if [[ "$OS" = Darwin ]]; then
     syspkgmgr_install_cmds="${syspkgmgr_install_cmds:+$syspkgmgr_install_cmds }uv"
   else
     ensure_uv_installed=1
   fi
 fi
 
-if [ -n "$pipx_install_cmds" ] && [ ! " $syspkgmgr_install_cmds " = *" pipx "* ]; then
+if [[ -n "$pipx_install_cmds" ]] && [[ ! " $syspkgmgr_install_cmds " = *" pipx "* ]]; then
   syspkgmgr_install_cmds="${syspkgmgr_install_cmds:+$syspkgmgr_install_cmds }pipx"
 fi
 
-if [ -n "$syspkgmgr_install_cmds" ]; then
+if [[ -n "$syspkgmgr_install_cmds" ]]; then
     core_tools=""
     ext_tools=""
     for item in $syspkgmgr_install_cmds; do
@@ -189,12 +189,12 @@ if [ -n "$syspkgmgr_install_cmds" ]; then
     echo "Updating $SYS_PKG_MANAGER..."
     sh -c "$PKG_MANAGER_UPDATE"
 
-    if [ -n "$core_tools" ]; then
+    if [[ -n "$core_tools" ]]; then
         echo "Installing system packages: $core_tools"
         sh -c "$PKG_MANAGER_INSTALL $core_tools"
     fi
 
-    if [ -n "$ext_tools" ]; then
+    if [[ -n "$ext_tools" ]]; then
       echo "Tapping external repositories: $ext_tools"
       for ext_tool in $ext_tools; do
         sh -c "$PKG_MANAGER_EXT_INSTALL $ext_tool"
@@ -203,70 +203,89 @@ if [ -n "$syspkgmgr_install_cmds" ]; then
 
     echo "Running system package configurations..."
     while IFS= read -r tool_script; do
-        [ -n "$tool_script" ] && sh "$tool_script" config
+        [[ -n "$tool_script" ]] && sh "$tool_script" config
     done <<< "$syspkgmgr_tool_scripts"
 fi
 
-if [ "${ensure_uv_installed:-0}" -gt 0 ] && ! command -v uv >/dev/null 2>&1; then
+if [[ "${ensure_uv_installed:-0}" -gt 0 ]] && ! command -v uv >/dev/null 2>&1; then
   echo "Installing uv..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 
-if [ -n "$uv_install_cmds" ]; then
-    install_list=$(printf "%s\n" $uv_install_cmds | sort -u | xargs)
-    echo "Updating uv and installing packages: $install_list"
+if [[ -n "$uv_install_cmds" ]]; then
     [[ "$(command -v uv 2>/dev/null)" = *homebrew* ]] || uv self update
-    for tool in $install_list; do
-      uv tool install "$tool"
+
+    tools=""
+    pythons=""
+    for item in $uv_install_cmds; do
+      case $item in
+        python:*) pythons="${pythons:+$pythons }${item#*:}" ;;
+        *) tools="${tools:+$tools }${item#*:}" ;;
+      esac
     done
+
+    tools=$(printf "%s\n" $tools | sort -u | xargs)
+    echo "Installing uv tools: $tools"
+    for tool in $tools; do
+      tool=$(echo $tool | tr ':' ' ')
+      uv tool install $tool
+    done
+
+    pythons=$(printf "%s\n" $pythons | sort -u | xargs)
+    echo "Installing uv pythons: $pythons"
+    for python in $pythons; do
+      python=$(echo $python | tr ':' ' ')
+      uv python install $python
+    done
+
     echo "Running uv package configurations..."
     while IFS= read -r tool_script; do
-        [ -n "$tool_script" ] && sh "$tool_script" config
+        [[ -n "$tool_script" ]] && sh "$tool_script" config
     done <<< "$uv_tool_scripts"
 fi
 
-if [ -n "$pip_install_cmds" ]; then
+if [[ -n "$pip_install_cmds" ]]; then
     install_list=$(printf "%s\n" $pip_install_cmds | sort -u | xargs)
     echo "Installing user-local pip packages: $install_list"
     python3 -m pip install -U pip
     python3 -m pip install --user $install_list
     echo "Running pip package configurations..."
     while IFS= read -r tool_script; do
-        [ -n "$tool_script" ] && sh "$tool_script" config
+        [[ -n "$tool_script" ]] && sh "$tool_script" config
     done <<< "$pip_tool_scripts"
 fi
 
-if [ -n "$pipx_install_cmds" ]; then
+if [[ -n "$pipx_install_cmds" ]]; then
     install_list=$(printf "%s\n" $pipx_install_cmds | sort -u | xargs)
     echo "Installing user-local pipx packages: $install_list"
     pipx install $install_list
     echo "Running pipx package configurations..."
     while IFS= read -r tool_script; do
-        [ -n "$tool_script" ] && sh "$tool_script" config
+        [[ -n "$tool_script" ]] && sh "$tool_script" config
     done <<< "$pipx_tool_scripts"
 fi
 
-if [ -n "$nvm_install_cmds" ]; then
+if [[ -n "$nvm_install_cmds" ]]; then
     install_list=$(printf "%s\n" $nvm_install_cmds | sort -u | xargs)
     echo "Installing node versions with nvm: $install_list"
     export NVM_DIR="$HOME/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+    [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
     nvm install "$install_list"
     echo "Running nvm package configurations..."
     while IFS= read -r tool_script; do
-        [ -n "$tool_script" ] && sh "$tool_script" config
+        [[ -n "$tool_script" ]] && sh "$tool_script" config
     done <<< "$nvm_tool_scripts"
 fi
 
-if [ -n "$npm_install_cmds" ]; then
+if [[ -n "$npm_install_cmds" ]]; then
     install_list=$(printf "%s\n" $npm_install_cmds | sort -u | xargs)
     echo "Installing global npm packages: $install_list"
     export NVM_DIR="$HOME/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+    [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
     npm install -g $install_list
     echo "Running npm package configurations..."
     while IFS= read -r tool_script; do
-        [ -n "$tool_script" ] && sh "$tool_script" config
+        [[ -n "$tool_script" ]] && sh "$tool_script" config
     done <<< "$npm_tool_scripts"
 fi
 
