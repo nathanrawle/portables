@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 set -e
 echo "Starting setup..."
@@ -14,7 +14,7 @@ if [ -z "$HOME" ]; then
 fi
 
 if [ -z "${HOST-}" ]; then
-  export HOST=$(hostname 2>/dev/null) || export HOST=mystery-host
+  HOST="$(hostname 2>/dev/null)" || HOST=mystery-host
 fi
 
 if [ $HOST = "mystery-host" ]; then
@@ -22,6 +22,8 @@ if [ $HOST = "mystery-host" ]; then
 else
   MACHINE=${HOST%%.*}
 fi
+
+export HOME HOST MACHINE
 
 THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
 HERE="$(dirname "$THIS")"
@@ -47,6 +49,7 @@ fi
 case "$OS" in
     Darwin)
         echo "Detected macOS."
+        xcode-select -p >/dev/null 2>&1 || xcode-select --install
         SYS_PKG_MANAGER="homebrew"
         PKG_MANAGER_UPDATE="brew update"
         PKG_MANAGER_INSTALL="brew install"
@@ -117,7 +120,6 @@ npm_tool_scripts=""
 
 for tool_script in "$MACHINE_TOOLS"/*.sh; do
     install_cmd="$(sh "$tool_script" install)"
-
     case "$install_cmd" in
       "" ) continue ;;
       self-install)
