@@ -214,8 +214,10 @@ fi
 if [ -n "$uv_install_cmds" ]; then
     install_list=$(printf "%s\n" $uv_install_cmds | sort -u | xargs)
     echo "Updating uv and installing packages: $install_list"
-    uv self update
-    uv tool install $install_list
+    [[ "$(command -v uv 2>/dev/null)" = *homebrew* ]] || uv self update
+    for tool in $install_list; do
+      uv tool install "$tool"
+    done
     echo "Running uv package configurations..."
     while IFS= read -r tool_script; do
         [ -n "$tool_script" ] && sh "$tool_script" config
