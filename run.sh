@@ -54,6 +54,7 @@ case "$OS" in
         PKG_MANAGER_UPDATE="brew update"
         PKG_MANAGER_INSTALL="brew install"
         PKG_MANAGER_EXT_INSTALL="brew tap"
+        export HOMEBREW_NO_ENV_HINTS=1
         ;;
     Linux)
         echo "Detected Linux."
