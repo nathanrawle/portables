@@ -35,4 +35,14 @@ for fundir in zfuns bfuns pfuns; do
   fi
 done
 
-export NVM_DIR PATH path fpath
+# This affects every invocation of `less` and makes it way better:
+#   -i   case-insensitive search unless search string contains uppercase letters
+#   -R   color
+#   -F   exit if there is less than one page of content
+#   -X   keep content on screen after exit
+#   -M   show more info at the bottom prompt line
+#   -x4  tabs are 4 instead of 8
+#   -W   temporarily highlight the first new line after foreward movement
+LESS='-iRFXMx4W'
+
+export NVM_DIR PATH path fpath LESS
