@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+if [[ $# -eq 4 ]]; then
+  sep="$4"
+  unset 4
+elif [[ "$2" = */* ]]; then
+  if [[ "$2" = *#* ]]; then
+    if [[ "$2" = *:* ]]; then
+      echo "Could not find a suitable separator for pattern-matching. Please pass a suitable separator as argument $(($# + 1))" >&2
+      exit 1
+    else
+      sep=':'
+    fi
+  else
+    sep='#'
+  fi
+else
+  sep='/'
+fi
+
+if [[ $# -eq 3 ]]; then
+  if [[ -e "$1" ]]; then
+    if ! fgrep -Eq "$3" "$1"; then
+      sed -Ei '' "${sep}${2}${sep}d" "$1"
+      echo "$3" >>"$1"
+    fi
+  else
+    echo "$3" >"$1"
+  fi
+elif [[ $# -eq 2 ]]; then
+  sed -Ei '' "${sep}${2}${sep}d" "$1"
+else
+  echo "Expected 2 or 3 arguments. Got $#" >&2
+fi
