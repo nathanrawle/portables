@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 
+[[ -n "$OS" ]] || OS="$(uname -s)"
+
 case "$1" in
 install)
-  echo "syspkgmgr:python"
-  echo "uv:python:--default"
+  case "$OS" in
+  # on macOS, I only really need brew python to get the essential system deps, like
+  # openssl & readline
+  Darwin) [[ -x "$(brew --prefix)/bin/python3" ]] || echo "syspkgmgr:python" ;;
+  *) echo "syspkgmgr:python" ;;
+  esac
+  echo "uv:python:--default:--preview-features:python-install-default"
   ;;
 config)
   mkdir -p ~/monty
