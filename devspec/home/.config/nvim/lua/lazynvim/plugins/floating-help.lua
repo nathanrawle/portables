@@ -21,10 +21,10 @@ return {
     vim.keymap.set("n", "<leader>h", fh.toggle)
     vim.keymap.set("n", "fwh", function()
       fh.open("t=help", vim.fn.expand("<cword>"))
-    end)
+    end, { desc = "Find word under cursor in help pages" })
     vim.keymap.set("n", "fwm", function()
       fh.open("t=man", vim.fn.expand("<cword>"))
-    end)
+    end, { desc = "Find word under cursor in man pages" })
 
     -- Only replace cmds, not search; only replace the first instance
     local function cmd_abbrev(abbrev, expansion)

@@ -1,10 +1,15 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
 case "$1" in
-  install) echo "uv:python:--default" ;;
-  config)
-    mkdir -p ~/monty
+install)
+  echo "syspkgmgr:python"
+  echo "uv:python:--default"
+  ;;
+config)
+  mkdir -p ~/monty
+  if [[ ! -d ~/monty/.venv ]]; then
     uv venv --directory ~/monty --allow-existing --prompt monty
-    uv pip install --directory ~/monty -r ~/.config/python/monty
-    ;;
+  fi
+  uv pip install --directory ~/monty -r ~/.config/python/monty
+  ;;
 esac
