@@ -164,7 +164,9 @@ if [[ -n "$self_install_scripts" ]]; then
     done <<< "$self_install_scripts"
 fi
 
-if [[ -n "$uv_install_cmds" ]] && [[ ! " $syspkgmgr_install_cmds " = *" uv "* ]]; then
+if [[ -n "$uv_install_cmds" ]] \
+&& ! command -v uv >/dev/null 2>&1 \
+&& [[ ! " $syspkgmgr_install_cmds " = *" uv "* ]]; then
   if [[ "$OS" = Darwin ]]; then
     syspkgmgr_install_cmds="${syspkgmgr_install_cmds:+$syspkgmgr_install_cmds }uv"
   else
@@ -224,19 +226,23 @@ if [[ -n "$uv_install_cmds" ]]; then
       esac
     done
 
-    tools=$(printf "%s\n" $tools | sort -u | xargs)
-    echo "Installing uv tools: $tools"
-    for tool in $tools; do
-      tool=$(echo $tool | tr ':' ' ')
-      uv tool install $tool
-    done
+    if [[ -n "$tools" ]]; then
+      tools=$(printf "%s\n" $tools | sort -u | xargs)
+      echo "Installing uv tools: $tools"
+      for tool in $tools; do
+        tool=$(echo $tool | tr ':' ' ')
+        uv tool install $tool
+      done
+    fi
 
-    pythons=$(printf "%s\n" $pythons | sort -u | xargs)
-    echo "Installing uv pythons: $pythons"
-    for python in $pythons; do
-      python=$(echo $python | tr ':' ' ')
-      uv python install $python
-    done
+    if [[ -n "$pythons" ]]; then
+      pythons=$(printf "%s\n" $pythons | sort -u | xargs)
+      echo "Installing uv pythons: $pythons"
+      for python in $pythons; do
+        python=$(echo $python | tr ':' ' ')
+        uv python install $python
+      done
+    fi
 
     echo "Running uv package configurations..."
     while IFS= read -r tool_script; do
