@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 echo "Starting setup..."
 
 # --- OS and Package Manager Detection ---
