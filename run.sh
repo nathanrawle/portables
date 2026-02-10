@@ -33,7 +33,7 @@ PORTABLE_HOME="$HERE/devspec/home"
 # bootstrap a .env file for a new machine, or amend an existing one
 machine=$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')
 MACHENV="$PORTABLE_HOME/.$machine.env"
-PRTBLS_LN="export PORTABLES=""${HERE/#$HOME/~}"
+PRTBLS_LN="export PORTABLES=${HERE/#$HOME/"~"}"
 
 if [[ -e "$MACHENV" ]]; then
   if ! fgrep -Eq "$PRTBLS_LN" "$MACHENV"; then
