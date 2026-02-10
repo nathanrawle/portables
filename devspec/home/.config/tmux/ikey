@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+
+case "$1" in
+1) echo "j" ;;
+2) echo "k" ;;
+3) echo "l" ;;
+4) echo ";" ;;
+*) echo "$1" ;;
+esac
