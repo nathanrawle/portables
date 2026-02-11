@@ -298,5 +298,3 @@ if [[ -n "$npm_install_cmds" ]]; then
 fi
 
 echo "Devspec run complete."
-echo "Restarting shell…"
-exec $SHELL
