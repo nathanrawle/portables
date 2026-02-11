@@ -1,9 +1,3 @@
-# terminal/shell setups
-alias portvar='[ -n $PORTABLES ]'
-alias omzmode='portvar && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && ln -f {$PORTABLES/omz+,~/}.zshrc && exec zsh'
-alias zimmode='portvar && [ -d ~/.zim ] && ([ ! -e ~/.zshenv ] || mv -f ~/{,.shh}.zshenv) && ln -f {$PORTABLES/zim,~/}.zshrc && ln -f {$PORTABLES/,~/}.zimrc && exec zsh'
-alias z4hmode='portvar && ([ -e ~/.zshenv ] || mv -f ~/{.shh,}.zshenv) && ln -f {$PORTABLES/z4h,~/}.zshrc && exec zsh'
-
 # utilities: shell
 alias cd-='cd -' # for times when `pushdminus` might be unset
 alias g='grep'
@@ -12,16 +6,13 @@ alias ge='grep -E'
 alias gei='grep -Ei'
 alias qg='grep -q'
 alias h='head'
-alias l='ls -lAh'
 alias t='tail'
+alias l='ls -lAh'
 alias ft='t -F'
 alias follow='ft'
 alias hist='history'
 alias rnsort='sort -rn'
 
-alias relink='relink -q && read
-?Do you want to restart the shell now? (Y|n)
-&& [[ ! ${(L)REPLY[1]} = n ]] && exec zsh'
 alias reshell='exec $SHELL'
 
 alias -g andyes='&& print yes'
@@ -36,6 +27,8 @@ alias pylatest='pyenv install --list | grep -E "^\s*\d\.\d{1,2}\.\d+$" | sort -t
 alias pil='pyenv install $(pylatest)'
 
 # git overrides
+alias gP='git push'
+alias gp='git pull'
 alias gs='git switch'
 alias gsc='git switch -c'
 alias gs-='git switch -'
@@ -67,6 +60,7 @@ alias gcfg='gcloud config list'
 alias gconfs='gcloud config configurations'
 alias gcfgs='gcloud config configurations list'
 
+# gcloud compute engine
 alias gce='gcloud compute'
 alias gcia='gcloud compute instances start'
 alias gcio='gcloud compute instances stop'
@@ -78,9 +72,11 @@ alias tasks='task list'
 
 alias tw=timew
 alias twd='timew day'
+alias twyd='timew day :yesterday'
 alias tww='timew week'
-alias twwl='timew week :lastweek'
+alias twlw='timew week :lastweek'
 alias twm='timew month'
+alias twlm='timew month :lastmonth'
 alias tws='timew summary :ids'
 alias twa='timew start'
 alias twx='timew cancel'
