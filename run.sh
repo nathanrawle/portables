@@ -27,8 +27,8 @@ export HOME HOST MACHINE
 
 THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
 HERE="$(dirname "$THIS")"
-MACHINE_TOOLS="$HERE/devspec/machine-tools"
-PORTABLE_HOME="$HERE/devspec/home"
+MACHINE_TOOLS="$HERE/machine-tools"
+PORTABLE_HOME="$HERE/home"
 
 # bootstrap a .env file for a new machine, or amend an existing one
 machine=$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')
