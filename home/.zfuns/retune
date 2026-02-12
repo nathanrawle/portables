@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+SCRIPT="${PORTABLES/#"~"/$HOME}"/reconfigure
+/usr/bin/env bash "$SCRIPT" $@
+read -qk '?Would you like to replace the shell? [Y|n] '
+if [[ ! "$REPLY" = n ]]; then
+  echo 'Replacing shell, please wait…'
+  exec $SHELL
+fi

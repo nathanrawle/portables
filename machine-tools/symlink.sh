@@ -1,15 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# This script creates symlinks from the dotfiles into the home directory.
-# It is the final step in the configuration pass.
+# This script creates symlinks into the home directory.
 
 case "$1" in
 install) echo self-install ;;
 config)
   THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
   HERE="$(dirname "$THIS")"
-  DEV_SPEC="$(cd -- "$HERE/.." >/dev/null 2>&1 && pwd)"
-  PORTABLE_HOME=$DEV_SPEC/home
+  PORTABLES="$(dirname "$HERE")"
+  PORTABLE_HOME=$PORTABLES/home
 
   if [[ -n "${HOST-}" ]]; then
     MACHINE=${HOST%%.*}
@@ -60,7 +59,7 @@ config)
   for fundir in pfuns bfuns zfuns; do
     PORTABLE_FUNDIR="$PORTABLE_HOME/.$fundir"
     if [[ -d "$PORTABLE_FUNDIR" ]]; then
-      HOME_FUNDIR=$HOME/$fundir
+      HOME_FUNDIR=$HOME/.$fundir
       echo "Linking $fundir functions"
       mkdir -p "$HOME_FUNDIR"
       for item in "$PORTABLE_FUNDIR"/{.[!.]*,*}; do
