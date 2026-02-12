@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
+HERE="$(dirname "$THIS")"
+
+if [[ $# -gt 0 ]]; then
+  for tool in $@; do
+    sh "${HERE}/machine-tools/${tool}.sh" config
+  done
+else
+  for tool_script in "$HERE"/machine-tools/*.sh; do
+    sh "$tool_script" config
+  done
+fi
