@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-SCRIPT="${PORTABLES/#"~"/$HOME}"/reconfigure
-/usr/bin/env bash "$SCRIPT" $@
+export LOG_NAME="retune"
+/usr/bin/env bash "$PORTABLES"/reconfigure $@
+unset LOG_NAME
 read -qk '?Would you like to replace the shell? [Y|n] '
 if [[ ! "$REPLY" = n ]]; then
   echo 'Replacing shell, please wait…'

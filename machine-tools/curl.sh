@@ -1,4 +1,8 @@
-#!/bin/sh
+#!/usr/bin/env bash
+
+LOG_NAME="${LOG_NAME:+$LOG_NAME.}curl:$1"
+functions log >/dev/null 2>&1 || . "$PORTABLES"/log
+
 case "$1" in
 install)
   command -v curl >/dev/null 2>&1 ||
@@ -9,5 +13,9 @@ install)
     *) echo syspkgmgr:curl ;;
     esac
   ;;
-self-install) xcode-select --install ;;
+self-install)
+  log "installing xcode command-line tools"
+  xcode-select --install
+  log "complete"
+  ;;
 esac

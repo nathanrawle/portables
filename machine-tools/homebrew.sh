@@ -1,9 +1,13 @@
+#!/usr/bin/env bash
+
+LOG_NAME="${LOG_NAME:+$LOG_NAME.}homebrew:$1"
+functions log >/dev/null 2>&1 || . "$PORTABLES"/log
+
 case "$1" in
-  install) echo self-install ;;
+  install) command -v brew >/dev/null 2>&1 || echo self-install ;;
   self-install)
-    if ! command -v brew >/dev/null 2>&1; then
-      echo "Homebrew not found. Installing..."
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    fi
+    log "begin"
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    log "complete"
     ;;
 esac

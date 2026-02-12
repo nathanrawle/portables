@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-SCRIPT="$PORTABLES"/instantiate
-/usr/bin/env bash "$SCRIPT"
+export LOG_NAME="reinstantiate"
+/usr/bin/env bash "$PORTABLES"/instantiate
+unset LOG_NAME
 read -qk '?Would you like to replace the shell? [Y|n] '
 if [[ ! "$REPLY" = n ]]; then
   echo 'Replacing shell, please wait…'
