@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+log () {
+  local MESSAGE=
+  local SECTIONS=
+  local SEVERITY=
+  local LEVEL=1
+  local NAME="${LOG_NAME:-$0}"
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -n) NAME="$2" && shift ;;
+      -e) SEVERITY='[ERROR]' && LEVEL=4 ;;
+      -w) SEVERITY='[WARN]' && LEVEL=3 ;;
+      -i) SEVERITY='[INFO]' && LEVEL=2 ;;
+      -d) SEVERITY='[DEBUG]' && LEVEL=0 ;;
+      -s|--severity) SEVERITY="$2" && shift ;;
+      .*) SECTIONS="${SECTIONS:-}$1" ;;
+      *) MESSAGE="$*" && shift $(( $# - 1 )) ;;
+    esac
+    shift
+  done
+
+  LOG_THRESHOLD=${LOG_THRESHOLD:-1}
+
+  if [[ $LEVEL -ge $LOG_THRESHOLD ]] || [[ -n "${DEBUG-}" ]]; then
+    printf '%s\n' "${SEVERITY:+$SEVERITY }(${NAME}${SECTIONS})${MESSAGE:+ $MESSAGE}"
+  fi
+}
+
