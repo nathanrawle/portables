@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+[[ -n "$LOG_NAME" ]] || LOG_NAME="reconfigure"
+. "$PORTABLES"/log
+export log
+
 THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
 HERE="$(dirname "$THIS")"
 

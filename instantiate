@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-. ./log
-log "Starting setup..."
+
+[[ -n "$LOG_NAME" ]] || LOG_NAME="instantiate"
+. "$PORTABLES"/log
+export log
+log "gathering…"
 
 # --- OS and Package Manager Detection ---
 export OS="$(uname -s)"
@@ -49,7 +52,7 @@ fi
 
 case "$OS" in
 Darwin)
-  log "Detected macOS."
+  log .gather "detected macOS."
   xcode-select -p >/dev/null 2>&1 || xcode-select --install
   SYS_PKG_MANAGER="homebrew"
   PKG_MANAGER_UPDATE="brew update"
@@ -58,52 +61,46 @@ Darwin)
   export HOMEBREW_NO_ENV_HINTS=1
   ;;
 Linux)
-  log "Detected Linux."
+  log .gather "detected Linux."
   if [[ -f /etc/os-release ]]; then
     . /etc/os-release
     case "$ID" in
     ubuntu | debian | pop)
-      log "Detected Debian-based distribution ($PRETTY_NAME)."
+      log .gather .linux "detected Debian-based distribution ($PRETTY_NAME)."
       SYS_PKG_MANAGER="apt"
       PKG_MANAGER_UPDATE="sudo apt-get update"
       PKG_MANAGER_INSTALL="sudo apt-get install -y"
       ;;
     arch)
-      log "Detected Arch Linux."
+      log .gather .linux "detected Arch Linux."
       SYS_PKG_MANAGER="pacman"
       PKG_MANAGER_UPDATE="sudo pacman -Syu"
       PKG_MANAGER_INSTALL="sudo pacman -S --noconfirm"
       ;;
     fedora)
-      log "Detected Fedora."
+      log .gather .linux "detected Fedora."
       SYS_PKG_MANAGER="dnf"
       PKG_MANAGER_UPDATE="sudo dnf check-update"
       PKG_MANAGER_INSTALL="sudo dnf install -y"
       ;;
     *)
-      log "Unsupported Linux distribution: $ID" >&2
+      log -e .gather .linux "unsupported Linux distribution: $ID"
       exit 1
       ;;
     esac
   else
-    log "Cannot determine Linux distribution. /etc/os-release not found." >&2
+    log -e .gather .linux "cannot determine Linux distribution. /etc/os-release not found."
     exit 1
   fi
   ;;
 *)
-  log "Unsupported operating system: $OS" >&2
+  log -e .gather "unsupported operating system: $OS"
   exit 1
   ;;
 esac
 
-# Prime the sudo timestamp
-if echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
-  log "Requesting sudo access upfront..."
-  sudo -v
-fi
-
 # --- 1. Collection Phase ---
-log "Collecting package dependencies from machine-tools..."
+log .gather "collecting package dependencies from machine-tools…"
 
 self_install_scripts=""
 syspkgmgr_install_cmds=""
@@ -152,15 +149,21 @@ for tool_script in "$MACHINE_TOOLS"/*.sh; do
       npm_install_cmds="${npm_install_cmds:+$npm_install_cmds }${install_cmd#npm:}"
       npm_tool_scripts="${npm_tool_scripts:+$npm_tool_scripts$'\n'}$tool_script"
       ;;
-    *) log "Install command not recognised: $install_cmd" ;;
+    *) log -w .gather "install command not recognised: $install_cmd" ;;
     esac
   done
 done
 
+# Prime the sudo timestamp
+if [[ -n "$syspkgmgr_install_cmds" ]] &&
+  echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
+  log -i "$SYS_PKG_MANAGER may need sudo access…"
+  sudo -v
+fi
+
 # --- 2. Execution Phase ---
 
 if [[ -n "$self_install_scripts" ]]; then
-  log "Running self-installers..."
   while IFS= read -r tool_script; do
     sh "$tool_script" self-install
     sh "$tool_script" config
@@ -191,33 +194,34 @@ if [[ -n "$syspkgmgr_install_cmds" ]]; then
     esac
   done
 
-  log "Updating $SYS_PKG_MANAGER..."
+  log ."$SYS_PKG_MANAGER" "updating $SYS_PKG_MANAGER…"
   sh -c "$PKG_MANAGER_UPDATE"
 
   if [[ -n "$core_tools" ]]; then
-    log "Installing system packages: $core_tools"
+    log ."$SYS_PKG_MANAGER" "installing system packages: $core_tools"
     sh -c "$PKG_MANAGER_INSTALL $core_tools"
   fi
 
   if [[ -n "$ext_tools" ]]; then
-    log "Tapping external repositories: $ext_tools"
+    log ."$SYS_PKG_MANAGER" "tapping external repositories: $ext_tools"
     for ext_tool in $ext_tools; do
       sh -c "$PKG_MANAGER_EXT_INSTALL $ext_tool"
     done
   fi
 
-  log "Running system package configurations..."
+  log ."$SYS_PKG_MANAGER" "running system package configurations…"
   while IFS= read -r tool_script; do
     [[ -n "$tool_script" ]] && sh "$tool_script" config
   done <<<"$syspkgmgr_tool_scripts"
 fi
 
 if [[ "${ensure_uv_installed:-0}" -gt 0 ]] && ! command -v uv >/dev/null 2>&1; then
-  log "Installing uv..."
+  log .gather "installing uv…"
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 
 if [[ -n "$uv_install_cmds" ]]; then
+
   [[ "$(command -v uv 2>/dev/null)" = *homebrew* ]] || uv self update
 
   tools=""
@@ -231,7 +235,7 @@ if [[ -n "$uv_install_cmds" ]]; then
 
   if [[ -n "$tools" ]]; then
     tools=$(printf "%s\n" $tools | sort -u | xargs)
-    log "Installing uv tools: $tools"
+    log .uv "installing uv tools: $tools"
     for tool in $tools; do
       tool=$(echo $tool | tr ':' ' ')
       uv tool install $tool
@@ -240,14 +244,14 @@ if [[ -n "$uv_install_cmds" ]]; then
 
   if [[ -n "$pythons" ]]; then
     pythons=$(printf "%s\n" $pythons | sort -u | xargs)
-    log "Installing uv pythons: $pythons"
+    log .uv "installing uv python(s): $pythons"
     for python in $pythons; do
       python=$(echo $python | tr ':' ' ')
       uv python install $python
     done
   fi
 
-  log "Running uv package configurations..."
+  log .uv "running uv package configurations…"
   while IFS= read -r tool_script; do
     [[ -n "$tool_script" ]] && sh "$tool_script" config
   done <<<"$uv_tool_scripts"
@@ -255,10 +259,10 @@ fi
 
 if [[ -n "$pip_install_cmds" ]]; then
   install_list=$(printf "%s\n" $pip_install_cmds | sort -u | xargs)
-  log "Installing user-local pip packages: $install_list"
+  log .pip "installing user-local pip packages: $install_list"
   python3 -m pip install -U pip
   python3 -m pip install --user $install_list
-  log "Running pip package configurations..."
+  log .pip "running pip package configurations…"
   while IFS= read -r tool_script; do
     [[ -n "$tool_script" ]] && sh "$tool_script" config
   done <<<"$pip_tool_scripts"
@@ -266,9 +270,9 @@ fi
 
 if [[ -n "$pipx_install_cmds" ]]; then
   install_list=$(printf "%s\n" $pipx_install_cmds | sort -u | xargs)
-  log "Installing user-local pipx packages: $install_list"
+  log .pipx "installing user-local pipx packages: $install_list"
   pipx install $install_list
-  log "Running pipx package configurations..."
+  log .pipx "running pipx package configurations…"
   while IFS= read -r tool_script; do
     [[ -n "$tool_script" ]] && sh "$tool_script" config
   done <<<"$pipx_tool_scripts"
@@ -276,11 +280,11 @@ fi
 
 if [[ -n "$nvm_install_cmds" ]]; then
   install_list=$(printf "%s\n" $nvm_install_cmds | sort -u | xargs)
-  log "Installing node versions with nvm: $install_list"
+  log .nvm "installing node versions with nvm: $install_list"
   export NVM_DIR="$HOME/.nvm"
   [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
   nvm install "$install_list"
-  log "Running nvm package configurations..."
+  log .nvm "checking for node configurations…"
   while IFS= read -r tool_script; do
     [[ -n "$tool_script" ]] && sh "$tool_script" config
   done <<<"$nvm_tool_scripts"
@@ -288,14 +292,14 @@ fi
 
 if [[ -n "$npm_install_cmds" ]]; then
   install_list=$(printf "%s\n" $npm_install_cmds | sort -u | xargs)
-  log "Installing global npm packages: $install_list"
+  log .npm "installing global npm packages: $install_list"
   export NVM_DIR="$HOME/.nvm"
   [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
   npm install -g $install_list
-  log "Running npm package configurations..."
+  log .npm "running npm package configurations…"
   while IFS= read -r tool_script; do
     [[ -n "$tool_script" ]] && sh "$tool_script" config
   done <<<"$npm_tool_scripts"
 fi
 
-log "Portables instantiated. GLHFDD 🎁"
+log -i "portables instantiated. GLHFDD 🎁"
