@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-LOG_NAME="${LOG_NAME:+$LOG_NAME.}tmux_sssnzr:$1"
+LOG_NAME="${LOG_NAME:+$LOG_NAME.}tmux-sssnzr:$1"
 functions log >/dev/null 2>&1 || . "$PORTABLES"/log
 
 url=https://github.com/ThePrimeagen/tmux-sessionizer.git

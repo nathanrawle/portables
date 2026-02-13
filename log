@@ -6,19 +6,23 @@ log () {
   local SEVERITY=
   local LEVEL=1
   local LEVEL_SET=0
-  local NAME="${LOG_NAME:-$0}"
+  local FILE="${0##*/}"
+  local STEM="${FILE%.*}"
+  local TITLE="${LOG_NAME:-$STEM}"
 
   LOG_THRESHOLD=${LOG_THRESHOLD:-1}
 
   while [[ $# -gt 0 ]]; do
     case $1 in
-      -n) NAME="$2" && shift ;;
+      -t) TITLE="$2" && shift ;;
       -e) SEVERITY='[ERROR]' && LEVEL=4 && LEVEL_SET=1 ;;
       -w) SEVERITY='[WARN]' && LEVEL=3 && LEVEL_SET=1 ;;
       -i) SEVERITY='[INFO]' && LEVEL=2 && LEVEL_SET=1 ;;
+      -n) SEVERITY='[NOTE]' && LEVEL=1 && LEVEL_SET=1 ;;
       -d) SEVERITY='[DEBUG]' && LEVEL=0 && LEVEL_SET=1 ;;
       -s|--severity) SEVERITY="$2" && shift ;;
-      .*) SECTIONS="${SECTIONS:-}$1" ;;
+      -o) USE_STDOUT=1 ;;
+      .*|:*) SECTIONS="${SECTIONS:-}$1" ;;
       *) MESSAGE="$*" && shift $(( $# - 1 )) ;;
     esac
     shift
@@ -30,10 +34,10 @@ log () {
     fi
   done
 
-  if [[ $LEVEL -ge 4 ]]; then
-    printf '%s\n' "${SEVERITY:+$SEVERITY }(${NAME}${SECTIONS})${MESSAGE:+ $MESSAGE}" >&2
+  if [[ $USE_STDOUT ]]; then
+    printf '%s\n' "${SEVERITY:+$SEVERITY }(${TITLE}${SECTIONS})${MESSAGE:+ $MESSAGE}"
   else
-    printf '%s\n' "${SEVERITY:+$SEVERITY }(${NAME}${SECTIONS})${MESSAGE:+ $MESSAGE}"
+    printf '%s\n' "${SEVERITY:+$SEVERITY }(${TITLE}${SECTIONS})${MESSAGE:+ $MESSAGE}" >&2
   fi
 }
 
