@@ -52,7 +52,7 @@ fi
 
 case "$OS" in
 Darwin)
-  log .gather "detected macOS."
+  log .gather "detected macOS"
   xcode-select -p >/dev/null 2>&1 || xcode-select --install
   SYS_PKG_MANAGER="homebrew"
   PKG_MANAGER_UPDATE="brew update"
@@ -61,24 +61,24 @@ Darwin)
   export HOMEBREW_NO_ENV_HINTS=1
   ;;
 Linux)
-  log .gather "detected Linux."
+  log .gather "detected Linux"
   if [[ -f /etc/os-release ]]; then
     . /etc/os-release
     case "$ID" in
     ubuntu | debian | pop)
-      log .gather .linux "detected Debian-based distribution ($PRETTY_NAME)."
+      log .gather .linux "detected Debian-based distribution ($PRETTY_NAME)"
       SYS_PKG_MANAGER="apt"
       PKG_MANAGER_UPDATE="sudo apt-get update"
       PKG_MANAGER_INSTALL="sudo apt-get install -y"
       ;;
     arch)
-      log .gather .linux "detected Arch Linux."
+      log .gather .linux "detected Arch Linux"
       SYS_PKG_MANAGER="pacman"
       PKG_MANAGER_UPDATE="sudo pacman -Syu"
       PKG_MANAGER_INSTALL="sudo pacman -S --noconfirm"
       ;;
     fedora)
-      log .gather .linux "detected Fedora."
+      log .gather .linux "detected Fedora"
       SYS_PKG_MANAGER="dnf"
       PKG_MANAGER_UPDATE="sudo dnf check-update"
       PKG_MANAGER_INSTALL="sudo dnf install -y"
@@ -89,7 +89,7 @@ Linux)
       ;;
     esac
   else
-    log -e .gather .linux "cannot determine Linux distribution. /etc/os-release not found."
+    log -e .gather .linux "cannot determine Linux distribution; /etc/os-release not found"
     exit 1
   fi
   ;;
@@ -237,8 +237,7 @@ if [[ -n "$uv_install_cmds" ]]; then
     tools=$(printf "%s\n" $tools | sort -u | xargs)
     log .uv "installing uv tools: $tools"
     for tool in $tools; do
-      tool=$(echo $tool | tr ':' ' ')
-      uv tool install $tool
+      uv tool install ${tool//:/ }
     done
   fi
 
@@ -246,8 +245,7 @@ if [[ -n "$uv_install_cmds" ]]; then
     pythons=$(printf "%s\n" $pythons | sort -u | xargs)
     log .uv "installing uv python(s): $pythons"
     for python in $pythons; do
-      python=$(echo $python | tr ':' ' ')
-      uv python install $python
+      uv python install ${python//:/ }
     done
   fi
 
