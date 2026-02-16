@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 case "$1" in
-    install) command -v nvim >/dev/null 2>&1 || echo syspkgmgr:neovim node:neovim ;;
+    install) command -v nvim >/dev/null 2>&1 || echo syspkgmgr:neovim ;;
 esac
