@@ -3,7 +3,7 @@
 export LOG_NAME="retune"
 /usr/bin/env bash "$PORTABLES"/reconfigure $@
 unset LOG_NAME
-read -qk '?Would you like to replace the shell? [Y|n] '
+read -k '?Would you like to replace the shell now? [Y|n] '
 if [[ ! "$REPLY" = n ]]; then
   echo 'Replacing shell, please wait…'
   exec $SHELL
