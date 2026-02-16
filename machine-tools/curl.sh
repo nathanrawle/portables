@@ -16,6 +16,5 @@ install)
 self-install)
   log "installing xcode command-line tools"
   xcode-select --install
-  log "complete"
   ;;
 esac

@@ -2,18 +2,22 @@
 
 set -euo pipefail
 
-[[ -n "$LOG_NAME" ]] || LOG_NAME="instantiate"
-. "$PORTABLES"/log
-export log
+THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
+HERE="$(dirname "$THIS")"
+MACHINE_TOOLS="$HERE/machine-tools"
+PORTABLE_HOME="$HERE/home"
+
+[[ -n "${LOG_NAME-}" ]] || LOG_NAME="instantiate"
+. "$HERE"/log
 log "gathering…"
 
 # --- OS and Package Manager Detection ---
-export OS="$(uname -s)"
+OS="$(uname -s)"
 PKG_MANAGER_UPDATE=""
 PKG_MANAGER_INSTALL=""
 PKG_MANAGER_EXT_INSTALL=""
 
-if [[ -z "$HOME" ]]; then
+if [[ -z "${HOME-}" ]]; then
   HOME="$(realpath ~)"
 fi
 
@@ -27,12 +31,7 @@ else
   MACHINE=${HOST%%.*}
 fi
 
-export HOME HOST MACHINE
-
-THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
-HERE="$(dirname "$THIS")"
-MACHINE_TOOLS="$HERE/machine-tools"
-PORTABLE_HOME="$HERE/home"
+export MACHINE_TOOLS PORTABLE_HOME log OS HOME HOST
 
 # bootstrap a .env file for a new machine, or amend an existing one
 machine=$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')
@@ -54,6 +53,10 @@ case "$OS" in
 Darwin)
   log .gather "detected macOS"
   xcode-select -p >/dev/null 2>&1 || xcode-select --install
+  if [[ -n "$(bash ./machine-tools/homebrew.sh install)" ]]; then
+    bash ./machine-tools/homebrew.sh self-install
+  fi
+  export PATH="${PATH}:/opt/homebrew/bin"
   SYS_PKG_MANAGER="homebrew"
   PKG_MANAGER_UPDATE="brew update"
   PKG_MANAGER_INSTALL="brew install"
