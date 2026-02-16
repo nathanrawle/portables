@@ -9,6 +9,7 @@ log () {
   local FILE="${0##*/}"
   local STEM="${FILE%.*}"
   local TITLE="${LOG_NAME:-$STEM}"
+  local USE_STDOUT=0
 
   LOG_THRESHOLD=${LOG_THRESHOLD:-1}
 
@@ -34,7 +35,7 @@ log () {
     fi
   done
 
-  if [[ $USE_STDOUT ]]; then
+  if [[ $USE_STDOUT -gt 0 ]]; then
     printf '%s\n' "${SEVERITY:+$SEVERITY }(${TITLE}${SECTIONS})${MESSAGE:+ $MESSAGE}"
   else
     printf '%s\n' "${SEVERITY:+$SEVERITY }(${TITLE}${SECTIONS})${MESSAGE:+ $MESSAGE}" >&2
