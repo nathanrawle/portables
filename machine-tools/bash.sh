@@ -9,7 +9,6 @@ case "$1" in
     if [ ! -d $HOME/.oh-my-bash ]; then
       log "installing oh-my-bash"
       bash -c "$(curl -fsSL https://raw.githubusercontent.com/ohmybash/oh-my-bash/master/tools/install.sh)"
-      log "complete"
     fi
     ;;
 esac
