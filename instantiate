@@ -124,7 +124,7 @@ nvm_tool_scripts=""
 npm_tool_scripts=""
 
 for tool_script in "$MACHINE_TOOLS"/*.sh; do
-  install_cmds="$(sh "$tool_script" install)"
+  install_cmds="$(bash "$tool_script" install)"
   for install_cmd in $install_cmds; do
     case "$install_cmd" in
     "") continue ;;
