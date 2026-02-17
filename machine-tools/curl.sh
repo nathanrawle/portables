@@ -8,12 +8,12 @@ install)
   command -v curl >/dev/null 2>&1 ||
     case "$OS" in
     Darwin)
-      echo self-install
+      echo xcode
       ;;
     *) echo syspkgmgr:curl ;;
     esac
   ;;
-self-install)
+xcode)
   log "installing xcode command-line tools"
   xcode-select --install
   ;;

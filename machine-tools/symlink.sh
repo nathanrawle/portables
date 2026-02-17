@@ -5,7 +5,6 @@
 functions log >/dev/null 2>&1 || . "$PORTABLES"/log
 
 case "$1" in
-install) echo self-install ;;
 config)
   shopt -s nullglob
 
