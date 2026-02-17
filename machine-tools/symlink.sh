@@ -40,7 +40,7 @@ config)
     [[ -f "$item" ]] || [[ -d "$item" ]] || continue
     destination="$HOME_DOTCONFIG/${item##*/}"
     rm -rf "$destination"
-    ln -shf "$item" "$destination" &&
+    ln -sf "$item" "$destination" &&
       log -d .symln "  linked $item -> $destination"
   done
 
@@ -55,7 +55,7 @@ config)
         [[ -f "$item" ]] || [[ -d "$item" ]] || continue
         destination="$HOME_LIBRARY/${item##*/}"
         rm -rf "$destination"
-        ln -shf "$item" "$destination" &&
+        ln -sf "$item" "$destination" &&
           log -d .symln "  linked $item -> $destination"
       done
     fi
@@ -75,7 +75,7 @@ config)
         [[ -f "$item" ]] || continue
         destination="$HOME_FUNDIR/${item##*/}"
         rm -rf "$destination"
-        ln -shf "$item" "$destination" &&
+        ln -sf "$item" "$destination" &&
           log -d .symln "  linked $item -> $destination"
       done
     fi
