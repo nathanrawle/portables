@@ -51,6 +51,8 @@ fi
 
 . "$MACHENV"
 
+bash "$MACHINE_TOOLS"/symlink.sh config
+
 case "$OS" in
 Darwin)
   log .gather "detected macOS"
@@ -105,7 +107,18 @@ Linux)
   ;;
 esac
 
-# --- 1. Collection Phase ---
+log ."$SYS_PKG_MANAGER" "updating ${SYS_PKG_MANAGER}…"
+bash -c "$PKG_MANAGER_UPDATE"
+
+for tool in curl git; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    pre_tools="${pre_tools:+$pre_tools }$tool"
+  fi
+done
+[[ -n "${pre_tools-}" ]] &&
+  log "pre-installing: $pre_tools" &&
+  bash -c "$PKG_MANAGER_INSTALL $pre_tools"
+
 log .gather "collecting package dependencies from machine-tools…"
 
 self_install_scripts=""
@@ -195,13 +208,10 @@ if [[ -n "$syspkgmgr_install_cmds" ]]; then
   ext_tools=""
   for item in $syspkgmgr_install_cmds; do
     case $item in
-    *:*) ext_tools="${ext_tools:+$ext_tools }${item#*:}" ;;
-    *) core_tools="${core_tools:+$core_tools }$item" ;;
+      ext:*) ext_tools="${ext_tools:+$ext_tools }${item#*:}" ;;
+      *) core_tools="${core_tools:+$core_tools }$item" ;;
     esac
   done
-
-  log ."$SYS_PKG_MANAGER" "updating ${SYS_PKG_MANAGER}…"
-  bash -c "$PKG_MANAGER_UPDATE"
 
   if [[ -n "$core_tools" ]]; then
     log ."$SYS_PKG_MANAGER" "installing system packages: $core_tools"
@@ -209,9 +219,9 @@ if [[ -n "$syspkgmgr_install_cmds" ]]; then
   fi
 
   if [[ -n "$ext_tools" ]]; then
-    log ."$SYS_PKG_MANAGER" "tapping external repositories: $ext_tools"
+    log ."$SYS_PKG_MANAGER" "tapping extension tools: $ext_tools"
     for ext_tool in $ext_tools; do
-      bash -c "$PKG_MANAGER_EXT_INSTALL $ext_tool"
+      bash -c "$PKG_MANAGER_EXT_INSTALL ${ext_tool//:/ }"
     done
   fi
 
