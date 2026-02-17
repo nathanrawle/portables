@@ -200,7 +200,7 @@ if [[ -n "$syspkgmgr_install_cmds" ]]; then
     esac
   done
 
-  log ."$SYS_PKG_MANAGER" "updating $SYS_PKG_MANAGER…"
+  log ."$SYS_PKG_MANAGER" "updating ${SYS_PKG_MANAGER}…"
   bash -c "$PKG_MANAGER_UPDATE"
 
   if [[ -n "$core_tools" ]]; then

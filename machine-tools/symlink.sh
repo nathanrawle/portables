@@ -23,9 +23,9 @@ config)
 
   log .symln "symlinking…"
 
-  items="$PORTABLE_HOME"/{.[!.]*,*}
+  items=( "$PORTABLE_HOME"/{.[!.]*,*} )
   [[ -n "$items" ]] && log .symln "linking homedir files…"
-  for item in $items; do
+  for item in ${items[@]}; do
     [[ -f "$item" ]] || continue
     destination="$HOME/${item##*/}"
     ln -sf "$item" "$destination" &&
@@ -35,9 +35,9 @@ config)
   PORTABLE_DOTCONFIG="$PORTABLE_HOME/.config"
   HOME_DOTCONFIG="$HOME/.config"
 
-  items="$PORTABLE_DOTCONFIG"/{.[!.]*,*}
+  items=( "$PORTABLE_DOTCONFIG"/{.[!.]*,*} )
   [[ -n "$items" ]] && log .symln "linking .config entries…"
-  for item in $items; do
+  for item in ${items[@]}; do
     [[ -f "$item" ]] || [[ -d "$item" ]] || continue
     destination="$HOME_DOTCONFIG/${item##*/}"
     rm -rf "$destination"
@@ -50,9 +50,9 @@ config)
     PORTABLE_LIBRARY="$PORTABLE_HOME/Library"
     HOME_LIBRARY="$HOME/Library"
     if [ -d "$PORTABLE_LIBRARY" ]; then
-      items="$PORTABLE_LIBRARY"/{.[!.]*,*}
+      items=( "$PORTABLE_LIBRARY"/{.[!.]*,*} )
       [[ -n "$items" ]] && log .symln "linking macOS Library entries…"
-      for item in $items; do
+      for item in ${items[@]}; do
         [[ -f "$item" ]] || [[ -d "$item" ]] || continue
         destination="$HOME_LIBRARY/${item##*/}"
         rm -rf "$destination"
@@ -71,8 +71,8 @@ config)
       log .symln "linking $fundir functions"
       mkdir -p "$HOME_FUNDIR"
 
-      items="$PORTABLE_FUNDIR"/{.[!.]*,*}
-      for item in $items; do
+      items=( "$PORTABLE_FUNDIR"/{.[!.]*,*} )
+      for item in ${items[@]}; do
         [[ -f "$item" ]] || continue
         destination="$HOME_FUNDIR/${item##*/}"
         rm -rf "$destination"
