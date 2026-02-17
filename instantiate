@@ -39,7 +39,7 @@ MACHENV="$PORTABLE_HOME/.$machine.env"
 PRTBLS_LN="export PORTABLES=${HERE}"
 
 if [[ -e "$MACHENV" ]]; then
-  if ! fgrep -Eq "$PRTBLS_LN" "$MACHENV"; then
+  if ! grep -Eq "$PRTBLS_LN" "$MACHENV"; then
     sed -Ei.bak '/^(export )?PORTABLES=/d' "$MACHENV" &&
       rm "$MACHENV".bak ||
       mv -f "$MACHENV"{.bak,}
