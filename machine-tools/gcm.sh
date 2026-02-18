@@ -13,10 +13,10 @@ case "$1" in
       *) echo syspkgmgr:git-credential-oauth ;;
     esac
     ;;
-  self-install)
-    bash <(curl -L https://aka.ms/gcm/linux-install-source.sh) -y
-    ;;
   config)
-    git-credential-manager configure
+    case "$OS" in
+      Darwin) git-credential-manager configure ;;
+      *) git-credential-oauth configure ;;
+    esac
     ;;
 esac
