@@ -10,7 +10,7 @@ case "$1" in
       Darwin)
         echo syspkgmgr:ext:--cask:git-credential-manager
         ;;
-      *) echo self-install ;;
+      *) echo syspkgmgr:git-credential-oauth ;;
     esac
     ;;
   self-install)
