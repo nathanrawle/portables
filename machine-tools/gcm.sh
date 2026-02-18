@@ -14,7 +14,7 @@ case "$1" in
     esac
     ;;
   self-install)
-    curl -L https://aka.ms/gcm/linux-install-source.sh | sh
+    bash <(curl -L https://aka.ms/gcm/linux-install-source.sh) -y
     ;;
   config)
     git-credential-manager configure
