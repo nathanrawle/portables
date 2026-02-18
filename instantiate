@@ -173,13 +173,6 @@ for tool_script in "$MACHINE_TOOLS"/*.sh; do
   done
 done
 
-# Prime the sudo timestamp
-if [[ -n "$syspkgmgr_install_cmds" ]] &&
-  echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
-  log -i "$SYS_PKG_MANAGER may need sudo access…"
-  sudo -v
-fi
-
 # --- 2. Execution Phase ---
 
 if [[ -n "$self_install_scripts" ]]; then
@@ -187,6 +180,13 @@ if [[ -n "$self_install_scripts" ]]; then
     bash "$tool_script" self-install
     bash "$tool_script" config
   done <<<"$self_install_scripts"
+fi
+
+# Prime the sudo timestamp
+if [[ -n "$syspkgmgr_install_cmds" ]] &&
+  echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
+  log -i "$SYS_PKG_MANAGER may need sudo access…"
+  sudo -v
 fi
 
 if [[ -n "$uv_install_cmds" ]] &&
