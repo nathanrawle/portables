@@ -15,7 +15,5 @@
 [core]
 	excludesfile = /Users/nathan/.config/git/ignore
 	excludesfile = /Users/nathan/.gitignore
-[credential]
-	helper = /usr/local/bin/git-credential-manager
 [credential "https://dev.azure.com"]
 	useHttpPath = true
