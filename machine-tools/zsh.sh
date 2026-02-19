@@ -65,7 +65,7 @@ case "$1" in
           log "complete"
         else
           log "installing zsh-autocomplete"
-          git clone --depth=1 https://github.com/marlon-richert/zsh-autocomplete.git "$ZSH_AUTOCOMPLETE_DIR"
+          git clone --depth=1 https://github.com/marlonrichert/zsh-autocomplete.git "$ZSH_AUTOCOMPLETE_DIR"
           log "complete"
         fi
 

@@ -4,7 +4,7 @@ LOG_NAME="${LOG_NAME:+$LOG_NAME.}homebrew:$1"
 functions log >/dev/null 2>&1 || . "$PORTABLES"/log
 
 [[ -n "$OS" ]] || OS="$(uname -s)"
-[[ "$OS" = Darwin ]] || exit
+[[ "$OS" = Darwin ]] || exit 0
 case "$1" in
   install)
     command -v brew >/dev/null 2>&1 ||

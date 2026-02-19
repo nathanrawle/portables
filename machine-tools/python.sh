@@ -10,8 +10,8 @@ case "$1" in
     case "$OS" in
       # on macOS, I only really need brew python to get the essential system deps, like
       # openssl & readline
-      Darwin) [[ -x "$(brew --prefix)/bin/python3" ]] || echo "syspkgmgr:python" ;;
-      *) echo "syspkgmgr:python" ;;
+      Darwin) [[ -x "$(brew --prefix)/bin/python3" ]] || echo "syspkgmgr:python3" ;;
+      *) echo "syspkgmgr:python3" ;;
     esac
     echo "uv:python:--default:--preview-features:python-install-default"
     ;;
