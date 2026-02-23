@@ -19,7 +19,7 @@ case "$1" in
       zip=Fira_Code_v${version}.zip
       curl --fail --location --show-error https://github.com/tonsky/FiraCode/releases/download/${version}/${zip} --output ${zip}
       unzip -o -q -d ${fonts_dir} ${zip}
+      fc-cache -f
       rm ${zip}
       ;;
-    config) fc-cache -f ;;
 esac

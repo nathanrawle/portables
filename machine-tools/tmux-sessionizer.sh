@@ -11,19 +11,15 @@ target=~/.local/scripts/tmux-sessionizer
 case "$1" in
 install) command -v tmux-sessionizer >/dev/null 2>&1 || echo self-install ;;
 self-install)
-  log "beginning"
+  log "installing tmux-sessionizer"
   [[ -s "$source" ]] ||
     git clone --depth 1 "$url" "$sauce"/tmux-sessionizer
-
-  [[ -x "$source" ]] || chmod +x "$source"
-
-  mkdir -p ~/.local/scripts
-  rm -f "$target"
-  ln -shf "$source" "$target"
-  log "complete"
   ;;
 config)
-  ln -shf "$source" "$target"
+  [[ -x "$source" ]] || chmod +x "$source"
+  mkdir -p ~/.local/scripts
+  rm -f "$target"
+  ln -sf "$source" "$target"
   [[ "$PATH": = *.local/scripts:* ]] ||
     log -i "make sure ~/.local/scripts gets added to your path"
   ;;
