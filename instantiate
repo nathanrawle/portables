@@ -31,7 +31,7 @@ else
   MACHINE=${HOST%%.*}
 fi
 
-export MACHINE_TOOLS PORTABLE_HOME log OS HOME HOST
+export MACHINE_TOOLS PORTABLE_HOME log LOG_NAME OS HOME HOST
 
 # bootstrap a .env file for a new machine, or amend an existing one
 machine=$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')

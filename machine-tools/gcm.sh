@@ -5,12 +5,15 @@ functions log >/dev/null 2>&1 || . "$PORTABLES"/log
 
 case "$1" in
   install)
-    command -v git-credential-manager >/dev/null 2>&1 \
-    || case "$OS" in
+    case "$OS" in
       Darwin)
-        echo syspkgmgr:ext:--cask:git-credential-manager
+        command -v git-credential-manager >/dev/null 2>&1 \
+        || echo syspkgmgr:ext:--cask:git-credential-manager
         ;;
-      *) echo syspkgmgr:git-credential-oauth ;;
+      *)
+        command -v git-credential-oauth >/dev/null 2>&1 \
+        || echo syspkgmgr:git-credential-oauth
+        ;;
     esac
     ;;
   config)
