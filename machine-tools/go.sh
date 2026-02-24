@@ -11,18 +11,23 @@ case "$1" in
   self-install)
     log "installing go"
     OS="${OS:-$(uname -s)}"
-    case "${OS}-$(uname -m)" in
-      Darwin-aarch_64)
+    OS_ARCH="${OS}-$(uname -m)"
+    case "$OS_ARCH" in
+      Darwin-arm_64)
         os_arch="darwin-arm64"
         ;;
       Darwin-x86_64)
         os_arch="darwin-amd64"
         ;;
-      Linux-aarch_64)
+      Linux-arm_64)
         os_arch="linux-arm64"
         ;;
       Linux-x86_64)
         os_arch="linux-amd64"
+        ;;
+      *)
+        log -e "OS-Arch combo not supported: $OS_ARCH"
+        exit 0
         ;;
     esac
 
