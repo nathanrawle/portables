@@ -1,47 +1,62 @@
 #!/usr/bin/env bash
 
-# This script creates symlinks into the home directory.
+shopt -s nullglob
 
-functions log >/dev/null 2>&1 || . "$PORTABLES"/log
+THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
+PORTABLES="$(dirname "$THIS")"
+PORTABLE_HOME="$PORTABLES/home"
+HOME=${HOME:-~}
 
-case "$1" in
-config)
-  shopt -s nullglob
+LOG_NAME="${LOGNAME:+$LOG_NAME.}${THIS##*/}"
+functions log >/dev/null 2>&1 || . ./log
 
-  THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
-  HERE="$(dirname "$THIS")"
-  PORTABLES="$(dirname "$HERE")"
-  PORTABLE_HOME=$PORTABLES/home
+if [[ -n "${HOST-}" ]]; then
+  MACHINE=${HOST%%.*}
+else
+  MACHINE=$(hostname 2>/dev/null) || MACHINE=mystery-box
+  MACHINE=${MACHINE%%.*}
+fi
 
-  if [[ -n "${HOST-}" ]]; then
-    MACHINE=${HOST%%.*}
-  else
-    MACHINE=$(hostname 2>/dev/null) || MACHINE=mystery-box
-    MACHINE=${MACHINE%%.*}
-  fi
-
-  log .symln "symlinking…"
+if [[ $# -gt 0 ]]; then
+  log "symlinking ${*}…"
+  for fn in "$@"; do
+    item="${PORTABLE_HOME}/${fn}"
+    destination="$HOME/${fn}"
+    if [[ -f "$item" ]]; then
+      ln -sf "$item" "$destination" &&
+        log -d "  linked $item -> $destination"
+    elif [[ -e "$destination" ]] && [[ -d "$item" ]]; then
+      read -k "?you're about to replace $destination with the directory $item. Continue? [y|N]\n"
+      if [[ "$REPLY" = y ]]; then
+        rm -rf "$destination" &&
+          ln -sf "$item" "$destination" &&
+          log -d "  linked $item -> $destination"
+      fi
+    fi
+  done
+else
+  log "establishing symlinks…"
 
   items=( "$PORTABLE_HOME"/{.[!.]*,*} )
-  [[ -n "$items" ]] && log .symln "linking homedir files…"
+  [[ -n "$items" ]] && log "linking homedir files…"
   for item in ${items[@]}; do
     [[ -f "$item" ]] || continue
     destination="$HOME/${item##*/}"
     ln -sf "$item" "$destination" &&
-      log -d .symln "  linked $item -> $destination"
+      log -d "  linked $item -> $destination"
   done
 
   PORTABLE_DOTCONFIG="$PORTABLE_HOME/.config"
   HOME_DOTCONFIG="$HOME/.config"
 
   items=( "$PORTABLE_DOTCONFIG"/{.[!.]*,*} )
-  [[ -n "$items" ]] && log .symln "linking .config entries…"
+  [[ -n "$items" ]] && log "linking .config entries…"
   for item in ${items[@]}; do
     [[ -f "$item" ]] || [[ -d "$item" ]] || continue
     destination="$HOME_DOTCONFIG/${item##*/}"
     rm -rf "$destination"
     ln -sf "$item" "$destination" &&
-      log -d .symln "  linked $item -> $destination"
+      log -d "  linked $item -> $destination"
   done
 
   # --- 3. Link contents of Library directory (macOS) ---
@@ -50,13 +65,13 @@ config)
     HOME_LIBRARY="$HOME/Library"
     if [ -d "$PORTABLE_LIBRARY" ]; then
       items=( "$PORTABLE_LIBRARY"/{.[!.]*,*} )
-      [[ -n "$items" ]] && log .symln "linking macOS Library entries…"
+      [[ -n "$items" ]] && log "linking macOS Library entries…"
       for item in ${items[@]}; do
         [[ -f "$item" ]] || [[ -d "$item" ]] || continue
         destination="$HOME_LIBRARY/${item##*/}"
         rm -rf "$destination"
         ln -sf "$item" "$destination" &&
-          log -d .symln "  linked $item -> $destination"
+          log -d "  linked $item -> $destination"
       done
     fi
   fi
@@ -67,7 +82,7 @@ config)
 
     if [[ -d "$PORTABLE_FUNDIR" ]]; then
       HOME_FUNDIR=$HOME/.$fundir
-      log .symln "linking $fundir functions"
+      log "linking $fundir functions"
       mkdir -p "$HOME_FUNDIR"
 
       items=( "$PORTABLE_FUNDIR"/{.[!.]*,*} )
@@ -76,13 +91,12 @@ config)
         destination="$HOME_FUNDIR/${item##*/}"
         rm -rf "$destination"
         ln -sf "$item" "$destination" &&
-          log -d .symln "  linked $item -> $destination"
+          log -d "  linked $item -> $destination"
       done
     fi
   done
+fi
 
-  log .symln "symlinking complete."
+log "symlinking complete."
 
-  shopt -u nullglob
-  ;;
-esac
+shopt -u nullglob
