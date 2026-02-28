@@ -108,14 +108,10 @@ Linux)
   ;;
 esac
 
-# Prime the sudo timestamp
-if [[ -n "$syspkgmgr_install_cmds" ]] &&
-  echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
-  log -i "$SYS_PKG_MANAGER may need sudo access…"
-  sudo -v
-fi
-
 log ."$SYS_PKG_MANAGER" "updating ${SYS_PKG_MANAGER}…"
+if echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
+  log -i ."$SYS_PKG_MANAGER" "$SYS_PKG_MANAGER may request sudo access…"
+fi
 bash -c "$PKG_MANAGER_UPDATE"
 
 for tool in curl git; do
