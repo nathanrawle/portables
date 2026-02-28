@@ -18,9 +18,11 @@ case "$1" in
     xcode-select --install
     ;;
   config)
-    log -d "configuring global git configurations…"
-    git config --global user.name "$USER_NAME" # these can be passed from private portables
-    git config --global user.email "$USER_EMAIL"
+    log
+    [[ -n "$GIT_NAME" ]] || read -p 'What name should appear on your commits? ' GIT_NAME
+    [[ -n "$GIT_EMAIL" ]] || read -p 'What email should git use? ' GIT_EMAIL
+    git config --global user.name "$GIT_NAME"
+    git config --global user.email "$GIT_EMAIL"
     git config --global --unset-all core.excludesfile 2>/dev/null || true # Ignore error if not set
     git config --global --add core.excludesfile "$HOME/.config/git/ignore"
     git config --global --add core.excludesfile "$HOME/.gitignore"
