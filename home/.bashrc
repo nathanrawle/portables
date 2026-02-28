@@ -41,4 +41,4 @@ plugins=(
 )
 
 source "$OSH"/oh-my-bash.sh
-
+source ~/.aliases.sh

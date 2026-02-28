@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
-[[ -n "$LOG_NAME" ]] || LOG_NAME="reconfigure"
-. "$PORTABLES"/log
-export log
-
 THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
 HERE="$(dirname "$THIS")"
+
+[[ -n "$LOG_NAME" ]] || LOG_NAME="configure"
+. "$HERE"/log
+export log
 
 if [[ $# -gt 0 ]]; then
   for tool in $@; do

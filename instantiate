@@ -9,7 +9,9 @@ PORTABLE_HOME="$HERE/home"
 
 [[ -n "${LOG_NAME-}" ]] || LOG_NAME="instantiate"
 . "$HERE"/log
-log "gathering…"
+
+log "🎁 ${LOG_NAME%e}ing…"
+bash "$HERE"/symlinks
 
 # --- OS and Package Manager Detection ---
 OS="$(uname -s)"
@@ -51,14 +53,13 @@ fi
 
 . "$MACHENV"
 
-bash "$MACHINE_TOOLS"/symlink.sh config
-
+log "gathering requirements…"
 case "$OS" in
 Darwin)
   log .gather "detected macOS"
   xcode-select -p >/dev/null 2>&1 || xcode-select --install
-  if [[ -n "$(bash ./machine-tools/homebrew.sh install)" ]]; then
-    bash ./machine-tools/homebrew.sh self-install
+  if [[ "$(bash "$HERE"/machine-tools/homebrew.sh install)" = self-install ]]; then
+    bash "$HERE"/machine-tools/homebrew.sh self-install
   fi
   export PATH="${PATH}:/opt/homebrew/bin"
   SYS_PKG_MANAGER="homebrew"
@@ -106,6 +107,13 @@ Linux)
   exit 1
   ;;
 esac
+
+# Prime the sudo timestamp
+if [[ -n "$syspkgmgr_install_cmds" ]] &&
+  echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
+  log -i "$SYS_PKG_MANAGER may need sudo access…"
+  sudo -v
+fi
 
 log ."$SYS_PKG_MANAGER" "updating ${SYS_PKG_MANAGER}…"
 bash -c "$PKG_MANAGER_UPDATE"
@@ -180,13 +188,6 @@ if [[ -n "$self_install_scripts" ]]; then
     bash "$tool_script" self-install
     bash "$tool_script" config
   done <<<"$self_install_scripts"
-fi
-
-# Prime the sudo timestamp
-if [[ -n "$syspkgmgr_install_cmds" ]] &&
-  echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
-  log -i "$SYS_PKG_MANAGER may need sudo access…"
-  sudo -v
 fi
 
 if [[ -n "$uv_install_cmds" ]] &&
