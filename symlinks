@@ -7,7 +7,7 @@ PORTABLES="$(dirname "$THIS")"
 PORTABLE_HOME="$PORTABLES/home"
 HOME=${HOME:-~}
 
-LOG_NAME="${LOGNAME:+$LOG_NAME.}${THIS##*/}"
+LOG_NAME="${LOG_NAME:+$LOG_NAME.}${THIS##*/}"
 functions log >/dev/null 2>&1 || . ./log
 
 if [[ -n "${HOST-}" ]]; then
@@ -19,18 +19,19 @@ fi
 
 if [[ $# -gt 0 ]]; then
   log "symlinking ${*}…"
-  for fn in "$@"; do
+  for fn in $@; do
     item="${PORTABLE_HOME}/${fn}"
     destination="$HOME/${fn}"
     if [[ -f "$item" ]]; then
       ln -sf "$item" "$destination" &&
-        log -d "  linked $item -> $destination"
+        log -d "linked $item -> $destination"
     elif [[ -e "$destination" ]] && [[ -d "$item" ]]; then
-      read -k "?you're about to replace $destination with the directory $item. Continue? [y|N]\n"
+      echo "you're about to replace $destination with the directory $item"
+      read -n 1 -p "Continue? [y|N] "
       if [[ "$REPLY" = y ]]; then
         rm -rf "$destination" &&
           ln -sf "$item" "$destination" &&
-          log -d "  linked $item -> $destination"
+          log -d "linked $item -> $destination"
       fi
     fi
   done
@@ -43,7 +44,7 @@ else
     [[ -f "$item" ]] || continue
     destination="$HOME/${item##*/}"
     ln -sf "$item" "$destination" &&
-      log -d "  linked $item -> $destination"
+      log -d "linked $item -> $destination"
   done
 
   PORTABLE_DOTCONFIG="$PORTABLE_HOME/.config"
@@ -56,7 +57,7 @@ else
     destination="$HOME_DOTCONFIG/${item##*/}"
     rm -rf "$destination"
     ln -sf "$item" "$destination" &&
-      log -d "  linked $item -> $destination"
+      log -d "linked $item -> $destination"
   done
 
   # --- 3. Link contents of Library directory (macOS) ---
@@ -71,7 +72,7 @@ else
         destination="$HOME_LIBRARY/${item##*/}"
         rm -rf "$destination"
         ln -sf "$item" "$destination" &&
-          log -d "  linked $item -> $destination"
+          log -d "linked $item -> $destination"
       done
     fi
   fi
@@ -91,7 +92,7 @@ else
         destination="$HOME_FUNDIR/${item##*/}"
         rm -rf "$destination"
         ln -sf "$item" "$destination" &&
-          log -d "  linked $item -> $destination"
+          log -d "linked $item -> $destination"
       done
     fi
   done

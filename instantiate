@@ -10,6 +10,8 @@ PORTABLE_HOME="$HERE/home"
 [[ -n "${LOG_NAME-}" ]] || LOG_NAME="instantiate"
 . "$HERE"/log
 
+export LOG_NAME log
+
 log "🎁 ${LOG_NAME%e}ing…"
 bash "$HERE"/symlinks
 
@@ -33,7 +35,7 @@ else
   MACHINE=${HOST%%.*}
 fi
 
-export MACHINE_TOOLS PORTABLE_HOME log LOG_NAME OS HOME HOST
+export MACHINE_TOOLS PORTABLE_HOME OS HOME HOST
 
 # bootstrap a .env file for a new machine, or amend an existing one
 machine=$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')
@@ -205,8 +207,8 @@ if [[ -n "$syspkgmgr_install_cmds" ]]; then
   ext_tools=""
   for item in $syspkgmgr_install_cmds; do
     case $item in
-      ext:*) ext_tools="${ext_tools:+$ext_tools }${item#*:}" ;;
-      *) core_tools="${core_tools:+$core_tools }$item" ;;
+    ext:*) ext_tools="${ext_tools:+$ext_tools }${item#*:}" ;;
+    *) core_tools="${core_tools:+$core_tools }$item" ;;
     esac
   done
 
