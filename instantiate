@@ -315,4 +315,4 @@ if [[ -n "$npm_install_cmds" ]]; then
   done <<<"$npm_tool_scripts"
 fi
 
-log -i "portables instantiated. GLHFDD 🎁"
+log -i "portables instantiated. GLHFDD 🥡"
