@@ -65,3 +65,20 @@ vim.api.nvim_create_autocmd("BufEnter", {
     vim.keymap.set("n", "u", "<C-U>", { desc = "Half-page up", buffer = args.buf, silent = true })
   end,
 })
+
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  group = my_augroup,
+  desc = "Rotate lsp log files when large",
+  callback = function()
+    local path = vim.lsp.get_log_path()
+
+    -- file size via Vimscript function (works everywhere Neovim does)
+    local size = vim.fn.getfsize(path)
+    if size > 50 * 1024 * 1024 then
+      local date = os.date("%Y-%m-%d")
+      local rotated = path .. "." .. date
+      -- rename() returns 0 on success, non-zero on failure
+      vim.fn.rename(path, rotated)
+    end
+  end,
+})
