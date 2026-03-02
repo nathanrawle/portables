@@ -238,6 +238,18 @@ return {
           -- cmd = { ... },
           -- filetypes = { ... },
           -- capabilities = {},
+          root_dir = function(fname)
+            local util = require("lspconfig.util")
+            local nvim_config = vim.fn.stdpath("config")
+
+            -- If we're editing files inside the Neovim config, treat that as the project root
+            if fname:sub(1, #nvim_config) == nvim_config then
+              return nvim_config
+            end
+
+            -- Otherwise, use the normal LuaLS root detection
+            return util.root_pattern(".luarc.json", ".luarc.jsonc", ".git")(fname) or util.path.dirname(fname)
+          end,
           settings = {
             Lua = {
               completion = {
@@ -245,6 +257,23 @@ return {
               },
               -- You can toggle below to ignore Lua_LS's noisy `missing-fields` warnings
               -- diagnostics = { disable = { 'missing-fields' } },
+            },
+          },
+        },
+
+        -- Terraform
+        terraformls = {
+          -- Redirect terraform-ls logs away from stderr (prevents Neovim lsp.log spam)
+          cmd = {
+            "terraform-ls",
+            "serve",
+            "-log-file",
+            vim.fn.stdpath("state") .. "/terraform-ls.log",
+          },
+          settings = {
+            indexing = {
+              -- Don't index generated/vendor dirs
+              ignoreDirectoryNames = { ".terraform", ".terragrunt-cache" },
             },
           },
         },
