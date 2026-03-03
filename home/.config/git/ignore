@@ -17,7 +17,6 @@ venv/
 .vscode/*
 
 .act/
-notes
 
 .terraform
 *tfplan*
