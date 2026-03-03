@@ -18,3 +18,9 @@ venv/
 
 .act/
 notes
+
+.terraform
+*tfplan*
+*planfile*
+*.plan
+

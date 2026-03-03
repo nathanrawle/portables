@@ -53,6 +53,7 @@ vim.g.lsp_ensure_installed = {
 }
 vim.g.never_show = {
   ".DS_Store",
+  ".terraform/",
 }
 vim.g.picker_no_show = vim.list_extend({
   ".git/",
