@@ -6,8 +6,8 @@
 [include]
   path = gitbutler_config
 [core]
+  excludesfile = /Users/nathan/.gitignore
 	excludesfile = /Users/nathan/.config/git/ignore
-	excludesfile = /Users/nathan/.gitignore
 [credential]
   helper = manager
   helper = oauth
