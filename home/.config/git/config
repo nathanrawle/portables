@@ -1,15 +1,15 @@
 [user]
-	name = "Nathan Rawle"
-	email = nathan.rawle@gmail.com
+  name = "Nathan Rawle"
+  email = nathan.rawle@gmail.com
 [init]
-	defaultBranch = main
+  defaultBranch = main
 [include]
   path = gitbutler_config
 [core]
   excludesfile = /Users/nathan/.gitignore
-	excludesfile = /Users/nathan/.config/git/ignore
+  excludesfile = /Users/nathan/.config/git/ignore
 [credential]
   helper = manager
   helper = oauth
 [credential "https://dev.azure.com"]
-	useHttpPath = true
+  useHttpPath = true
