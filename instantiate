@@ -45,9 +45,9 @@ PRTBLS_LN="export PORTABLES=${HERE}"
 if [[ -e "$MACHENV" ]]; then
   if ! grep -Eq "$PRTBLS_LN" "$MACHENV"; then
     sed -Ei.bak '/^(export )?PORTABLES=/d' "$MACHENV" &&
+      echo "$PRTBLS_LN" >>"$MACHENV" &&
       rm "$MACHENV".bak ||
       mv -f "$MACHENV"{.bak,}
-    echo "$PRTBLS_LN" >>"$MACHENV"
   fi
 else
   echo "$PRTBLS_LN" >"$MACHENV"
@@ -315,4 +315,4 @@ if [[ -n "$npm_install_cmds" ]]; then
   done <<<"$npm_tool_scripts"
 fi
 
-log -i "portables instantiated. GLHFDD 🥡"
+log -i "portables ${LOG_NAME}d. GLHFDD 🥡"
