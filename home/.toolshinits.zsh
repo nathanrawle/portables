@@ -25,7 +25,7 @@ localbin=~/.local/bin
 localscripts=~/.local/scripts
 mkdir -p "$localbin"
 mkdir -p "$localscripts"
-path+=( "$localbin" "$localscripts" )
+path=( "$localbin" "$localscripts" $path )
 
 # Add my functions to fpath
 for fundir in zfuns bfuns pfuns; do
