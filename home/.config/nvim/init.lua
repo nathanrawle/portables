@@ -39,7 +39,6 @@ vim.g.lsp_ensure_installed = {
   "docker-language-server",
   "gh-actions-language-server",
   "gopls",
-  "ltex-ls-plus",
   "lua-language-server",
   "ruff",
   "sqls",
