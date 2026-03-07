@@ -91,7 +91,7 @@ alt-o = 'workspace O'
 alt-p = 'workspace P'
 alt-q = 'workspace Q'
 cmd-alt-r = 'workspace R' # alt-r = excalidraw view-mode
-cmd-alt-s = 'workspace S' # alt-s = excalidraw Snap to objects
+alt-s = 'workspace S'     # alt-s = excalidraw Snap to objects
 alt-t = 'workspace T'
 alt-u = 'workspace U'
 alt-v = 'workspace V'
