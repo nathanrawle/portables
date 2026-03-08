@@ -252,7 +252,7 @@ run = ['move-node-to-workspace V']
 
 [[on-window-detected]]
 if.app-id = 'net.whatsapp.WhatsApp'
-run = ['move-node-to-workspace M']
+run = ['move-node-to-workspace W']
 
 [[on-window-detected]]
 if.app-id = 'com.microsoft.Teams2'
@@ -260,7 +260,7 @@ run = ['move-node-to-workspace M']
 
 [[on-window-detected]]
 if.app-id = 'com.tinyspeck.slackmacgap'
-run = ['move-node-to-workspace M']
+run = ['move-node-to-workspace S']
 
 [[on-window-detected]]
 if.app-id = 'com.readdle.SparkDesktop.appstore'
