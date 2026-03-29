@@ -2,6 +2,7 @@
 
 export LOG_NAME="retune"
 /usr/bin/env bash "$PORTABLES"/configure $@
+/usr/bin/env bash "$PORTABLES"/symlinks
 unset LOG_NAME
 read -k '?Would you like to replace the shell now? [Y|n] '
 if [[ ! "$REPLY" = n ]]; then

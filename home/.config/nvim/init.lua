@@ -41,8 +41,7 @@ vim.g.lsp_ensure_installed = {
   "gopls",
   "lua-language-server",
   "ruff",
-  "sqls",
-  "sqruff",
+  "sqlfluff",
   "stylua", -- Used to format Lua code
   "taplo",
   "terraform",
