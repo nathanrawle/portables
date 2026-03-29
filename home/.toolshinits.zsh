@@ -35,6 +35,9 @@ for fundir in zfuns bfuns pfuns; do
   fi
 done
 
+# handy zsh functions
+autoload -Uz zmv zcp zln
+
 # This affects every invocation of `less` and makes it way better:
 #   -i   case-insensitive search unless search string contains uppercase letters
 #   -R   color
