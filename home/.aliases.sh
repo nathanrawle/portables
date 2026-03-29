@@ -1,19 +1,25 @@
 # utilities: shell
 alias cd-='cd -' # for times when `pushdminus` might be unset
-alias g='grep'
-alias gi='grep -i'
-alias ge='grep -E'
-alias gei='grep -Ei'
-alias qg='grep -q'
-alias h='head'
-alias t='tail'
+
+if [[ $(uname -s) == 'Darwin' ]]; then
+  alias c=clipcopy
+  alias v=clippaste
+  alias V='clippaste |'
+fi
+
+alias g=egrep
+alias gi='egrep -i'
+alias qg='egrep -q'
+alias h=head
+alias t=tail
 alias l='ls -lAh'
-alias ft='t -F'
-alias follow='ft'
-alias hist='history'
+alias f='t -F'
+alias follow='f'
+alias hist=history
 alias rnsort='sort -rn'
 
 alias reshell='exec $0'
+alias :q=exit
 
 # utilities: python
 alias wp='which python'
@@ -36,9 +42,18 @@ alias killdocs='pkill -a -f dbt\ docs\ serve'
 
 # gcloud auth
 alias gauth='gcloud auth'
-alias gal='gcloud auth login --login-config=$HOME/.config/gcloud/blume_login_config.json'
-alias gadl='gcloud auth application-default login --login-config=$HOME/.config/gcloud/blume_login_config.json'
-alias glogin='gal && gadl'
+
+alias gal-wfid='gcloud auth login --login-config=$HOME/.config/gcloud/blume_login_config.json'
+alias gadl-wfid='gcloud auth application-default login --login-config=$HOME/.config/gcloud/blume_login_config.json'
+alias glogin-wfid='gal-wfid && gadl-wfid'
+
+alias gal-gid='gcloud auth login'
+alias gadl-gid='gcloud auth application-default login'
+alias glogin-gid='gal-gid && gadl-gid'
+
+alias gal='() { if [[ $1 = wf ]]; then gal-wfid; else gal-gid; fi }'
+alias gadl='() { if [[ $1 = wf ]]; then gadl-wfid; else gadl-gid; fi }'
+alias glogin='() { if [[ $1 = wf ]]; then glogin-wfid; else glogin-gid; fi }'
 
 # gcloud config
 alias gconf='gcloud config'
@@ -64,6 +79,7 @@ alias twlw='timew week :lastweek'
 alias twm='timew month'
 alias twlm='timew month :lastmonth'
 alias tws='timew summary :ids'
+alias twsw='timew summary :ids :week'
 alias twslw='timew summary :ids :lastweek'
 alias twslm='timew summary :ids :lastmonth'
 alias twa='timew start'
@@ -80,6 +96,7 @@ alias tfo='tf output'
 alias tfp='tf plan'
 alias tfa='tf apply'
 alias tfv='tf validate'
+alias tfc='tf console'
 alias tfmt='tf fmt'
 alias tffmt=tfmt
 
