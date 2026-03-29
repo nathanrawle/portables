@@ -8,7 +8,7 @@ PORTABLE_HOME="$PORTABLES/home"
 HOME=${HOME:-~}
 
 LOG_NAME="${LOG_NAME:+$LOG_NAME.}${THIS##*/}"
-functions log >/dev/null 2>&1 || . ./log
+functions log >/dev/null 2>&1 || . "$PORTABLES"/log
 
 if [[ -n "${HOST-}" ]]; then
   MACHINE=${HOST%%.*}
