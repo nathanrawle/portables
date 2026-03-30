@@ -1,7 +1,7 @@
 export MACHINE=${${HOST%%.*}:-${(%):-%m}}
-machine="$(tr '[:upper:]' '[:lower:]' <<< "$MACHINE")"
+machine="${MACHINE:l}"
 source ~/."$machine".env \
-|| echo "No environment found for $MACHINE. Run \`run.sh\`"
+|| echo "No environment found for $MACHINE. Run the instantiation script."
 
 source ~/.zstyles
 source ~/.toolshinits.zsh

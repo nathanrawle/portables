@@ -15,3 +15,4 @@ bindkey -s '\ej' "tmux-sessionizer -s 0\n"
 bindkey -s '\ek' "tmux-sessionizer -s 1\n"
 bindkey -s '\el' "tmux-sessionizer -s 2\n"
 
+bindkey -s ^xgc 'git commit -m ""^b'
