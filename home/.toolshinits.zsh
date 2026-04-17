@@ -21,6 +21,10 @@ export NVM_DIR="$HOME/.nvm"
 [[ -d "/usr/local/go/bin" ]] && path+=( "/usr/local/go/bin" )
 [[ -d "${GOPATH:=$HOME/go}/bin" ]] && path+=( "$GOPATH/bin" )
 
+
+# opencode
+export PATH=/Users/nathan/.opencode/bin:$PATH
+
 # ~/.local
 localbin=~/.local/bin
 localscripts=~/.local/scripts
