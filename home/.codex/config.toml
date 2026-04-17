@@ -1,0 +1,21 @@
+sandbox_mode = "workspace-write"
+
+[history]
+persistence = "save-all"
+max_bytes = 52428800
+
+[shell_environment_policy]
+inherit = "core"
+experimental_use_profile = true
+
+[profiles.safe-readonly]
+sandbox_mode = "read-only"
+
+[profiles.deep-think]
+model_reasoning_effort = "high"
+plan_mode_reasoning_effort = "high"
+
+[profiles.fast-iterate]
+model_reasoning_effort = "low"
+plan_mode_reasoning_effort = "medium"
+model_verbosity = "low"
