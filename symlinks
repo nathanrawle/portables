@@ -6,6 +6,9 @@ THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
 PORTABLES="$(dirname "$THIS")"
 PORTABLE_HOME="$PORTABLES/home"
 HOME=${HOME:-~}
+OS="${OS:-$(uname -s)}"
+LINK_CONFLICT_MODE="${LINK_CONFLICT_MODE:-skip}"
+BACKUP_STAMP="$(date +%Y%m%d%H%M%S)"
 
 LOG_NAME="${LOG_NAME:+$LOG_NAME.}${THIS##*/}"
 functions log >/dev/null 2>&1 || . "$PORTABLES"/log
@@ -17,85 +20,103 @@ else
   MACHINE=${MACHINE%%.*}
 fi
 
-if [[ $# -gt 0 ]]; then
-  log "symlinking ${*}…"
-  for fn in $@; do
-    item="${PORTABLE_HOME}/${fn}"
-    destination="$HOME/${fn}"
-    if [[ -f "$item" ]]; then
-      ln -sf "$item" "$destination" &&
-        log -d "linked $item -> $destination"
-    elif [[ -e "$destination" ]] && [[ -d "$item" ]]; then
-      echo "you're about to replace $destination with the directory $item"
-      read -n 1 -p "Continue? [y|N] "
-      if [[ "$REPLY" = y ]]; then
-        rm -rf "$destination" &&
-          ln -sf "$item" "$destination" &&
-          log -d "linked $item -> $destination"
-      fi
-    fi
-  done
-else
-  log "establishing symlinks…"
+link_file() {
+  local source_path="$1"
+  local destination="$2"
+  local parent_dir
+  local linked_target
 
-  items=( "$PORTABLE_HOME"/{.[!.]*,*} )
-  [[ -n "$items" ]] && log "linking homedir files…"
-  for item in ${items[@]}; do
-    [[ -f "$item" ]] || continue
-    destination="$HOME/${item##*/}"
-    ln -sf "$item" "$destination" &&
-      log -d "linked $item -> $destination"
-  done
+  parent_dir="$(dirname "$destination")"
+  if [[ -e "$parent_dir" ]] && [[ ! -d "$parent_dir" ]]; then
+    log -w "cannot link into non-directory path: $parent_dir"
+    return 1
+  fi
 
-  PORTABLE_DOTCONFIG="$PORTABLE_HOME/.config"
-  HOME_DOTCONFIG="$HOME/.config"
+  mkdir -p "$parent_dir"
 
-  items=( "$PORTABLE_DOTCONFIG"/{.[!.]*,*} )
-  [[ -n "$items" ]] && log "linking .config entries…"
-  for item in ${items[@]}; do
-    [[ -f "$item" ]] || [[ -d "$item" ]] || continue
-    destination="$HOME_DOTCONFIG/${item##*/}"
-    rm -rf "$destination"
-    ln -sf "$item" "$destination" &&
-      log -d "linked $item -> $destination"
-  done
-
-  # --- 3. Link contents of Library directory (macOS) ---
-  if [[ "$OS" = "Darwin" ]]; then
-    PORTABLE_LIBRARY="$PORTABLE_HOME/Library"
-    HOME_LIBRARY="$HOME/Library"
-    if [ -d "$PORTABLE_LIBRARY" ]; then
-      items=( "$PORTABLE_LIBRARY"/{.[!.]*,*} )
-      [[ -n "$items" ]] && log "linking macOS Library entries…"
-      for item in ${items[@]}; do
-        [[ -f "$item" ]] || [[ -d "$item" ]] || continue
-        destination="$HOME_LIBRARY/${item##*/}"
-        rm -rf "$destination"
-        ln -sf "$item" "$destination" &&
-          log -d "linked $item -> $destination"
-      done
+  if [[ -L "$destination" ]]; then
+    linked_target="$(readlink "$destination")"
+    if [[ "$linked_target" = "$source_path" ]]; then
+      log -d "already linked $source_path -> $destination"
+      return 0
     fi
   fi
 
-  # --- 4. Link contents of fns directory ---
-  for fundir in pfuns bfuns zfuns; do
-    PORTABLE_FUNDIR="$PORTABLE_HOME/.$fundir"
+  if [[ -e "$destination" ]] || [[ -L "$destination" ]]; then
+    case "$LINK_CONFLICT_MODE" in
+    force)
+      rm -rf "$destination"
+      ;;
+    backup)
+      mv "$destination" "${destination}.bak.${BACKUP_STAMP}"
+      log -i "backed up $destination -> ${destination}.bak.${BACKUP_STAMP}"
+      ;;
+    skip)
+      log -w "skipping existing path: $destination"
+      return 0
+      ;;
+    *)
+      log -w "unknown LINK_CONFLICT_MODE=$LINK_CONFLICT_MODE; skipping $destination"
+      return 0
+      ;;
+    esac
+  fi
 
-    if [[ -d "$PORTABLE_FUNDIR" ]]; then
-      HOME_FUNDIR=$HOME/.$fundir
-      log "linking $fundir functions"
-      mkdir -p "$HOME_FUNDIR"
+  ln -s "$source_path" "$destination" &&
+    log -d "linked $source_path -> $destination"
+}
 
-      items=( "$PORTABLE_FUNDIR"/{.[!.]*,*} )
-      for item in ${items[@]}; do
-        [[ -f "$item" ]] || continue
-        destination="$HOME_FUNDIR/${item##*/}"
-        rm -rf "$destination"
-        ln -sf "$item" "$destination" &&
-          log -d "linked $item -> $destination"
-      done
-    fi
+link_tree_files() {
+  local source_root="$1"
+  local destination_root="$2"
+  local source_path
+  local relative_path
+  local normalized_source_root
+  local -a find_args
+
+  [[ -d "$source_root" ]] || return 0
+  normalized_source_root="${source_root%/}"
+  normalized_source_root="${normalized_source_root%/.}"
+  find_args=( "$source_root" )
+
+  if [[ "$normalized_source_root" = "$PORTABLE_HOME" && "$OS" != Darwin ]]; then
+    find_args+=( -path "$source_root/Library" -prune -o )
+  fi
+
+  find_args+=( \( -type f -o -type l \) -print0 )
+
+  while IFS= read -r -d '' source_path; do
+    relative_path="${source_path#$source_root/}"
+    link_file "$source_path" "$destination_root/$relative_path"
+  done < <(find "${find_args[@]}")
+}
+
+link_relative_path() {
+  local relative_path="${1:-}"
+  local source_path
+  local destination
+
+  [[ "$relative_path" = "." ]] && relative_path=
+  source_path="${PORTABLE_HOME}${relative_path:+/$relative_path}"
+  destination="${HOME}${relative_path:+/$relative_path}"
+
+  if [[ -f "$source_path" ]]; then
+    link_file "$source_path" "$destination"
+  elif [[ -d "$source_path" ]]; then
+    link_tree_files "$source_path" "$destination"
+  else
+    log -w "nothing to link for $relative_path"
+  fi
+}
+
+if [[ $# -gt 0 ]]; then
+  log "symlinking ${*}…"
+  for fn in "$@"; do
+    link_relative_path "$fn"
   done
+else
+  log "establishing symlinks…"
+  link_relative_path
 fi
 
 log "symlinking complete."
