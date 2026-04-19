@@ -10,6 +10,30 @@ These are global, repository-agnostic working preferences that apply unless a pr
 - Surface uncertainty early instead of guessing.
 - When several approaches are viable, prefer the simplest one that meets the requirement.
 
+## Core philosophy
+
+- Prefer systems and software with the fewest moving parts that still meet the requirement well.
+- Prefer readability, robustness, and maintainability over cleverness, novelty, or fashionable complexity.
+- Prefer approaches that make information flow, control flow, and system boundaries easy to understand.
+- Treat dependency count and dependency criticality as meaningful design costs.
+
+## Dependency philosophy
+
+Prefer the lightest solution that meets the requirement well, in this order:
+
+1. the language standard library
+2. built-in platform capabilities
+3. tools already established in the project or operating environment
+4. extremely common and well-understood utilities where appropriate
+5. new external dependencies only when they provide substantial net benefit
+
+- Do not add a dependency merely for convenience, novelty, or to avoid a small amount of straightforward code.
+- Be able to explain why a dependency is worth its maintenance, upgrade, security, portability, and supply-chain cost.
+- Prefer fewer layers, fewer packages, and fewer integration points when the result remains clear and maintainable.
+- Do not assume a dependency is justified just because it is popular, ergonomic, or modern.
+
+Common, already-accepted command-line tools may be treated as part of the practical platform baseline where appropriate, especially when they are already established in the project or are extremely widely used in the target environment. Examples may include `jq`, `yq`, and `rclone`.
+
 ## Before changing code
 
 - Read the nearest relevant documentation and configuration first.
@@ -66,7 +90,7 @@ These are personal, global preferences. Apply them when relevant unless the repo
 - If writing shell intended for very broad portability, use POSIX `sh` only when that requirement is clear.
 - Preserve the shell already used by the repository when editing existing files.
 - Prefer simple pipelines and readable command composition over dense one-liners.
-- Assume common CLI tools such as `jq` and `yq` are available unless portability requirements suggest otherwise.
+- Assume common CLI tools such as `jq`, `yq`, and `rclone` are available unless portability requirements suggest otherwise.
 - Quote carefully and consistently.
 - Avoid fragile parsing of human-readable command output when structured output is available.
 - Be explicit when using Bash-specific features.

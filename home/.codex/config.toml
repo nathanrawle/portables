@@ -1,4 +1,6 @@
 sandbox_mode = "workspace-write"
+model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
 
 [history]
 persistence = "save-all"
@@ -7,6 +9,24 @@ max_bytes = 52428800
 [shell_environment_policy]
 inherit = "core"
 experimental_use_profile = true
+
+[agents.orchestrator]
+config_file = "./agents/orchestrator.toml"
+
+[agents.architect]
+config_file = "./agents/architect.toml"
+
+[agents.planner]
+config_file = "./agents/planner.toml"
+
+[agents.implementer]
+config_file = "./agents/implementer.toml"
+
+[agents.reviewer]
+config_file = "./agents/reviewer.toml"
+
+[agents.verifier]
+config_file = "./agents/verifier.toml"
 
 [profiles.safe-readonly]
 sandbox_mode = "read-only"
@@ -19,3 +39,15 @@ plan_mode_reasoning_effort = "high"
 model_reasoning_effort = "low"
 plan_mode_reasoning_effort = "medium"
 model_verbosity = "low"
+
+[projects."/Users/nathan/code"]
+trust_level = "trusted"
+
+[tui]
+status_line = [
+  "git-branch",
+  "model-with-reasoning",
+  "context-remaining",
+  "five-hour-limit",
+  "weekly-limit",
+]
