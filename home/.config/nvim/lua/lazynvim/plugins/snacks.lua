@@ -4,6 +4,7 @@ return {
   lazy = false,
   opts = {
     lazygit = { enabled = true },
+    image = { enabled = true },
   },
   keys = {
     {

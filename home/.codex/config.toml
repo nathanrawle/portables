@@ -1,7 +1,7 @@
 sandbox_mode = "workspace-write"
 personality = "pragmatic"
 model = "gpt-5.4"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 
 [history]
 persistence = "save-all"
@@ -33,8 +33,8 @@ config_file = "./agents/verifier.toml"
 sandbox_mode = "read-only"
 
 [profiles.deep-think]
-model_reasoning_effort = "high"
-plan_mode_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
+plan_mode_reasoning_effort = "xhigh"
 
 [profiles.fast-iterate]
 model_reasoning_effort = "low"
@@ -42,6 +42,9 @@ plan_mode_reasoning_effort = "medium"
 model_verbosity = "low"
 
 [projects."/Users/nathan/code/managed-platforms"]
+trust_level = "trusted"
+
+[projects."/Users/nathan/.codex"]
 trust_level = "trusted"
 
 [notice.model_migrations]

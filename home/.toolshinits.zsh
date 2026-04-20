@@ -10,6 +10,7 @@ export HOMEBREW_NO_ENV_HINTS=1
 command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh --no-cmd)"
 command -v pyenv >/dev/null 2>&1 && eval "$(pyenv init -)"
+command -v codex >/dev/null 2>&1 && eval "$(codex completion zsh)"
 
 # NVM, npm, & node
 export NVM_DIR="$HOME/.nvm"
@@ -20,7 +21,6 @@ export NVM_DIR="$HOME/.nvm"
 # Go
 [[ -d "/usr/local/go/bin" ]] && path+=( "/usr/local/go/bin" )
 [[ -d "${GOPATH:=$HOME/go}/bin" ]] && path+=( "$GOPATH/bin" )
-
 
 # opencode
 export PATH=/Users/nathan/.opencode/bin:$PATH

@@ -1,4 +1,4 @@
-# Personal defaults for Codex
+# Personal global defaults
 
 These are global, repository-agnostic working preferences that apply unless a project overrides them.
 
@@ -113,4 +113,4 @@ These are personal, global preferences. Apply them when relevant unless the repo
 - Prefer explicit control flow over dense abstraction.
 - Include reasonable error handling where failure is plausible.
 - Keep scripts and functions small and composable.
-- Preserve the repository’s formatting, linting, and test conventions where they exist.
+- Preserve the repository's formatting, linting, and test conventions where they exist.
