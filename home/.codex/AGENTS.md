@@ -32,8 +32,6 @@ Prefer the lightest solution that meets the requirement well, in this order:
 - Prefer fewer layers, fewer packages, and fewer integration points when the result remains clear and maintainable.
 - Do not assume a dependency is justified just because it is popular, ergonomic, or modern.
 
-Common, already-accepted command-line tools may be treated as part of the practical platform baseline where appropriate, especially when they are already established in the project or are extremely widely used in the target environment. Examples may include `jq`, `yq`, and `rclone`.
-
 ## Before changing code
 
 - Read the nearest relevant documentation and configuration first.
@@ -91,7 +89,6 @@ These are personal, global preferences. Apply them when relevant unless the repo
 - If writing shell intended for very broad portability, use POSIX `sh` only when that requirement is clear.
 - Preserve the shell already used by the repository when editing existing files.
 - Prefer simple pipelines and readable command composition over dense one-liners.
-- Assume common CLI tools such as `jq`, `yq`, and `rclone` are available unless portability requirements suggest otherwise.
 - Quote carefully and consistently.
 - Avoid fragile parsing of human-readable command output when structured output is available.
 - Be explicit when using Bash-specific features.
@@ -102,7 +99,6 @@ These are personal, global preferences. Apply them when relevant unless the repo
 - Keep workflows readable and easy to debug.
 - Reuse existing workflow patterns in the repository where possible.
 - Prefer least-privilege permissions and avoid silently broadening token access.
-- Be careful with matrix, `needs`, outputs, conditionals, and expression syntax; prefer approaches that are straightforward and valid over ones that are merely compact.
 - Avoid introducing unnecessary third-party actions when official actions or simple shell steps are sufficient.
 - Call out where behavior differs between pull request, push, and manual dispatch contexts when it matters.
 
