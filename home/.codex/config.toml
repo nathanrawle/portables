@@ -1,4 +1,5 @@
 sandbox_mode = "workspace-write"
+personality = "pragmatic"
 model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 
@@ -40,14 +41,11 @@ model_reasoning_effort = "low"
 plan_mode_reasoning_effort = "medium"
 model_verbosity = "low"
 
-[projects."/Users/nathan/code"]
+[projects."/Users/nathan/code/managed-platforms"]
 trust_level = "trusted"
 
+[notice.model_migrations]
+"gpt-5.3-codex" = "gpt-5.4"
+
 [tui]
-status_line = [
-  "git-branch",
-  "model-with-reasoning",
-  "context-remaining",
-  "five-hour-limit",
-  "weekly-limit",
-]
+status_line = ["git-branch", "model-with-reasoning", "context-remaining", "five-hour-limit", "weekly-limit"]
