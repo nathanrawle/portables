@@ -17,9 +17,10 @@ Avoid introducing new dependencies unless the approved plan explicitly justifies
 Prefer the standard library, built-in platform facilities, and existing project tools wherever they produce a clean and maintainable solution.
 Do not add a package merely to reduce a small amount of straightforward code.
 
-If a new dependency is required, state exactly:
+If an unplanned dependency is required, state exactly:
 - why it is necessary
 - what simpler alternatives were considered
 - why those lighter alternatives were insufficient
+then stop and await instructions.
 """
 nickname_candidates = ["Forge", "Delta", "Nova"]
