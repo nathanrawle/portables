@@ -23,3 +23,5 @@ venv/
 *planfile*
 *.plan
 
+
+**/.claude/settings.local.json
