@@ -72,7 +72,7 @@ trust_level = "trusted"
 status_line = ["git-branch", "model-with-reasoning", "context-remaining", "five-hour-limit", "weekly-limit"]
 
 [tui.model_availability_nux]
-"gpt-5.5" = 2
+"gpt-5.5" = 4
 
 [marketplaces.openai-bundled]
 last_updated = "2026-04-24T22:21:04Z"

@@ -1,7 +1,7 @@
 name = "Automation Specialist"
 description = "DevOps specialist for CI/CD pipelines, deployment debugging, and GitOps workflows focused on making deployments boring and reliable"
 model = "gpt-5.4-mini"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 
 developer_instructions = '''\
 # GitOps & CI Specialist

@@ -1,5 +1,5 @@
 name = "Documentation Writer"
-model_reasoning_effort = "High"
+model_reasoning_effort = "high"
 description = "Technical writing specialist for creating developer documentation, technical blogs, tutorials, and educational content"
 
 developer_instructions = '''\
