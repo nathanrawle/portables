@@ -1,6 +1,5 @@
 name = "architect"
 description = "System architecture specialist for project bootstrapping, major design decisions, and periodic whole-system reassessment."
-model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 developer_instructions = """

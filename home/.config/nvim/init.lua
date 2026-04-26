@@ -20,6 +20,8 @@ vim.g.ts_ensure_installed = {
   "luadoc",
   "markdown",
   "markdown_inline",
+  "make",
+  "cmake",
   "python",
   "query",
   "regex",

@@ -1,7 +1,7 @@
 sandbox_mode = "workspace-write"
 personality = "pragmatic"
-model = "gpt-5.4"
 model_reasoning_effort = "high"
+plan_mode_reasoning_effort = "xhigh"
 
 [history]
 persistence = "save-all"
@@ -17,6 +17,15 @@ config_file = "./agents/orchestrator.toml"
 [agents.architect]
 config_file = "./agents/architect.toml"
 
+[agents.architecture-reviewer]
+config_file = "./agents/architecture-reviewer.toml"
+
+[agents.automation-specialist]
+config_file = "./agents/automation-specialist.toml"
+
+[agents.documentation-writer]
+config_file = "./agents/documentation-writer.toml"
+
 [agents.planner]
 config_file = "./agents/planner.toml"
 
@@ -25,6 +34,9 @@ config_file = "./agents/implementer.toml"
 
 [agents.reviewer]
 config_file = "./agents/reviewer.toml"
+
+[agents.security-reviewer]
+config_file = "./agents/security-reviewer.toml"
 
 [agents.verifier]
 config_file = "./agents/verifier.toml"
@@ -47,8 +59,39 @@ trust_level = "trusted"
 [projects."/Users/nathan/.codex"]
 trust_level = "trusted"
 
+[projects."/Users/nathan/code/sheffield-live"]
+trust_level = "trusted"
+
+[projects."/Users/nathan/code/portables"]
+trust_level = "trusted"
+
 [notice.model_migrations]
 "gpt-5.3-codex" = "gpt-5.4"
 
 [tui]
 status_line = ["git-branch", "model-with-reasoning", "context-remaining", "five-hour-limit", "weekly-limit"]
+
+[tui.model_availability_nux]
+"gpt-5.5" = 2
+
+[marketplaces.openai-bundled]
+last_updated = "2026-04-24T22:21:04Z"
+source_type = "local"
+source = "/Users/nathan/.codex/.tmp/bundled-marketplaces/openai-bundled"
+
+[marketplaces.openai-primary-runtime]
+last_updated = "2026-04-24T22:21:27Z"
+source_type = "local"
+source = "/Users/nathan/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+
+[plugins."browser-use@openai-bundled"]
+enabled = true
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = true
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = true

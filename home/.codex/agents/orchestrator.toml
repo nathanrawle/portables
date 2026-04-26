@@ -1,6 +1,5 @@
 name = "orchestrator"
 description = "Lead coordinating agent that routes work to specialist agents, reconciles outputs, and keeps execution aligned with project goals."
-model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
 developer_instructions = """

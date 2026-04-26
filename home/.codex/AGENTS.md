@@ -10,6 +10,11 @@ These are global, repository-agnostic working preferences that apply unless a pr
 - Surface uncertainty early instead of guessing.
 - When several approaches are viable, prefer the simplest one that meets the requirement.
 
+## Sub Agents
+- When using subagents, wait for all of them to complete.
+- Do not treat a wait timeout as failure; if a subagent is still running, call wait again with a longer timeout until it completes or clearly fails.
+- Reuse subagents when the next work increment is similar to something they worked on before.
+
 ## Core philosophy
 
 - Prefer systems and software with the fewest moving parts that still meet the requirement well.

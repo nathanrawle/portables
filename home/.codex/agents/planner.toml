@@ -1,6 +1,5 @@
 name = "planner"
 description = "Planning specialist for understanding the codebase, proposing approaches, and defining acceptance criteria."
-model = "gpt-5.4"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
