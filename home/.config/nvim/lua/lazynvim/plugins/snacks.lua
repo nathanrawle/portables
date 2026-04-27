@@ -5,6 +5,11 @@ return {
   opts = {
     lazygit = { enabled = true },
     image = { enabled = true },
+    doc = {
+      enabled = true,
+      inline = true,
+      float = true,
+    },
   },
   keys = {
     {
