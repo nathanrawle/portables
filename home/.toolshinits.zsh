@@ -14,8 +14,17 @@ command -v codex >/dev/null 2>&1 && eval "$(codex completion zsh)"
 
 # NVM, npm, & node
 export NVM_DIR="$HOME/.nvm"
-[[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
-[[ -s "$NVM_DIR/bash_completion" ]] && . "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+function nvm() {
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    unfunction nvm
+    . "$NVM_DIR/nvm.sh"
+    [[ -s "$NVM_DIR/bash_completion" ]] && . "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+    nvm "$@"
+  else
+    print -u2 "nvm: could not find $NVM_DIR/nvm.sh"
+    return 1
+  fi
+}
 [[ -d "$HOME/.npm-global/bin" ]] && path+=( "$HOME/.npm-global/bin" )
 
 # Go
@@ -24,6 +33,7 @@ export NVM_DIR="$HOME/.nvm"
 
 # opencode
 export PATH=/Users/nathan/.opencode/bin:$PATH
+command -v opencode >/dev/null 2>&1 && . $PORTABLES/home/.opencode-completions.zsh
 
 # ~/.local
 localbin=~/.local/bin
@@ -54,3 +64,4 @@ autoload -Uz zmv zcp zln
 LESS='-iRFXMx4W'
 
 export NVM_DIR PATH path fpath LESS
+
