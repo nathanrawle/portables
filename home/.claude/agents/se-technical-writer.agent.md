@@ -1,7 +1,7 @@
 ---
 name: 'SE: Tech Writer'
-description: 'Technical writing specialist for creating developer documentation, technical blogs, tutorials, and educational content'
-model: sonnet
+description: 'Technical writing specialist for creating developer documentation, technical blogs, tutorials, and educational content. Use when prompt asks for help writing documentation or other technical content.'
+model: opus
 tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'WebFetch', 'WebSearch']
 ---
 
