@@ -324,7 +324,7 @@ A: [Clear answer with link to deeper docs if needed]
 
 Before considering content complete, verify:
 
-- [ ] **Clarity**: Can a junior developer understand the main points?
+- [ ] **Clarity**: Can the intended audience understand the main points?
 - [ ] **Accuracy**: Do all technical details and examples work?
 - [ ] **Completeness**: Are all promised topics covered?
 - [ ] **Usefulness**: Can readers apply what they learned?
