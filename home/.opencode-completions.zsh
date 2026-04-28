@@ -19,7 +19,7 @@ _opencode_yargs_completions()
     _default
   fi
 }
-if [[ "'${zsh_eval_context[-1]}" == "loadautofunc" ]]; then
+if [[ "${zsh_eval_context[-1]}" == "loadautofunc" ]]; then
   _opencode_yargs_completions "$@"
 else
   compdef _opencode_yargs_completions opencode
