@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize Claude and Codex agent definitions."""
+"""Synchronize Claude, Codex, and Copilot agent definitions."""
 
 from __future__ import annotations
 
@@ -15,6 +15,16 @@ from typing import Any
 
 READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "Bash"]
 WRITE_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
+COPILOT_READ_ONLY_TOOLS = ["read", "search"]
+COPILOT_WRITE_TOOLS = ["read", "search", "edit", "shell"]
+PROVIDERS = ("claude", "copilot", "codex")
+SOURCE_PREFERENCE = {
+    "claude": ("copilot", "codex"),
+    "copilot": ("codex", "claude"),
+    "codex": ("copilot", "claude"),
+}
+WRITE_TOOL_MARKERS = ("edit", "write", "run", "shell", "terminal")
+OPENAI_MODEL_MARKERS = ("gpt", "chatgpt", "o1", "o3", "o4")
 
 
 @dataclass(frozen=True)
@@ -29,6 +39,17 @@ class CreateAction:
     id: str
     path: Path
     content: str
+
+
+@dataclass(frozen=True)
+class AgentSpec:
+    id: str
+    name: str
+    description: str
+    model: str
+    model_reasoning_effort: str
+    sandbox_mode: str
+    instructions: str
 
 
 def normalize_id(path: Path) -> str:
@@ -67,12 +88,27 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 def parse_simple_yaml(text: str) -> dict[str, Any]:
     data: dict[str, Any] = {}
+    block_list_key = ""
     for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if block_list_key and raw_line[:1].isspace() and stripped.startswith("- "):
+            data[block_list_key].append(parse_yaml_value(stripped[2:].strip()))
+            continue
+        if not raw_line[:1].isspace():
+            block_list_key = ""
+        elif raw_line[:1].isspace():
+            continue
         line = raw_line.strip()
         if not line or line.startswith("#") or ":" not in line:
             continue
         key, value = line.split(":", 1)
-        data[key.strip()] = parse_yaml_value(value.strip())
+        key = key.strip()
+        value = value.strip()
+        if value == "":
+            data[key] = []
+            block_list_key = key
+            continue
+        data[key] = parse_yaml_value(value)
     return data
 
 
@@ -130,10 +166,10 @@ def list_value(data: dict[str, Any], key: str) -> list[str]:
     return []
 
 
-def claude_effort_and_model(model: str) -> tuple[str, str | None]:
+def claude_effort_and_model(model: str) -> tuple[str, str]:
     model = model.lower()
     if "opus" in model:
-        return "xhigh", None
+        return "xhigh", ""
     if "haiku" in model:
         return "medium", "gpt-5.4-mini"
     if "sonnet" in model:
@@ -154,55 +190,155 @@ def codex_to_claude_model(model: str, effort: str) -> str:
     return "sonnet"
 
 
+def is_openai_model(model: str) -> bool:
+    normalized = model.lower()
+    return any(marker in normalized for marker in OPENAI_MODEL_MARKERS)
+
+
+def model_effort(model: str, default: str = "high") -> str:
+    normalized = model.lower()
+    if "opus" in normalized or "xhigh" in normalized:
+        return "xhigh"
+    if "haiku" in normalized or "mini" in normalized or "medium" in normalized:
+        return "medium"
+    if "low" in normalized:
+        return "low"
+    if "gpt-5" in normalized or "high" in normalized or "sonnet" in normalized:
+        return "high"
+    return default
+
+
+def tools_sandbox(tools: list[str]) -> str:
+    normalized = [tool.lower() for tool in tools]
+    if any(marker in tool for tool in normalized for marker in WRITE_TOOL_MARKERS):
+        return "workspace-write"
+    return "read-only"
+
+
+def sandbox_is_writable(sandbox: str) -> bool:
+    return sandbox != "read-only"
+
+
 def toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def claude_to_codex(path: Path) -> str:
+def parse_markdown_agent(path: Path, provider: str) -> AgentSpec:
     frontmatter, body = parse_frontmatter(path.read_text())
-    effort, codex_model = claude_effort_and_model(scalar(frontmatter, "model"))
-    tools = set(list_value(frontmatter, "tools"))
-    sandbox = "workspace-write" if {"Edit", "Write"} & tools else "read-only"
+    agent_id = normalize_id(path)
+    model = scalar(frontmatter, "model")
+    tools = list_value(frontmatter, "tools")
 
+    if provider == "claude":
+        effort, codex_model = claude_effort_and_model(model)
+        spec_model = codex_model
+        sandbox = "workspace-write" if {"Edit", "Write"} & set(tools) else "read-only"
+    else:
+        effort = model_effort(model)
+        if not model:
+            spec_model = ""
+        elif is_openai_model(model):
+            spec_model = model
+        else:
+            spec_model = claude_effort_and_model(model)[1]
+        sandbox = tools_sandbox(tools)
+
+    return AgentSpec(
+        id=agent_id,
+        name=scalar(frontmatter, "name", agent_id),
+        description=scalar(frontmatter, "description"),
+        model=spec_model,
+        model_reasoning_effort=effort,
+        sandbox_mode=sandbox,
+        instructions=body,
+    )
+
+
+def parse_codex_agent(path: Path) -> AgentSpec:
+    try:
+        data = tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"failed to parse Codex agent {path}: {exc}") from exc
+    agent_id = normalize_id(path)
+    return AgentSpec(
+        id=agent_id,
+        name=scalar(data, "name", agent_id),
+        description=scalar(data, "description"),
+        model=scalar(data, "model"),
+        model_reasoning_effort=scalar(data, "model_reasoning_effort"),
+        sandbox_mode=scalar(data, "sandbox_mode"),
+        instructions=scalar(data, "developer_instructions"),
+    )
+
+
+def parse_agent(agent: AgentFile, provider: str) -> AgentSpec:
+    if provider == "codex":
+        return parse_codex_agent(agent.path)
+    return parse_markdown_agent(agent.path, provider)
+
+
+def render_codex(spec: AgentSpec) -> str:
     lines = [
-        f"name = {toml_string(scalar(frontmatter, 'name', normalize_id(path)))}",
-        f"description = {toml_string(scalar(frontmatter, 'description'))}",
+        f"name = {toml_string(spec.name)}",
+        f"description = {toml_string(spec.description)}",
     ]
-    if codex_model:
-        lines.append(f"model = {toml_string(codex_model)}")
+    if spec.model:
+        lines.append(f"model = {toml_string(spec.model)}")
     lines.extend(
         [
-            f"model_reasoning_effort = {toml_string(effort)}",
-            f"sandbox_mode = {toml_string(sandbox)}",
+            f"model_reasoning_effort = {toml_string(spec.model_reasoning_effort)}",
+            f"sandbox_mode = {toml_string(spec.sandbox_mode)}",
             "",
-            f"developer_instructions = {toml_string(body)}",
+            f"developer_instructions = {toml_string(spec.instructions)}",
             "",
         ]
     )
     return "\n".join(lines)
 
 
-def codex_to_claude(path: Path) -> str:
-    data = tomllib.loads(path.read_text())
-    name = scalar(data, "name", normalize_id(path))
-    description = scalar(data, "description")
-    model = scalar(data, "model")
-    effort = scalar(data, "model_reasoning_effort")
-    sandbox = scalar(data, "sandbox_mode")
-    instructions = scalar(data, "developer_instructions")
-    claude_model = codex_to_claude_model(model, effort)
-    tools = READ_ONLY_TOOLS if sandbox == "read-only" else WRITE_TOOLS
+def render_claude(spec: AgentSpec) -> str:
+    claude_model = codex_to_claude_model(spec.model, spec.model_reasoning_effort)
+    tools = READ_ONLY_TOOLS if spec.sandbox_mode == "read-only" else WRITE_TOOLS
 
     frontmatter = [
         "---",
-        f"name: {json.dumps(name, ensure_ascii=False)}",
-        f"description: {json.dumps(description, ensure_ascii=False)}",
+        f"name: {json.dumps(spec.name, ensure_ascii=False)}",
+        f"description: {json.dumps(spec.description, ensure_ascii=False)}",
         f"model: {claude_model}",
         "tools: [" + ", ".join(json.dumps(tool) for tool in tools) + "]",
         "---",
         "",
     ]
-    return "\n".join(frontmatter) + instructions
+    return "\n".join(frontmatter) + spec.instructions
+
+
+def render_copilot(spec: AgentSpec) -> str:
+    tools = COPILOT_WRITE_TOOLS if sandbox_is_writable(spec.sandbox_mode) else COPILOT_READ_ONLY_TOOLS
+    frontmatter = [
+        "---",
+        f"name: {json.dumps(spec.name, ensure_ascii=False)}",
+        f"description: {json.dumps(spec.description, ensure_ascii=False)}",
+    ]
+    if spec.model:
+        frontmatter.append(f"model: {json.dumps(spec.model, ensure_ascii=False)}")
+    frontmatter.extend(
+        [
+            "tools: [" + ", ".join(json.dumps(tool) for tool in tools) + "]",
+            "---",
+            "",
+        ]
+    )
+    return "\n".join(frontmatter) + spec.instructions
+
+
+def render_agent(spec: AgentSpec, provider: str) -> str:
+    if provider == "claude":
+        return render_claude(spec)
+    if provider == "copilot":
+        return render_copilot(spec)
+    if provider == "codex":
+        return render_codex(spec)
+    raise ValueError(f"unknown provider: {provider}")
 
 
 def load_registered_codex_agents(config_path: Path) -> set[str]:
@@ -250,37 +386,52 @@ def insert_agent_registrations(config_text: str, agent_ids: list[str]) -> str:
 
 
 def plan_actions(root: Path) -> tuple[list[CreateAction], list[str]]:
-    claude_dir = root / "home/.claude/agents"
-    codex_dir = root / "home/.codex/agents"
+    directories = {
+        "claude": root / "home/.claude/agents",
+        "copilot": root / "home/.copilot/agents",
+        "codex": root / "home/.codex/agents",
+    }
+    suffixes = {
+        "claude": ".md",
+        "copilot": ".agent.md",
+        "codex": ".toml",
+    }
+    discovery_suffixes = {
+        "claude": ".md",
+        "copilot": ".md",
+        "codex": ".toml",
+    }
     config_path = root / "home/.codex/config.toml"
 
-    claude_agents = discover_agents(claude_dir, ".md")
-    codex_agents = discover_agents(codex_dir, ".toml")
+    agents = {
+        provider: discover_agents(directories[provider], discovery_suffixes[provider])
+        for provider in PROVIDERS
+    }
+    all_ids = sorted(set().union(*(set(provider_agents) for provider_agents in agents.values())))
 
     creates: list[CreateAction] = []
-    for agent_id in sorted(set(claude_agents) - set(codex_agents)):
-        target_path = codex_dir / f"{agent_id}.toml"
-        creates.append(
-            CreateAction(
-                "codex",
-                agent_id,
-                target_path,
-                claude_to_codex(claude_agents[agent_id].path),
-            )
-        )
-    for agent_id in sorted(set(codex_agents) - set(claude_agents)):
-        target_path = claude_dir / f"{agent_id}.md"
-        creates.append(
-            CreateAction(
-                "claude",
-                agent_id,
-                target_path,
-                codex_to_claude(codex_agents[agent_id].path),
-            )
-        )
+    for agent_id in all_ids:
+        for target in PROVIDERS:
+            if agent_id in agents[target]:
+                continue
+            for source in SOURCE_PREFERENCE[target]:
+                if agent_id not in agents[source]:
+                    continue
+                suffix = suffixes[target]
+                target_path = directories[target] / f"{agent_id}{suffix}"
+                spec = parse_agent(agents[source][agent_id], source)
+                creates.append(
+                    CreateAction(
+                        target,
+                        agent_id,
+                        target_path,
+                        render_agent(spec, target),
+                    )
+                )
+                break
 
     registered = load_registered_codex_agents(config_path)
-    codex_ids_after_sync = sorted(set(codex_agents) | {a.id for a in creates if a.target == "codex"})
+    codex_ids_after_sync = sorted(set(agents["codex"]) | {a.id for a in creates if a.target == "codex"})
     registrations = [agent_id for agent_id in codex_ids_after_sync if agent_id not in registered]
     return creates, registrations
 
@@ -317,7 +468,11 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
-    creates, registrations = plan_actions(root)
+    try:
+        creates, registrations = plan_actions(root)
+    except ValueError as exc:
+        print(f"sync-agents: error: {exc}", file=sys.stderr)
+        return 2
     changed = bool(creates or registrations)
 
     if args.dry_run or args.check:
