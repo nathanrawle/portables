@@ -1,5 +1,5 @@
 ---
-name: 'SE: Architect'
+name: 'Architecture Reviewer'
 description: 'System architecture review specialist with Well-Architected frameworks, design validation, and scalability analysis for AI and distributed systems'
 model: opus
 tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'WebFetch', 'WebSearch']

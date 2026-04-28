@@ -1,5 +1,5 @@
 ---
-name: 'SE: DevOps/CI'
+name: 'Automation Specialist'
 description: 'DevOps specialist for CI/CD pipelines, deployment debugging, and GitOps workflows focused on making deployments boring and reliable'
 model: sonnet
 tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash']

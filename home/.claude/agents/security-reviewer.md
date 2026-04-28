@@ -1,5 +1,5 @@
 ---
-name: 'SE: Security'
+name: 'Security Reviewer'
 description: 'Security-focused code review specialist with OWASP Top 10, Zero Trust, LLM security, and enterprise security standards'
 model: opus
 tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash']
