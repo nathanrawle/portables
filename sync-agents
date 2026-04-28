@@ -1,0 +1,338 @@
+#!/usr/bin/env python3
+"""Synchronize Claude and Codex agent definitions."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "Bash"]
+WRITE_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "Bash"]
+
+
+@dataclass(frozen=True)
+class AgentFile:
+    id: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class CreateAction:
+    target: str
+    id: str
+    path: Path
+    content: str
+
+
+def normalize_id(path: Path) -> str:
+    name = path.name
+    for suffix in (".toml", ".md"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    if name.endswith(".agent"):
+        name = name[: -len(".agent")]
+    return name
+
+
+def discover_agents(directory: Path, suffix: str) -> dict[str, AgentFile]:
+    agents: dict[str, AgentFile] = {}
+    if not directory.is_dir():
+        return agents
+    for path in sorted(directory.iterdir()):
+        if not path.is_file() or path.name.startswith(".") or path.suffix != suffix:
+            continue
+        agent_id = normalize_id(path)
+        agents.setdefault(agent_id, AgentFile(agent_id, path))
+    return agents
+
+
+def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    if not text.startswith("---\n"):
+        return {}, text
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return {}, text
+    raw_frontmatter = text[4:end]
+    body = text[end + len("\n---\n") :]
+    return parse_simple_yaml(raw_frontmatter), body
+
+
+def parse_simple_yaml(text: str) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        data[key.strip()] = parse_yaml_value(value.strip())
+    return data
+
+
+def parse_yaml_value(value: str) -> Any:
+    if value == "":
+        return ""
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        if not inner:
+            return []
+        return [parse_yaml_value(part.strip()) for part in split_csv(inner)]
+    if (value.startswith("'") and value.endswith("'")) or (
+        value.startswith('"') and value.endswith('"')
+    ):
+        return value[1:-1]
+    return value
+
+
+def split_csv(text: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    quote = ""
+    for char in text:
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = ""
+        elif char in ("'", '"'):
+            quote = char
+            current.append(char)
+        elif char == ",":
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
+def scalar(data: dict[str, Any], key: str, default: str = "") -> str:
+    value = data.get(key, default)
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def list_value(data: dict[str, Any], key: str) -> list[str]:
+    value = data.get(key, [])
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        return [value]
+    return []
+
+
+def claude_effort_and_model(model: str) -> tuple[str, str | None]:
+    model = model.lower()
+    if "opus" in model:
+        return "xhigh", None
+    if "haiku" in model:
+        return "medium", "gpt-5.4-mini"
+    if "sonnet" in model:
+        return "high", "gpt-5.4-mini"
+    return "high", "gpt-5.4-mini"
+
+
+def codex_to_claude_model(model: str, effort: str) -> str:
+    model = model.lower()
+    effort = effort.lower()
+    is_mini = "mini" in model
+    if is_mini and effort in {"low", "medium"}:
+        return "haiku"
+    if is_mini and effort == "high":
+        return "sonnet"
+    if not is_mini and effort in {"high", "xhigh"}:
+        return "opus"
+    return "sonnet"
+
+
+def toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def claude_to_codex(path: Path) -> str:
+    frontmatter, body = parse_frontmatter(path.read_text())
+    effort, codex_model = claude_effort_and_model(scalar(frontmatter, "model"))
+    tools = set(list_value(frontmatter, "tools"))
+    sandbox = "workspace-write" if {"Edit", "Write"} & tools else "read-only"
+
+    lines = [
+        f"name = {toml_string(scalar(frontmatter, 'name', normalize_id(path)))}",
+        f"description = {toml_string(scalar(frontmatter, 'description'))}",
+    ]
+    if codex_model:
+        lines.append(f"model = {toml_string(codex_model)}")
+    lines.extend(
+        [
+            f"model_reasoning_effort = {toml_string(effort)}",
+            f"sandbox_mode = {toml_string(sandbox)}",
+            "",
+            f"developer_instructions = {toml_string(body)}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def codex_to_claude(path: Path) -> str:
+    data = tomllib.loads(path.read_text())
+    name = scalar(data, "name", normalize_id(path))
+    description = scalar(data, "description")
+    model = scalar(data, "model")
+    effort = scalar(data, "model_reasoning_effort")
+    sandbox = scalar(data, "sandbox_mode")
+    instructions = scalar(data, "developer_instructions")
+    claude_model = codex_to_claude_model(model, effort)
+    tools = READ_ONLY_TOOLS if sandbox == "read-only" else WRITE_TOOLS
+
+    frontmatter = [
+        "---",
+        f"name: {json.dumps(name, ensure_ascii=False)}",
+        f"description: {json.dumps(description, ensure_ascii=False)}",
+        f"model: {claude_model}",
+        "tools: [" + ", ".join(json.dumps(tool) for tool in tools) + "]",
+        "---",
+        "",
+    ]
+    return "\n".join(frontmatter) + instructions
+
+
+def load_registered_codex_agents(config_path: Path) -> set[str]:
+    if not config_path.is_file():
+        return set()
+    text = config_path.read_text()
+    return set(re.findall(r"(?m)^\[agents\.([^\]\s]+)\]\s*$", text))
+
+
+def registration_block(agent_id: str) -> str:
+    return f"[agents.{agent_id}]\nconfig_file = \"./agents/{agent_id}.toml\"\n"
+
+
+def insert_agent_registrations(config_text: str, agent_ids: list[str]) -> str:
+    if not agent_ids:
+        return config_text
+
+    addition = "\n\n".join(registration_block(agent_id).rstrip() for agent_id in agent_ids)
+    addition = f"\n{addition}\n"
+    lines = config_text.splitlines(keepends=True)
+    agent_header = re.compile(r"^\[agents\.[^\]]+\]\s*$")
+    table_header = re.compile(r"^\[[^\]]+\]\s*$")
+
+    last_agent_index: int | None = None
+    for index, line in enumerate(lines):
+        if agent_header.match(line.strip()):
+            last_agent_index = index
+
+    if last_agent_index is None:
+        if config_text and not config_text.endswith("\n"):
+            return config_text + "\n" + addition
+        return config_text + addition.lstrip("\n")
+
+    insert_at = len(lines)
+    for index in range(last_agent_index + 1, len(lines)):
+        if table_header.match(lines[index].strip()):
+            insert_at = index
+            break
+
+    before = "".join(lines[:insert_at]).rstrip() + "\n"
+    after = "".join(lines[insert_at:]).lstrip("\n")
+    if after:
+        return before + addition + "\n" + after
+    return before + addition
+
+
+def plan_actions(root: Path) -> tuple[list[CreateAction], list[str]]:
+    claude_dir = root / "home/.claude/agents"
+    codex_dir = root / "home/.codex/agents"
+    config_path = root / "home/.codex/config.toml"
+
+    claude_agents = discover_agents(claude_dir, ".md")
+    codex_agents = discover_agents(codex_dir, ".toml")
+
+    creates: list[CreateAction] = []
+    for agent_id in sorted(set(claude_agents) - set(codex_agents)):
+        target_path = codex_dir / f"{agent_id}.toml"
+        creates.append(
+            CreateAction(
+                "codex",
+                agent_id,
+                target_path,
+                claude_to_codex(claude_agents[agent_id].path),
+            )
+        )
+    for agent_id in sorted(set(codex_agents) - set(claude_agents)):
+        target_path = claude_dir / f"{agent_id}.md"
+        creates.append(
+            CreateAction(
+                "claude",
+                agent_id,
+                target_path,
+                codex_to_claude(codex_agents[agent_id].path),
+            )
+        )
+
+    registered = load_registered_codex_agents(config_path)
+    codex_ids_after_sync = sorted(set(codex_agents) | {a.id for a in creates if a.target == "codex"})
+    registrations = [agent_id for agent_id in codex_ids_after_sync if agent_id not in registered]
+    return creates, registrations
+
+
+def print_plan(creates: list[CreateAction], registrations: list[str]) -> None:
+    for action in creates:
+        print(f"create {action.target} {action.path}")
+    for agent_id in registrations:
+        print(f"register codex {agent_id}")
+
+
+def apply_actions(root: Path, creates: list[CreateAction], registrations: list[str]) -> None:
+    for action in creates:
+        action.path.parent.mkdir(parents=True, exist_ok=True)
+        action.path.write_text(action.content)
+
+    if registrations:
+        config_path = root / "home/.codex/config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_text = config_path.read_text() if config_path.is_file() else ""
+        config_path.write_text(insert_agent_registrations(config_text, registrations))
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true", help="print changes without writing")
+    parser.add_argument("--check", action="store_true", help="exit non-zero if changes are needed")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parent,
+        help="repository root to synchronize",
+    )
+    args = parser.parse_args(argv)
+
+    root = args.root.resolve()
+    creates, registrations = plan_actions(root)
+    changed = bool(creates or registrations)
+
+    if args.dry_run or args.check:
+        print_plan(creates, registrations)
+    if args.check:
+        return 1 if changed else 0
+    if args.dry_run:
+        return 0
+    if changed:
+        apply_actions(root, creates, registrations)
+        print_plan(creates, registrations)
+    else:
+        print("sync-agents: no changes")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
