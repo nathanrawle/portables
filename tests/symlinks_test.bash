@@ -7,6 +7,8 @@ make_symlinks_fixture() {
   mkdir -p \
     "$repo/home/.config/git" \
     "$repo/home/.config/nvim" \
+    "$repo/home/.codex" \
+    "$repo/home/.claude" \
     "$repo/home/.zfuns" \
     "$repo/home/Library/Application Support/example"
 
@@ -23,6 +25,10 @@ make_symlinks_fixture() {
   printf 'repo library\n' >"$repo/home/Library/Application Support/example/config"
 
   ln -s plain-func "$repo/home/.zfuns/symlink-func"
+  mkdir -p "$repo/home/.agent-generics/skills/test-skill"
+  printf 'skill body\n' >"$repo/home/.agent-generics/skills/test-skill/SKILL.md"
+  ln -s ../.agent-generics/skills "$repo/home/.codex/skills"
+  ln -s ../.agent-generics/skills "$repo/home/.claude/skills"
 
   printf '%s\n' "$repo"
 }
@@ -157,6 +163,26 @@ test_darwin_default_links_library_payload() {
     "$repo/home/Library/Application Support/example/config"
 }
 
+test_symlinked_directory_tree_links_into_existing_destination() {
+  local repo home
+
+  repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$home/.codex/skills/.system" "$home/.claude/skills"
+  printf 'keep\n' >"$home/.codex/skills/.system/existing"
+
+  run_symlinks "$repo" "$home" .codex .claude
+
+  assert_file_contents "$home/.codex/skills/.system/existing" "keep"
+  assert_symlink_to \
+    "$home/.codex/skills/test-skill/SKILL.md" \
+    "$repo/home/.codex/skills/test-skill/SKILL.md"
+  assert_symlink_to \
+    "$home/.claude/skills/test-skill/SKILL.md" \
+    "$repo/home/.claude/skills/test-skill/SKILL.md"
+  [[ ! -L "$home/.codex/skills" ]] || fail "expected .codex/skills directory to remain real"
+}
+
 test_case "symlinks: default run links tree and preserves existing files" \
   test_default_links_tree_and_preserves_existing_files
 test_case "symlinks: explicit file links only that file" \
@@ -173,3 +199,5 @@ test_case "symlinks: non-Darwin default prunes Library payload" \
   test_non_darwin_default_prunes_library_payload
 test_case "symlinks: Darwin default links Library payload" \
   test_darwin_default_links_library_payload
+test_case "symlinks: symlinked directory trees merge into existing destinations" \
+  test_symlinked_directory_tree_links_into_existing_destination

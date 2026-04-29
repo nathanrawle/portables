@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-shopt -s nullglob
+shopt -s nullglob dotglob
 
 THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
 PORTABLES="$(dirname "$THIS")"
@@ -66,29 +66,102 @@ link_file() {
     log -d "linked $source_path -> $destination"
 }
 
+path_is_within() {
+  local path="$1"
+  local root="$2"
+
+  case "$path" in
+  "$root" | "$root"/*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+source_dir_is_pruned() {
+  local source_root="$1"
+  local source_path="$2"
+  local relative_path
+
+  if [[ "$source_root" != "$PORTABLE_HOME" || "$OS" = Darwin ]]; then
+    return 1
+  fi
+
+  relative_path="${source_path#$source_root/}"
+  [[ "$relative_path" = "Library" ]]
+}
+
+ACTIVE_SOURCE_DIRS=$'\n'
+
+source_dir_active() {
+  local resolved_path="$1"
+  case "$ACTIVE_SOURCE_DIRS" in
+  *$'\n'"$resolved_path"$'\n'*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+mark_source_dir_active() {
+  local resolved_path="$1"
+  ACTIVE_SOURCE_DIRS+="$resolved_path"$'\n'
+}
+
+clear_source_dir_active() {
+  local resolved_path="$1"
+  ACTIVE_SOURCE_DIRS="${ACTIVE_SOURCE_DIRS%"$resolved_path"$'\n'}"
+}
+
+link_tree_directory() {
+  local current_path="$1"
+  local source_root="$2"
+  local destination_root="$3"
+  local resolved_current_path
+  local source_path
+  local resolved_source_path
+  local relative_path
+  local destination_path
+
+  [[ -d "$current_path" ]] || return 0
+
+  resolved_current_path="$(realpath "$current_path" 2>/dev/null)" || return 0
+  [[ -d "$resolved_current_path" ]] || return 0
+
+  if source_dir_active "$resolved_current_path"; then
+    return 0
+  fi
+  mark_source_dir_active "$resolved_current_path"
+
+  for source_path in "$current_path"/*; do
+    [[ -e "$source_path" || -L "$source_path" ]] || continue
+
+    relative_path="${source_path#$source_root/}"
+    destination_path="$destination_root/$relative_path"
+
+    if source_dir_is_pruned "$source_root" "$source_path"; then
+      continue
+    fi
+
+    if [[ -L "$source_path" && -d "$source_path" ]]; then
+      resolved_source_path="$(realpath "$source_path" 2>/dev/null)" || continue
+      if path_is_within "$resolved_source_path" "$PORTABLE_HOME"; then
+        link_tree_directory "$source_path" "$source_root" "$destination_root"
+      else
+        link_file "$source_path" "$destination_path"
+      fi
+    elif [[ -d "$source_path" ]]; then
+      link_tree_directory "$source_path" "$source_root" "$destination_root"
+    elif [[ -f "$source_path" || -L "$source_path" ]]; then
+      link_file "$source_path" "$destination_path"
+    fi
+  done
+
+  clear_source_dir_active "$resolved_current_path"
+}
+
 link_tree_files() {
   local source_root="$1"
   local destination_root="$2"
-  local source_path
-  local relative_path
-  local normalized_source_root
-  local -a find_args
 
   [[ -d "$source_root" ]] || return 0
-  normalized_source_root="${source_root%/}"
-  normalized_source_root="${normalized_source_root%/.}"
-  find_args=( "$source_root" )
-
-  if [[ "$normalized_source_root" = "$PORTABLE_HOME" && "$OS" != Darwin ]]; then
-    find_args+=( -path "$source_root/Library" -prune -o )
-  fi
-
-  find_args+=( \( -type f -o -type l \) -print0 )
-
-  while IFS= read -r -d '' source_path; do
-    relative_path="${source_path#$source_root/}"
-    link_file "$source_path" "$destination_root/$relative_path"
-  done < <(find "${find_args[@]}")
+  link_tree_directory "$source_root" "$source_root" "$destination_root"
 }
 
 link_relative_path() {
@@ -121,4 +194,4 @@ fi
 
 log "symlinking complete."
 
-shopt -u nullglob
+shopt -u nullglob dotglob
