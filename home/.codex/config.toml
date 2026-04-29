@@ -41,6 +41,66 @@ config_file = "./agents/security-reviewer.toml"
 [agents.verifier]
 config_file = "./agents/verifier.toml"
 
+[agents.Thinking-Beast-Mode]
+config_file = "./agents/Thinking-Beast-Mode.toml"
+
+[agents.adr-generator]
+config_file = "./agents/adr-generator.toml"
+
+[agents.arch]
+config_file = "./agents/arch.toml"
+
+[agents.blueprint-mode]
+config_file = "./agents/blueprint-mode.toml"
+
+[agents.critical-thinking]
+config_file = "./agents/critical-thinking.toml"
+
+[agents.debug]
+config_file = "./agents/debug.toml"
+
+[agents.demonstrate-understanding]
+config_file = "./agents/demonstrate-understanding.toml"
+
+[agents.devils-advocate]
+config_file = "./agents/devils-advocate.toml"
+
+[agents.devops-expert]
+config_file = "./agents/devops-expert.toml"
+
+[agents.doublecheck]
+config_file = "./agents/doublecheck.toml"
+
+[agents.gilfoyle]
+config_file = "./agents/gilfoyle.toml"
+
+[agents.github-actions-expert]
+config_file = "./agents/github-actions-expert.toml"
+
+[agents.hlbpa]
+config_file = "./agents/hlbpa.toml"
+
+[agents.janitor]
+config_file = "./agents/janitor.toml"
+
+[agents.mentor]
+config_file = "./agents/mentor.toml"
+
+[agents.one-shot-feature-issue-planner]
+config_file = "./agents/one-shot-feature-issue-planner.toml"
+
+[agents.project-architecture-planner]
+config_file = "./agents/project-architecture-planner.toml"
+
+[agents.technical-content-evaluator]
+config_file = "./agents/technical-content-evaluator.toml"
+
+[agents.terraform]
+config_file = "./agents/terraform.toml"
+
+[agents.terraform-iac-reviewer]
+config_file = "./agents/terraform-iac-reviewer.toml"
+
 [profiles.safe-readonly]
 sandbox_mode = "read-only"
 
