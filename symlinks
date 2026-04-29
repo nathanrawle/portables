@@ -8,6 +8,7 @@ PORTABLE_HOME="$PORTABLES/home"
 HOME=${HOME:-~}
 OS="${OS:-$(uname -s)}"
 LINK_CONFLICT_MODE="${LINK_CONFLICT_MODE:-skip}"
+APPLY_IGNORE_RULES=1
 BACKUP_STAMP="$(date +%Y%m%d%H%M%S)"
 
 LOG_NAME="${LOG_NAME:+$LOG_NAME.}${THIS##*/}"
@@ -19,6 +20,49 @@ else
   MACHINE=$(hostname 2>/dev/null) || MACHINE=mystery-box
   MACHINE=${MACHINE%%.*}
 fi
+
+SOURCE_MOUNT_LOGICALS=()
+SOURCE_MOUNT_PHYSICALS=()
+SOURCE_MOUNT_LOGICAL_RELS=()
+SOURCE_MOUNT_PHYSICAL_RELS=()
+GIT_IGNORE_AVAILABLE=0
+IGNORED_SOURCE_PATHS=$'\n'
+
+usage() {
+  cat <<EOF
+Usage: ${THIS##*/} [--no-ignore] [--] [path...]
+EOF
+}
+
+parse_args() {
+  POSITIONAL_ARGS=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --no-ignore)
+      APPLY_IGNORE_RULES=0
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      POSITIONAL_ARGS+=( "$@" )
+      break
+      ;;
+    -*)
+      log -w "unknown option: $1"
+      usage >&2
+      exit 1
+      ;;
+    *)
+      POSITIONAL_ARGS+=( "$1" )
+      ;;
+    esac
+    shift
+  done
+}
 
 link_file() {
   local source_path="$1"
@@ -66,6 +110,43 @@ link_file() {
     log -d "linked $source_path -> $destination"
 }
 
+link_file_with_parent_ready() {
+  local source_path="$1"
+  local destination="$2"
+  local linked_target
+
+  if [[ -L "$destination" ]]; then
+    linked_target="$(readlink "$destination")"
+    if [[ "$linked_target" = "$source_path" ]]; then
+      log -d "already linked $source_path -> $destination"
+      return 0
+    fi
+  fi
+
+  if [[ -e "$destination" ]] || [[ -L "$destination" ]]; then
+    case "$LINK_CONFLICT_MODE" in
+    force)
+      rm -rf "$destination"
+      ;;
+    backup)
+      mv "$destination" "${destination}.bak.${BACKUP_STAMP}"
+      log -i "backed up $destination -> ${destination}.bak.${BACKUP_STAMP}"
+      ;;
+    skip)
+      log -w "skipping existing path: $destination"
+      return 0
+      ;;
+    *)
+      log -w "unknown LINK_CONFLICT_MODE=$LINK_CONFLICT_MODE; skipping $destination"
+      return 0
+      ;;
+    esac
+  fi
+
+  ln -s "$source_path" "$destination" &&
+    log -d "linked $source_path -> $destination"
+}
+
 path_is_within() {
   local path="$1"
   local root="$2"
@@ -74,6 +155,74 @@ path_is_within() {
   "$root" | "$root"/*) return 0 ;;
   *) return 1 ;;
   esac
+}
+
+source_path_matches_ignore_list() {
+  local source_path="$1"
+  [[ "${source_path##*/}" = ".DS_Store" ]]
+}
+
+git_ignore_is_available() {
+  command -v git >/dev/null 2>&1 || return 1
+  [[ -d "$PORTABLES/.git" || -f "$PORTABLES/.git" ]]
+}
+
+source_path_to_git_ignore_path() {
+  local source_path="$1"
+  local rewritten_path="$source_path"
+  local logical_root
+  local physical_root
+  local repo_relative_path
+  local i
+
+  for ((i = 0; i < ${#SOURCE_MOUNT_LOGICALS[@]}; i++)); do
+    logical_root="${SOURCE_MOUNT_LOGICALS[i]}"
+    physical_root="${SOURCE_MOUNT_PHYSICALS[i]}"
+    case "$rewritten_path" in
+    "$logical_root")
+      rewritten_path="$physical_root"
+      break
+      ;;
+    "$logical_root"/*)
+      rewritten_path="$physical_root${rewritten_path#$logical_root}"
+      break
+      ;;
+    esac
+  done
+
+  repo_relative_path="${rewritten_path#$PORTABLES/}"
+  [[ "$repo_relative_path" != "$rewritten_path" ]] || return 1
+  printf '%s\n' "$repo_relative_path"
+}
+
+source_path_matches_gitignore_direct() {
+  local source_path="$1"
+  local git_ignore_path
+
+  [[ "$GIT_IGNORE_AVAILABLE" -eq 1 ]] || return 1
+  git_ignore_path="$(source_path_to_git_ignore_path "$source_path")" || return 1
+  git -C "$PORTABLES" check-ignore -q --no-index -- "$git_ignore_path" 2>/dev/null
+}
+
+source_path_is_ignored() {
+  local source_path="$1"
+
+  [[ "$APPLY_IGNORE_RULES" -eq 1 ]] || return 1
+  source_path_matches_ignore_list "$source_path" ||
+    source_path_matches_gitignore_direct "$source_path"
+}
+
+ignored_source_paths_include() {
+  local source_path="$1"
+  [[ "$IGNORED_SOURCE_PATHS" == *$'\n'"$source_path"$'\n'* ]]
+}
+
+escape_basic_regex() {
+  printf '%s\n' "$1" | sed 's/[][(){}.^$*+?|\\]/\\&/g'
+}
+
+escape_sed_replacement() {
+  printf '%s\n' "$1" | sed 's/[&\\]/\\&/g'
 }
 
 source_dir_is_pruned() {
@@ -89,79 +238,173 @@ source_dir_is_pruned() {
   [[ "$relative_path" = "Library" ]]
 }
 
-ACTIVE_SOURCE_DIRS=$'\n'
+find_command_for_tree() {
+  local source_root="$1"
+  shift
 
-source_dir_active() {
-  local resolved_path="$1"
-  case "$ACTIVE_SOURCE_DIRS" in
-  *$'\n'"$resolved_path"$'\n'*) return 0 ;;
-  *) return 1 ;;
-  esac
+  if [[ "$source_root" = "$PORTABLE_HOME" && "$OS" != Darwin ]]; then
+    find -L "$source_root" \
+      \( -path "$source_root/Library" -prune \) -o \
+      "$@"
+  else
+    find -L "$source_root" "$@"
+  fi
 }
 
-mark_source_dir_active() {
-  local resolved_path="$1"
-  ACTIVE_SOURCE_DIRS+="$resolved_path"$'\n'
-}
-
-clear_source_dir_active() {
-  local resolved_path="$1"
-  ACTIVE_SOURCE_DIRS="${ACTIVE_SOURCE_DIRS%"$resolved_path"$'\n'}"
-}
-
-link_tree_directory() {
-  local current_path="$1"
-  local source_root="$2"
-  local destination_root="$3"
-  local resolved_current_path
+discover_source_mounts() {
+  local source_root="$1"
   local source_path
   local resolved_source_path
-  local relative_path
-  local destination_path
+  local logical_repo_relative
+  local physical_repo_relative
 
-  [[ -d "$current_path" ]] || return 0
+  SOURCE_MOUNT_LOGICALS=()
+  SOURCE_MOUNT_PHYSICALS=()
+  SOURCE_MOUNT_LOGICAL_RELS=()
+  SOURCE_MOUNT_PHYSICAL_RELS=()
 
-  resolved_current_path="$(realpath "$current_path" 2>/dev/null)" || return 0
-  [[ -d "$resolved_current_path" ]] || return 0
+  if [[ -L "$source_root" && -d "$source_root" ]]; then
+    resolved_source_path="$(realpath "$source_root" 2>/dev/null)" || resolved_source_path=
+    if [[ -n "$resolved_source_path" ]] && path_is_within "$resolved_source_path" "$PORTABLE_HOME"; then
+      logical_repo_relative="${source_root#$PORTABLES/}"
+      physical_repo_relative="${resolved_source_path#$PORTABLES/}"
+      SOURCE_MOUNT_LOGICALS+=( "$source_root" )
+      SOURCE_MOUNT_PHYSICALS+=( "$resolved_source_path" )
+      SOURCE_MOUNT_LOGICAL_RELS+=( "$logical_repo_relative" )
+      SOURCE_MOUNT_PHYSICAL_RELS+=( "$physical_repo_relative" )
+    fi
+  fi
 
-  if source_dir_active "$resolved_current_path"; then
+  while IFS= read -r source_path; do
+    [[ -L "$source_path" && -d "$source_path" ]] || continue
+    resolved_source_path="$(realpath "$source_path" 2>/dev/null)" || continue
+    if path_is_within "$resolved_source_path" "$PORTABLE_HOME"; then
+      logical_repo_relative="${source_path#$PORTABLES/}"
+      physical_repo_relative="${resolved_source_path#$PORTABLES/}"
+      SOURCE_MOUNT_LOGICALS+=( "$source_path" )
+      SOURCE_MOUNT_PHYSICALS+=( "$resolved_source_path" )
+      SOURCE_MOUNT_LOGICAL_RELS+=( "$logical_repo_relative" )
+      SOURCE_MOUNT_PHYSICAL_RELS+=( "$physical_repo_relative" )
+    fi
+  done < <(find "$source_root" -type l -print)
+}
+
+build_ignored_source_paths_for_tree() {
+  local files_list="$1"
+  local relative_sources
+  local ignored_results
+  local sed_script
+  local source_path
+  local escaped_logical
+  local escaped_physical
+  local i
+
+  IGNORED_SOURCE_PATHS=$'\n'
+  [[ "$APPLY_IGNORE_RULES" -eq 1 ]] || return 0
+
+  if [[ "$GIT_IGNORE_AVAILABLE" -eq 0 ]]; then
+    while IFS= read -r source_path; do
+      if source_path_matches_ignore_list "$source_path"; then
+        IGNORED_SOURCE_PATHS+="$source_path"$'\n'
+      fi
+    done <"$files_list"
     return 0
   fi
-  mark_source_dir_active "$resolved_current_path"
 
-  for source_path in "$current_path"/*; do
-    [[ -e "$source_path" || -L "$source_path" ]] || continue
+  relative_sources="$(mktemp "${TMPDIR:-/tmp}/symlinks-ignore-relative.XXXXXX")" || return 1
+  ignored_results="$(mktemp "${TMPDIR:-/tmp}/symlinks-ignore-results.XXXXXX")" || {
+    rm -f "$relative_sources"
+    return 1
+  }
+  sed_script="$(mktemp "${TMPDIR:-/tmp}/symlinks-ignore-rewrite.XXXXXX")" || {
+    rm -f "$relative_sources" "$ignored_results"
+    return 1
+  }
 
-    relative_path="${source_path#$source_root/}"
-    destination_path="$destination_root/$relative_path"
+  sed "s#^$PORTABLES/##" "$files_list" >"$relative_sources"
 
-    if source_dir_is_pruned "$source_root" "$source_path"; then
-      continue
-    fi
-
-    if [[ -L "$source_path" && -d "$source_path" ]]; then
-      resolved_source_path="$(realpath "$source_path" 2>/dev/null)" || continue
-      if path_is_within "$resolved_source_path" "$PORTABLE_HOME"; then
-        link_tree_directory "$source_path" "$source_root" "$destination_root"
-      else
-        link_file "$source_path" "$destination_path"
-      fi
-    elif [[ -d "$source_path" ]]; then
-      link_tree_directory "$source_path" "$source_root" "$destination_root"
-    elif [[ -f "$source_path" || -L "$source_path" ]]; then
-      link_file "$source_path" "$destination_path"
-    fi
+  for ((i = 0; i < ${#SOURCE_MOUNT_LOGICAL_RELS[@]}; i++)); do
+    escaped_logical="$(escape_basic_regex "${SOURCE_MOUNT_LOGICAL_RELS[i]}")"
+    escaped_physical="$(escape_sed_replacement "${SOURCE_MOUNT_PHYSICAL_RELS[i]}")"
+    printf 's#^%s/#%s/#\n' "$escaped_logical" "$escaped_physical" >>"$sed_script"
   done
 
-  clear_source_dir_active "$resolved_current_path"
+  if [[ -s "$sed_script" ]]; then
+    sed -E -f "$sed_script" "$relative_sources" >"${relative_sources}.rewritten"
+    mv "${relative_sources}.rewritten" "$relative_sources"
+  fi
+
+  git -C "$PORTABLES" check-ignore --stdin --no-index --non-matching -v \
+    <"$relative_sources" >"$ignored_results" 2>/dev/null || true
+
+  while IFS= read -r source_path; do
+    IGNORED_SOURCE_PATHS+="$source_path"$'\n'
+  done < <(
+    awk 'NR == FNR { source_paths[NR] = $0; next } { split($0, fields, "\t"); if (fields[1] != "::") print source_paths[FNR] }' \
+      "$files_list" "$ignored_results"
+  )
+
+  rm -f "$relative_sources" "$ignored_results" "$sed_script"
+}
+
+source_path_is_ignored_in_tree() {
+  local source_path="$1"
+
+  [[ "$APPLY_IGNORE_RULES" -eq 1 ]] || return 1
+  ignored_source_paths_include "$source_path"
+}
+
+prepare_tree_destination_dirs() {
+  local source_root="$1"
+  local destination_root="$2"
+  local source_dir
+  local relative_dir
+
+  mkdir -p "$destination_root"
+
+  while IFS= read -r source_dir; do
+    relative_dir="${source_dir#$source_root}"
+    [[ -n "$relative_dir" ]] || continue
+    mkdir -p "$destination_root$relative_dir"
+  done < <(find_command_for_tree "$source_root" -type d -print)
 }
 
 link_tree_files() {
   local source_root="$1"
   local destination_root="$2"
+  local files_list
+  local source_path
+  local relative_path
+  local destination_path
 
   [[ -d "$source_root" ]] || return 0
-  link_tree_directory "$source_root" "$source_root" "$destination_root"
+
+  GIT_IGNORE_AVAILABLE=0
+  if git_ignore_is_available; then
+    GIT_IGNORE_AVAILABLE=1
+  fi
+
+  discover_source_mounts "$source_root"
+  prepare_tree_destination_dirs "$source_root" "$destination_root"
+
+  files_list="$(mktemp "${TMPDIR:-/tmp}/symlinks-files.XXXXXX")" || return 1
+  find_command_for_tree "$source_root" \
+    \( -type f -o -type l \) -print >"$files_list"
+
+  build_ignored_source_paths_for_tree "$files_list"
+
+  while IFS= read -r source_path; do
+    if source_path_is_ignored_in_tree "$source_path"; then
+      log -d "ignoring $source_path"
+      continue
+    fi
+
+    relative_path="${source_path#$source_root/}"
+    destination_path="$destination_root/$relative_path"
+    link_file_with_parent_ready "$source_path" "$destination_path"
+  done <"$files_list"
+
+  rm -f "$files_list"
 }
 
 link_relative_path() {
@@ -173,6 +416,17 @@ link_relative_path() {
   source_path="${PORTABLE_HOME}${relative_path:+/$relative_path}"
   destination="${HOME}${relative_path:+/$relative_path}"
 
+  GIT_IGNORE_AVAILABLE=0
+  if git_ignore_is_available; then
+    GIT_IGNORE_AVAILABLE=1
+  fi
+  discover_source_mounts "$PORTABLE_HOME"
+
+  if source_path_is_ignored "$source_path"; then
+    log -d "ignoring $source_path"
+    return 0
+  fi
+
   if [[ -f "$source_path" ]]; then
     link_file "$source_path" "$destination"
   elif [[ -d "$source_path" ]]; then
@@ -182,9 +436,11 @@ link_relative_path() {
   fi
 }
 
-if [[ $# -gt 0 ]]; then
-  log "symlinking ${*}…"
-  for fn in "$@"; do
+parse_args "$@"
+
+if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+  log "symlinking ${POSITIONAL_ARGS[*]}…"
+  for fn in "${POSITIONAL_ARGS[@]}"; do
     link_relative_path "$fn"
   done
 else
