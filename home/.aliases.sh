@@ -35,7 +35,7 @@ alias gs='git switch'
 alias gsc='git switch -c'
 alias gs-='git switch -'
 alias gsm='git switch main'
-alias glgo='git log --stat --one-line'
+alias glgo='git log --stat --oneline'
 
 # dbt
 alias serve-dbtdocs='{ nohup dbt docs serve < /dev/null &> /tmp/dbt-docs-serve-$(date -I) & } && print "docs served in background" || print "something went wrong. Check /tmp/dbt-docs-serve-$(date -I)"'
