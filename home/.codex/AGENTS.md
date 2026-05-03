@@ -13,7 +13,8 @@ These are global, repository-agnostic working preferences that apply unless a pr
 ## Sub Agents
 - When using subagents, wait for all of them to complete.
 - Do not treat a wait timeout as failure; if a subagent is still running, call wait again with a longer timeout until it completes or clearly fails.
-- Reuse subagents when the next work increment is similar to something they worked on before.
+- reset the wait timeout after a subagent returns or errors
+- Reuse subagents when the next work increment is similar to what they worked on before.
 
 ## Core philosophy
 
@@ -58,6 +59,9 @@ Prefer the lightest solution that meets the requirement well, in this order:
 - If fast local validation exists, use it before broader test suites.
 - Report what you validated, what passed, and what you could not verify.
 - If you could not run validation, say so clearly.
+
+## After changing code
+- commit changes after each meaningful unit of work
 
 ## Communication
 
