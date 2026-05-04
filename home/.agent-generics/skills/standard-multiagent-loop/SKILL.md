@@ -1,5 +1,5 @@
 ---
-name: standard-development-loop
+name: standard-multiagent-loop
 description: Use only when the user explicitly asks for the standard development loop or explicitly asks for a multi-agent coding workflow. Do not use for ordinary plan-driven execution, small edits, direct questions, reviews, or when a more specific skill applies.
 ---
 
