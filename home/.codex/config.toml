@@ -1,8 +1,8 @@
 sandbox_mode = "workspace-write"
 personality = "pragmatic"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 plan_mode_reasoning_effort = "high"
-model = "gpt-5.4"
+model = "gpt-5.5"
 
 [history]
 persistence = "save-all"
@@ -126,6 +126,12 @@ trust_level = "trusted"
 [projects."/Users/nathan/code/portables"]
 trust_level = "trusted"
 
+[projects."/Users/nathan/code"]
+trust_level = "trusted"
+
+[projects."/Users/nathan"]
+trust_level = "trusted"
+
 [notice.model_migrations]
 "gpt-5.3-codex" = "gpt-5.4"
 
@@ -142,17 +148,14 @@ status_line = [
 "gpt-5.5" = 4
 
 [marketplaces.openai-bundled]
-last_updated = "2026-04-24T22:21:04Z"
+last_updated = "2026-05-04T11:30:11Z"
 source_type = "local"
 source = "/Users/nathan/.codex/.tmp/bundled-marketplaces/openai-bundled"
 
 [marketplaces.openai-primary-runtime]
-last_updated = "2026-04-24T22:21:27Z"
+last_updated = "2026-05-04T11:39:37Z"
 source_type = "local"
 source = "/Users/nathan/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
-
-[plugins."browser-use@openai-bundled"]
-enabled = true
 
 [plugins."documents@openai-primary-runtime"]
 enabled = true
@@ -161,4 +164,10 @@ enabled = true
 enabled = true
 
 [plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+[plugins."browser-use@openai-bundled"]
+enabled = true
+
+[plugins."github@openai-curated"]
 enabled = true
