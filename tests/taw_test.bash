@@ -392,6 +392,44 @@ test_creates_bare_worktree_from_positional_base_ref() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"
 }
 
+test_bare_positional_worktree_supports_shell_equals_command() {
+  local project fake_bin log worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" branch provisional-venues main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" -sh='ADDR=:8081 go run ./cmd/web' -- provisional-venues
+
+  worktree_real="$(cd "$project/provisional-venues" && pwd -P)"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tprovisional-venues'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex'
+  assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$worktree_real"$'\tADDR=:8081 go run ./cmd/web'
+}
+
+test_shell_option_skips_existing_window_reuse() {
+  local project fake_bin log worktree_real panes
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" branch provisional-venues main
+  git --git-dir "$project/.git" worktree add "$project/provisional-venues" provisional-venues >/dev/null 2>&1
+  worktree_real="$(cd "$project/provisional-venues" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'@8\t'"$worktree_real"$'\n'
+
+  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_PANES="$panes" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" -sh='ADDR=:8081 go run ./cmd/web' -- provisional-venues
+
+  assert_file_contains "$log" $'has-session\t-t\tproject'
+  assert_file_not_contains "$log" $'list-panes\t'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tproject:\t-n\tprovisional-venues\t-c\t'"$worktree_real"$'\tvim'
+  assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$worktree_real"$'\tADDR=:8081 go run ./cmd/web'
+}
+
 test_positional_base_ref_overrides_named_branch() {
   local project fake_bin log expected actual
 
@@ -868,6 +906,10 @@ test_case "taw: unresolved -p fails without creating window" \
   test_project_arg_unresolved_fails_without_creating_window
 test_case "taw: creates bare worktree from positional base ref" \
   test_creates_bare_worktree_from_positional_base_ref
+test_case "taw: bare positional worktree supports -sh= command" \
+  test_bare_positional_worktree_supports_shell_equals_command
+test_case "taw: shell option skips existing window reuse" \
+  test_shell_option_skips_existing_window_reuse
 test_case "taw: positional base ref overrides named branch" \
   test_positional_base_ref_overrides_named_branch
 test_case "taw: supports bare child not named .git" \

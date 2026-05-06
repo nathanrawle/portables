@@ -5,6 +5,7 @@ setopt pipefail
 
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_agent_cmd _taw_editor_cmd _taw_named_branch
+local _taw_agent_arg_provided _taw_editor_arg_provided
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_is_bare
 local _taw_session_name _taw_project_name _taw_project_session_name
@@ -17,6 +18,8 @@ _taw_project_arg=
 _taw_agent_cmd=codex
 _taw_editor_cmd=
 _taw_named_branch=
+_taw_agent_arg_provided=false
+_taw_editor_arg_provided=false
 
 _taw_die() {
   print -u2 -- "taw: $*"
@@ -596,12 +599,18 @@ _taw_switch_to_tmux_window() {
   fi
 }
 
+_taw_can_reuse_existing_window() {
+  [[ "$_taw_agent_arg_provided" != true \
+    && "$_taw_editor_arg_provided" != true \
+    && ${#_taw_shell_cmds[@]} -eq 0 ]]
+}
+
 _taw_create_tmux_window() {
   local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_editor_pane
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
 
   if tmux has-session -t "$_taw_session_name" 2>/dev/null; then
-    if _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
+    if _taw_can_reuse_existing_window && _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
       _taw_switch_to_tmux_window "$_taw_existing_window"
       return
     fi
@@ -674,22 +683,26 @@ while (( $# > 0 )); do
       (( $# >= 2 )) || _taw_die "-agent requires a value" || return 1
       [[ -n "$2" ]] || _taw_die "-agent requires a non-empty value" || return 1
       _taw_agent_cmd="$2"
+      _taw_agent_arg_provided=true
       shift 2
       ;;
     -agent=*)
       _taw_agent_cmd="${1#*=}"
       [[ -n "$_taw_agent_cmd" ]] || _taw_die "-agent requires a non-empty value" || return 1
+      _taw_agent_arg_provided=true
       shift
       ;;
     -ed|-editor)
       (( $# >= 2 )) || _taw_die "$1 requires a value" || return 1
       [[ -n "$2" ]] || _taw_die "$1 requires a non-empty value" || return 1
       _taw_editor_cmd="$2"
+      _taw_editor_arg_provided=true
       shift 2
       ;;
     -ed=*|-editor=*)
       _taw_editor_cmd="${1#*=}"
       [[ -n "$_taw_editor_cmd" ]] || _taw_die "-editor requires a non-empty value" || return 1
+      _taw_editor_arg_provided=true
       shift
       ;;
     -b|-branch)
