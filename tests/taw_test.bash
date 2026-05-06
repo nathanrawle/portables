@@ -241,6 +241,23 @@ test_normal_repo_rejects_existing_worktree_path() {
   [[ ! -f "$log" ]] || fail "expected tmux not to run after existing worktree error"
 }
 
+test_rejects_unrelated_git_repo_at_worktree_path() {
+  local project fake_bin log unrelated
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  unrelated="$project/feature-x"
+  make_git_repo "$unrelated"
+  git -C "$unrelated" checkout -qb feature-x
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" feature-x; then
+    fail "expected unrelated git repo at worktree path to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run for unrelated git repo"
+}
+
 test_rejects_empty_required_command_values() {
   local repo fake_bin log
 
@@ -362,6 +379,8 @@ test_case "taw: normal repo rejects worktree creation" \
   test_normal_repo_rejects_worktree_creation
 test_case "taw: normal repo rejects existing worktree path" \
   test_normal_repo_rejects_existing_worktree_path
+test_case "taw: rejects unrelated git repo at worktree path" \
+  test_rejects_unrelated_git_repo_at_worktree_path
 test_case "taw: rejects empty required command values" \
   test_rejects_empty_required_command_values
 test_case "taw: existing worktree branch switch prompts" \

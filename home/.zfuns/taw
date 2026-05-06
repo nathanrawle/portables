@@ -259,7 +259,7 @@ _taw_checkout_existing_worktree_branch() {
 }
 
 _taw_prepare_worktree() {
-  local _taw_path="$1" _taw_branch="$2" _taw_ref="$3"
+  local _taw_path="$1" _taw_branch="$2" _taw_ref="$3" _taw_existing_common
 
   [[ "$_taw_is_bare" == true ]] || {
     _taw_die "creating worktrees requires a bare project"
@@ -271,6 +271,15 @@ _taw_prepare_worktree() {
       _taw_die "worktree path exists but is not a git worktree: $_taw_path"
       return 1
     }
+    _taw_existing_common="$(git -C "$_taw_path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+      _taw_die "could not inspect worktree git dir: $_taw_path"
+      return 1
+    }
+    _taw_existing_common="${_taw_existing_common:A}"
+    if [[ "$_taw_existing_common" != "${_taw_git_dir:A}" ]]; then
+      _taw_die "worktree path does not belong to selected project: $_taw_path"
+      return 1
+    fi
     _taw_checkout_existing_worktree_branch "$_taw_path" "$_taw_branch" "$_taw_ref" || return 1
     return 0
   fi
