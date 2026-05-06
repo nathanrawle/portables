@@ -9,6 +9,16 @@ assert_file_contains() {
     fail "expected $path to contain: $expected"
 }
 
+assert_file_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+
+  [[ -f "$path" ]] || fail "expected file: $path"
+  if grep -F -- "$unexpected" "$path" >/dev/null; then
+    fail "expected $path not to contain: $unexpected"
+  fi
+}
+
 make_fake_tmux() {
   local root="$1"
   local bin="$root/bin"
@@ -103,10 +113,11 @@ run_taw() {
 }
 
 test_layout_with_overrides_and_shell_panes() {
-  local repo fake_bin log
+  local repo repo_real fake_bin log
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
@@ -114,22 +125,21 @@ test_layout_with_overrides_and_shell_panes() {
     run_taw "$repo" -p "$repo" -agent "claude --resume" -ed "nvim ." -sh -sh "npm test"
 
   assert_file_contains "$log" $'has-session\t-t\trepo'
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
-  assert_file_contains "$log" $'send-keys\t-t\t%1\t--\tnvim .\tC-m'
-  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1'
-  assert_file_contains "$log" $'send-keys\t-t\t%2\t--\tclaude --resume\tC-m'
-  assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2'
-  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%3'
-  assert_file_contains "$log" $'send-keys\t-t\t%4\t--\tnpm test\tC-m'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tnvim .'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tclaude --resume'
+  assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$repo_real"
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%3\t-c\t'"$repo_real"$'\tnpm test'
+  assert_file_not_contains "$log" $'send-keys\t'
   assert_file_contains "$log" $'select-window\t-t\t@1'
   assert_file_contains "$log" $'attach-session\t-t\trepo'
 }
 
 test_existing_session_adds_window_and_selects_it_before_attach() {
-  local repo fake_bin log
+  local repo repo_real fake_bin log
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
@@ -137,16 +147,17 @@ test_existing_session_adds_window_and_selects_it_before_attach() {
     run_taw "$repo" -p "$repo"
 
   assert_file_contains "$log" $'has-session\t-t\trepo'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\trepo:\t-n\trepo'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\trepo:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
   assert_file_contains "$log" $'select-window\t-t\t@1'
   assert_file_contains "$log" $'attach-session\t-t\trepo'
 }
 
 test_named_branch_checks_out_normal_repo() {
-  local repo fake_bin log branch
+  local repo repo_real fake_bin log branch
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
@@ -155,9 +166,9 @@ test_named_branch_checks_out_normal_repo() {
 
   branch="$(git -C "$repo" branch --show-current)"
   assert_eq "develop" "$branch" "expected named branch checkout"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tdevelop'
-  assert_file_contains "$log" $'send-keys\t-t\t%1\t--\tvim -u NONE\tC-m'
-  assert_file_contains "$log" $'send-keys\t-t\t%2\t--\tcodex\tC-m'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tdevelop\t-c\t'"$repo_real"$'\tvim -u NONE'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tcodex'
+  assert_file_not_contains "$log" $'send-keys\t'
 }
 
 test_creates_bare_worktree_from_positional_base_ref() {

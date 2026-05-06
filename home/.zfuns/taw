@@ -298,44 +298,47 @@ _taw_parse_created_window() {
   _taw_created_pane="${_taw_created##* }"
 }
 
-_taw_send_command() {
-  local _taw_pane="$1" _taw_command="$2"
-  [[ -n "$_taw_command" ]] || return 0
-  tmux send-keys -t "$_taw_pane" -- "$_taw_command" C-m
-}
-
 _taw_create_tmux_window() {
   local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_editor_pane
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd
 
   if tmux has-session -t "$_taw_session_name" 2>/dev/null; then
     _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
-      -t "$_taw_session_name:" -n "$_taw_window_name" -c "$_taw_window_dir")" || return 1
+      -t "$_taw_session_name:" -n "$_taw_window_name" -c "$_taw_window_dir" \
+      "$_taw_editor_cmd")" || return 1
   else
     _taw_created="$(tmux new-session -d -P -F '#{window_id} #{pane_id}' \
-      -s "$_taw_session_name" -n "$_taw_window_name" -c "$_taw_window_dir")" || return 1
+      -s "$_taw_session_name" -n "$_taw_window_name" -c "$_taw_window_dir" \
+      "$_taw_editor_cmd")" || return 1
   fi
 
   _taw_parse_created_window "$_taw_created"
   _taw_window_id="$_taw_created_window"
   _taw_editor_pane="$_taw_created_pane"
 
-  _taw_send_command "$_taw_editor_pane" "$_taw_editor_cmd" || return 1
-
   _taw_agent_pane="$(tmux split-window -h -P -F '#{pane_id}' \
-    -t "$_taw_editor_pane" -c "$_taw_window_dir")" || return 1
-  _taw_send_command "$_taw_agent_pane" "$_taw_agent_cmd" || return 1
+    -t "$_taw_editor_pane" -c "$_taw_window_dir" "$_taw_agent_cmd")" || return 1
 
   if (( ${#_taw_shell_cmds[@]} > 0 )); then
-    _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
-      -t "$_taw_agent_pane" -c "$_taw_window_dir")" || return 1
+    if [[ -n "${_taw_shell_cmds[1]}" ]]; then
+      _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
+        -t "$_taw_agent_pane" -c "$_taw_window_dir" \
+        "${_taw_shell_cmds[1]}")" || return 1
+    else
+      _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
+        -t "$_taw_agent_pane" -c "$_taw_window_dir")" || return 1
+    fi
     _taw_last_shell_pane="$_taw_shell_pane"
-    _taw_send_command "$_taw_shell_pane" "$_taw_shell_cmds[1]" || return 1
 
     for _taw_shell_cmd in "${_taw_shell_cmds[@]:1}"; do
-      _taw_last_shell_pane="$(tmux split-window -h -P -F '#{pane_id}' \
-        -t "$_taw_last_shell_pane" -c "$_taw_window_dir")" || return 1
-      _taw_send_command "$_taw_last_shell_pane" "$_taw_shell_cmd" || return 1
+      if [[ -n "$_taw_shell_cmd" ]]; then
+        _taw_last_shell_pane="$(tmux split-window -h -P -F '#{pane_id}' \
+          -t "$_taw_last_shell_pane" -c "$_taw_window_dir" \
+          "$_taw_shell_cmd")" || return 1
+      else
+        _taw_last_shell_pane="$(tmux split-window -h -P -F '#{pane_id}' \
+          -t "$_taw_last_shell_pane" -c "$_taw_window_dir")" || return 1
+      fi
     done
   fi
 
