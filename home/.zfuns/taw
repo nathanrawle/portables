@@ -358,7 +358,7 @@ _taw_bare_picker_rows() {
             _taw_branch_by_key[$_taw_key]="$_taw_branch"
             _taw_ref_by_key[$_taw_key]="$_taw_branch"
             _taw_path_by_key[$_taw_key]="$_taw_path"
-            _taw_display_by_key[$_taw_key]="$_taw_branch [worktree] $_taw_path"
+            _taw_display_by_key[$_taw_key]="$_taw_branch [worktree]"
             _taw_source_by_branch[$_taw_branch]=worktree
             _taw_key_by_branch[$_taw_branch]="$_taw_key"
           elif [[ "$_taw_is_detached_entry" == true ]]; then
@@ -367,7 +367,7 @@ _taw_bare_picker_rows() {
             _taw_branch_by_key[$_taw_key]=
             _taw_ref_by_key[$_taw_key]=
             _taw_path_by_key[$_taw_key]="$_taw_path"
-            _taw_display_by_key[$_taw_key]="${_taw_path:t} [detached] $_taw_path"
+            _taw_display_by_key[$_taw_key]="${_taw_path:t} [detached]"
           fi
         fi
         ;;

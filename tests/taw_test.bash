@@ -444,7 +444,7 @@ test_bare_project_without_worktree_opens_default_branch_worktree() {
 }
 
 test_bare_default_worktree_window_is_reused() {
-  local project fake_bin log branch worktree_real panes
+  local project fake_bin log fzf_log branch worktree_real panes display
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
@@ -452,13 +452,17 @@ test_bare_default_worktree_window_is_reused() {
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
   panes=$'@8\t'"$worktree_real"$'\n'
 
   EDITOR=vim TAW_FAKE_FZF_MATCH='main [worktree]' \
+    TAW_FZF_INPUT_LOG="$fzf_log" \
     TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_PANES="$panes" \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
+  display="$(grep -F $'main [worktree]\tworktree' "$fzf_log" | cut -f1)"
+  assert_eq "main [worktree]" "$display" "expected fzf worktree display to omit path"
   branch="$(git -C "$project/main" branch --show-current)"
   assert_eq "main" "$branch" "expected bare project default branch worktree"
   assert_file_contains "$log" $'has-session\t-t\tproject'
