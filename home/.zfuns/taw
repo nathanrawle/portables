@@ -442,6 +442,7 @@ _taw_create_tmux_window() {
   _taw_window_id="$_taw_created_window"
   _taw_editor_pane="$_taw_created_pane"
   tmux set-window-option -t "$_taw_window_id" automatic-rename off >/dev/null || return 1
+  tmux set-window-option -t "$_taw_window_id" allow-rename off >/dev/null || return 1
   tmux rename-window -t "$_taw_window_id" "$_taw_window_name" >/dev/null || return 1
 
   _taw_agent_pane="$(tmux split-window -h -P -F '#{pane_id}' \

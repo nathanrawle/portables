@@ -134,6 +134,7 @@ test_layout_with_overrides_and_shell_panes() {
   assert_file_contains "$log" $'has-session\t-t\trepo'
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tnvim .'
   assert_file_contains "$log" $'set-window-option\t-t\t@1\tautomatic-rename\toff'
+  assert_file_contains "$log" $'set-window-option\t-t\t@1\tallow-rename\toff'
   assert_file_contains "$log" $'rename-window\t-t\t@1\trepo'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tclaude --resume'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$repo_real"
@@ -158,6 +159,7 @@ test_existing_session_adds_window_and_selects_it_before_attach() {
   assert_file_contains "$log" $'has-session\t-t\trepo'
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\trepo:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
   assert_file_contains "$log" $'set-window-option\t-t\t@1\tautomatic-rename\toff'
+  assert_file_contains "$log" $'set-window-option\t-t\t@1\tallow-rename\toff'
   assert_file_contains "$log" $'rename-window\t-t\t@1\trepo'
   assert_file_contains "$log" $'select-window\t-t\t@1'
   assert_file_contains "$log" $'attach-session\t-t\trepo'
@@ -347,6 +349,8 @@ test_bare_project_without_worktree_opens_default_branch_worktree() {
   worktree_real="$(cd "$project/main" && pwd -P)"
   assert_eq "main" "$branch" "expected bare project default branch worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
+  assert_file_contains "$log" $'set-window-option\t-t\t@1\tallow-rename\toff'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\tmain'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
