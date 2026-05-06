@@ -50,6 +50,11 @@ case "${1:-}" in
     fi
     exit 1
     ;;
+  list-sessions)
+    [[ -n "${TAW_FAKE_TMUX_SESSIONS+x}" ]] || exit 1
+    printf '%b' "$TAW_FAKE_TMUX_SESSIONS"
+    [[ "$TAW_FAKE_TMUX_SESSIONS" = *$'\n' ]] || printf '\n'
+    ;;
   new-session|new-window)
     printf '@1 %%1\n'
     ;;
@@ -128,6 +133,8 @@ test_layout_with_overrides_and_shell_panes() {
 
   assert_file_contains "$log" $'has-session\t-t\trepo'
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tnvim .'
+  assert_file_contains "$log" $'set-window-option\t-t\t@1\tautomatic-rename\toff'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\trepo'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tclaude --resume'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$repo_real"
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%3\t-c\t'"$repo_real"$'\tnpm test'
@@ -150,6 +157,8 @@ test_existing_session_adds_window_and_selects_it_before_attach() {
 
   assert_file_contains "$log" $'has-session\t-t\trepo'
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\trepo:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'set-window-option\t-t\t@1\tautomatic-rename\toff'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\trepo'
   assert_file_contains "$log" $'select-window\t-t\t@1'
   assert_file_contains "$log" $'attach-session\t-t\trepo'
 }
@@ -168,9 +177,109 @@ test_named_branch_checks_out_normal_repo() {
 
   branch="$(git -C "$repo" branch --show-current)"
   assert_eq "develop" "$branch" "expected named branch checkout"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tdevelop\t-c\t'"$repo_real"$'\tvim -u NONE'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim -u NONE'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\trepo'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tcodex'
   assert_file_not_contains "$log" $'send-keys\t'
+}
+
+test_project_arg_resolves_from_projects_home() {
+  local projects_home repo repo_real fake_bin log
+
+  projects_home="$TEST_TMPDIR/projects"
+  repo="$projects_home/foo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  PROJECTS_HOME="$projects_home" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -p foo
+
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tfoo\t-n\tfoo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_not_contains "$log" $'list-sessions\t'
+}
+
+test_project_arg_direct_path_precedes_projects_home() {
+  local projects_home direct_repo projects_repo direct_real projects_real fake_bin log
+
+  projects_home="$TEST_TMPDIR/projects"
+  direct_repo="$TEST_TMPDIR/current/foo"
+  projects_repo="$projects_home/foo"
+  make_git_repo "$direct_repo"
+  make_git_repo "$projects_repo"
+  direct_real="$(cd "$direct_repo" && pwd -P)"
+  projects_real="$(cd "$projects_repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  PROJECTS_HOME="$projects_home" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/current" -p foo
+
+  assert_file_contains "$log" $'-c\t'"$direct_real"$'\tvim'
+  assert_file_not_contains "$log" $'-c\t'"$projects_real"$'\tvim'
+}
+
+test_project_arg_resolves_by_tmux_session_name() {
+  local repo repo_real fake_bin log sessions
+
+  repo="$TEST_TMPDIR/session-repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  sessions=$'agent\t'"$repo_real"$'\n'
+
+  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -p agent
+
+  assert_file_contains "$log" $'list-sessions\t-F\t#{session_name}\t#{session_path}'
+  assert_file_contains "$log" $'has-session\t-t\tagent'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tagent:\t-n\tsession-repo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\tsession-repo'
+}
+
+test_project_arg_resolves_by_tmux_session_path_basename() {
+  local repo repo_real fake_bin log sessions
+
+  repo="$TEST_TMPDIR/path-match"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  sessions=$'alpha\t'"$repo_real"$'\n'
+
+  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -p path-match
+
+  assert_file_contains "$log" $'has-session\t-t\talpha'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\talpha:\t-n\tpath-match\t-c\t'"$repo_real"$'\tvim'
+}
+
+test_project_arg_unresolved_fails_without_creating_window() {
+  local repo repo_real fake_bin log sessions
+
+  repo="$TEST_TMPDIR/other"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  sessions=$'alpha\t'"$repo_real"$'\n'
+
+  if EDITOR=vim TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -p missing; then
+    fail "expected unresolved -p project to fail"
+  fi
+
+  assert_file_contains "$log" $'list-sessions\t-F\t#{session_name}\t#{session_path}'
+  assert_file_not_contains "$log" $'new-session\t'
+  assert_file_not_contains "$log" $'new-window\t'
 }
 
 test_creates_bare_worktree_from_positional_base_ref() {
@@ -190,6 +299,7 @@ test_creates_bare_worktree_from_positional_base_ref() {
   assert_eq "feature-x" "$branch" "expected worktree branch named after worktree"
   assert_eq "$expected" "$actual" "expected worktree branch to start from positional base ref"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\tfeature-x'
   assert_file_contains "$log" $'-c\t'"$worktree_real"
 }
 
@@ -507,6 +617,16 @@ test_case "taw: existing session selects new window before attach" \
   test_existing_session_adds_window_and_selects_it_before_attach
 test_case "taw: named branch checks out normal repo" \
   test_named_branch_checks_out_normal_repo
+test_case "taw: -p resolves from PROJECTS_HOME" \
+  test_project_arg_resolves_from_projects_home
+test_case "taw: direct -p path precedes PROJECTS_HOME" \
+  test_project_arg_direct_path_precedes_projects_home
+test_case "taw: -p resolves by tmux session name" \
+  test_project_arg_resolves_by_tmux_session_name
+test_case "taw: -p resolves by tmux session path basename" \
+  test_project_arg_resolves_by_tmux_session_path_basename
+test_case "taw: unresolved -p fails without creating window" \
+  test_project_arg_unresolved_fails_without_creating_window
 test_case "taw: creates bare worktree from positional base ref" \
   test_creates_bare_worktree_from_positional_base_ref
 test_case "taw: positional base ref overrides named branch" \

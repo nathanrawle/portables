@@ -7,7 +7,7 @@ local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_is_bare
-local _taw_session_name _taw_project_name
+local _taw_session_name _taw_project_name _taw_project_session_name
 local _taw_default_branch_result _taw_default_base_ref
 
 _taw_shell_cmds=()
@@ -179,19 +179,74 @@ _taw_clone_prompted_repo() {
   print -r -- "$_taw_dest"
 }
 
+_taw_use_project_path() {
+  local _taw_path="$1" _taw_label="$2" _taw_session_name="${3:-}"
+
+  cd -- "$_taw_path" 2>/dev/null || {
+    _taw_die "could not cd to project: $_taw_label"
+    return 1
+  }
+  _taw_detect_project "$PWD" || {
+    _taw_die "not a git project: $_taw_label"
+    return 1
+  }
+  [[ -z "$_taw_session_name" ]] || _taw_project_session_name="$_taw_session_name"
+}
+
+_taw_resolve_project_from_tmux() {
+  local _taw_query="$1" _taw_sessions _taw_line _taw_session _taw_path
+  local _taw_tab=$'\t'
+
+  _taw_sessions="$(tmux list-sessions -F '#{session_name}	#{session_path}' 2>/dev/null)" || return 1
+
+  for _taw_line in "${(@f)_taw_sessions}"; do
+    _taw_session="${_taw_line%%${_taw_tab}*}"
+    _taw_path="${_taw_line#*${_taw_tab}}"
+    [[ "$_taw_path" == "$_taw_line" ]] && _taw_path=
+    [[ "$_taw_session" == "$_taw_query" && -n "$_taw_path" ]] || continue
+    _taw_use_project_path "$_taw_path" "$_taw_path" "$_taw_session"
+    return
+  done
+
+  for _taw_line in "${(@f)_taw_sessions}"; do
+    _taw_session="${_taw_line%%${_taw_tab}*}"
+    _taw_path="${_taw_line#*${_taw_tab}}"
+    [[ "$_taw_path" == "$_taw_line" ]] && _taw_path=
+    [[ -n "$_taw_path" && "${_taw_path:t}" == "$_taw_query" ]] || continue
+    _taw_use_project_path "$_taw_path" "$_taw_path" "$_taw_session"
+    return
+  done
+
+  return 1
+}
+
 _taw_resolve_project() {
-  local _taw_input _taw_resolved
+  local _taw_input _taw_resolved _taw_projects_candidate
 
   if [[ -n "$_taw_project_arg" ]]; then
-    cd -- "$_taw_project_arg" 2>/dev/null || {
+    if [[ -d "$_taw_project_arg" ]]; then
+      _taw_use_project_path "$_taw_project_arg" "$_taw_project_arg"
+      return
+    fi
+    [[ ! -e "$_taw_project_arg" && ! -L "$_taw_project_arg" ]] || {
       _taw_die "could not cd to project: $_taw_project_arg"
       return 1
     }
-    _taw_detect_project "$PWD" || {
-      _taw_die "not a git project: $_taw_project_arg"
-      return 1
-    }
-    return 0
+
+    if [[ "$_taw_project_arg" != /* && "$_taw_project_arg" != */* && -n "${PROJECTS_HOME:-}" ]]; then
+      _taw_projects_candidate="${PROJECTS_HOME:A}/$_taw_project_arg"
+      if [[ -d "$_taw_projects_candidate" ]]; then
+        _taw_use_project_path "$_taw_projects_candidate" "$_taw_projects_candidate"
+        return
+      fi
+    fi
+
+    if _taw_resolve_project_from_tmux "$_taw_project_arg"; then
+      return 0
+    fi
+
+    _taw_die "could not resolve project: $_taw_project_arg"
+    return 1
   fi
 
   if _taw_detect_project "$PWD"; then
@@ -210,14 +265,7 @@ _taw_resolve_project() {
     _taw_resolved="$(_taw_abs_path "$_taw_input")"
   fi
 
-  cd -- "$_taw_resolved" 2>/dev/null || {
-    _taw_die "could not cd to project: $_taw_resolved"
-    return 1
-  }
-  _taw_detect_project "$PWD" || {
-    _taw_die "not a git project: $_taw_resolved"
-    return 1
-  }
+  _taw_use_project_path "$_taw_resolved" "$_taw_resolved"
 }
 
 _taw_git() {
@@ -393,6 +441,8 @@ _taw_create_tmux_window() {
   _taw_parse_created_window "$_taw_created"
   _taw_window_id="$_taw_created_window"
   _taw_editor_pane="$_taw_created_pane"
+  tmux set-window-option -t "$_taw_window_id" automatic-rename off >/dev/null || return 1
+  tmux rename-window -t "$_taw_window_id" "$_taw_window_name" >/dev/null || return 1
 
   _taw_agent_pane="$(tmux split-window -h -P -F '#{pane_id}' \
     -t "$_taw_editor_pane" -c "$_taw_window_dir" "$_taw_agent_cmd")" || return 1
@@ -570,9 +620,14 @@ else
   _taw_window_name="${_taw_project_dir:t}"
 fi
 
-_taw_project_name="${_taw_project_dir:t}"
-_taw_project_name="${_taw_project_name%.git}"
-_taw_session_name="${_taw_project_name//:/_}"
+_taw_window_name="${_taw_window_dir:t}"
 _taw_window_name="${_taw_window_name//:/_}"
+if [[ -n "$_taw_project_session_name" ]]; then
+  _taw_session_name="$_taw_project_session_name"
+else
+  _taw_project_name="${_taw_project_dir:t}"
+  _taw_project_name="${_taw_project_name%.git}"
+  _taw_session_name="${_taw_project_name//:/_}"
+fi
 
 _taw_create_tmux_window
