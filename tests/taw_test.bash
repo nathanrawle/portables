@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+
+assert_file_contains() {
+  local path="$1"
+  local expected="$2"
+
+  [[ -f "$path" ]] || fail "expected file: $path"
+  grep -F -- "$expected" "$path" >/dev/null ||
+    fail "expected $path to contain: $expected"
+}
+
+make_fake_tmux() {
+  local root="$1"
+  local bin="$root/bin"
+
+  mkdir -p "$bin"
+  cat >"$bin/tmux" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${TAW_TMUX_LOG:?}"
+
+{
+  first=1
+  for arg in "$@"; do
+    if [[ $first -eq 1 ]]; then
+      printf '%s' "$arg"
+      first=0
+    else
+      printf '\t%s' "$arg"
+    fi
+  done
+  printf '\n'
+} >>"$TAW_TMUX_LOG"
+
+case "${1:-}" in
+  has-session)
+    if [[ "${TAW_FAKE_TMUX_HAS_SESSION:-0}" = 1 ]]; then
+      exit 0
+    fi
+    exit 1
+    ;;
+  new-session|new-window)
+    printf '@1 %%1\n'
+    ;;
+  split-window)
+    count_file="${TAW_TMUX_COUNT_FILE:-$TAW_TMUX_LOG.count}"
+    count=1
+    if [[ -f "$count_file" ]]; then
+      count="$(<"$count_file")"
+    fi
+    count=$((count + 1))
+    printf '%s\n' "$count" >"$count_file"
+    printf '%%%d\n' "$count"
+    ;;
+esac
+EOF
+  chmod +x "$bin/tmux"
+  printf '%s\n' "$bin"
+}
+
+make_git_repo() {
+  local repo="$1"
+
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email "taw@example.invalid"
+  git -C "$repo" config user.name "taw test"
+  printf 'main\n' >"$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm "initial commit"
+  git -C "$repo" branch -M main
+  git -C "$repo" checkout -qb develop
+  printf 'develop\n' >"$repo/develop.txt"
+  git -C "$repo" add develop.txt
+  git -C "$repo" commit -qm "develop commit"
+  git -C "$repo" checkout -q main
+}
+
+make_bare_wrapper() {
+  local root="$1"
+  local bare_name="${2:-.git}"
+  local src="$root/src"
+  local project="$root/project"
+
+  make_git_repo "$src"
+  mkdir -p "$project"
+  git clone --bare "$src" "$project/$bare_name" >/dev/null 2>&1
+  printf '%s\n' "$project"
+}
+
+run_taw() {
+  local cwd="$1"
+  shift
+
+  (
+    cd "$cwd" || exit 1
+    TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" \
+      PATH="$TAW_FAKE_TMUX_BIN:$PATH" \
+      TMUX= \
+      zsh -fc 'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw "$@"' taw "$@"
+  )
+}
+
+test_layout_with_overrides_and_shell_panes() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -agent "claude --resume" -ed "nvim ." -sh -sh "npm test"
+
+  assert_file_contains "$log" $'has-session\t-t\trepo'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
+  assert_file_contains "$log" $'send-keys\t-t\t%1\t--\tnvim .\tC-m'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1'
+  assert_file_contains "$log" $'send-keys\t-t\t%2\t--\tclaude --resume\tC-m'
+  assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%3'
+  assert_file_contains "$log" $'send-keys\t-t\t%4\t--\tnpm test\tC-m'
+  assert_file_contains "$log" $'attach-session\t-t\trepo'
+}
+
+test_named_branch_checks_out_normal_repo() {
+  local repo fake_bin log branch
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR="vim -u NONE" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b develop
+
+  branch="$(git -C "$repo" branch --show-current)"
+  assert_eq "develop" "$branch" "expected named branch checkout"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tdevelop'
+  assert_file_contains "$log" $'send-keys\t-t\t%1\t--\tvim -u NONE\tC-m'
+  assert_file_contains "$log" $'send-keys\t-t\t%2\t--\tcodex\tC-m'
+}
+
+test_creates_bare_worktree_from_positional_base_ref() {
+  local project fake_bin log expected actual branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" feature-x develop
+
+  branch="$(git -C "$project/feature-x" branch --show-current)"
+  expected="$(git -C "$project" rev-parse develop)"
+  actual="$(git -C "$project/feature-x" rev-parse HEAD)"
+  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  assert_eq "feature-x" "$branch" "expected worktree branch named after worktree"
+  assert_eq "$expected" "$actual" "expected worktree branch to start from positional base ref"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"
+}
+
+test_positional_base_ref_overrides_named_branch() {
+  local project fake_bin log expected actual
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" -b main feature-x develop
+
+  expected="$(git -C "$project" rev-parse develop)"
+  actual="$(git -C "$project/feature-x" rev-parse HEAD)"
+  assert_eq "$expected" "$actual" "expected positional base ref to override -b"
+}
+
+test_supports_bare_child_not_named_git() {
+  local project fake_bin log branch
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR" ".bare")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" feature-x develop
+
+  branch="$(git -C "$project/feature-x" branch --show-current)"
+  assert_eq "feature-x" "$branch" "expected worktree branch from .bare repo"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+}
+
+test_normal_repo_rejects_worktree_creation() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" feature-x; then
+    fail "expected normal repo worktree creation to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after worktree error"
+}
+
+test_existing_worktree_branch_switch_prompts() {
+  local project fake_bin log branch
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git -C "$project" branch feature-x develop
+  git -C "$project" worktree add -b other "$project/feature-x" main >/dev/null 2>&1
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf 'y\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" feature-x develop
+
+  branch="$(git -C "$project/feature-x" branch --show-current)"
+  assert_eq "feature-x" "$branch" "expected existing worktree to switch after confirmation"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+}
+
+test_prompts_for_existing_repo_when_not_inside_git() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf '%s\n' "$repo" | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere"
+
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
+}
+
+test_case "taw: creates tmux layout with overrides and shell panes" \
+  test_layout_with_overrides_and_shell_panes
+test_case "taw: named branch checks out normal repo" \
+  test_named_branch_checks_out_normal_repo
+test_case "taw: creates bare worktree from positional base ref" \
+  test_creates_bare_worktree_from_positional_base_ref
+test_case "taw: positional base ref overrides named branch" \
+  test_positional_base_ref_overrides_named_branch
+test_case "taw: supports bare child not named .git" \
+  test_supports_bare_child_not_named_git
+test_case "taw: normal repo rejects worktree creation" \
+  test_normal_repo_rejects_worktree_creation
+test_case "taw: existing worktree branch switch prompts" \
+  test_existing_worktree_branch_switch_prompts
+test_case "taw: prompts for repo path outside git" \
+  test_prompts_for_existing_repo_when_not_inside_git
