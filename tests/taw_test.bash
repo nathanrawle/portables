@@ -71,29 +71,31 @@ EOF
 
 make_git_repo() {
   local repo="$1"
+  local primary_branch="${2:-main}"
 
   mkdir -p "$repo"
   git -C "$repo" init -q
   git -C "$repo" config user.email "taw@example.invalid"
   git -C "$repo" config user.name "taw test"
-  printf 'main\n' >"$repo/README.md"
+  printf '%s\n' "$primary_branch" >"$repo/README.md"
   git -C "$repo" add README.md
   git -C "$repo" commit -qm "initial commit"
-  git -C "$repo" branch -M main
+  git -C "$repo" branch -M "$primary_branch"
   git -C "$repo" checkout -qb develop
   printf 'develop\n' >"$repo/develop.txt"
   git -C "$repo" add develop.txt
   git -C "$repo" commit -qm "develop commit"
-  git -C "$repo" checkout -q main
+  git -C "$repo" checkout -q "$primary_branch"
 }
 
 make_bare_wrapper() {
   local root="$1"
   local bare_name="${2:-.git}"
+  local primary_branch="${3:-main}"
   local src="$root/src"
   local project="$root/project"
 
-  make_git_repo "$src"
+  make_git_repo "$src" "$primary_branch"
   mkdir -p "$project"
   git clone --bare "$src" "$project/$bare_name" >/dev/null 2>&1
   printf '%s\n' "$project"
@@ -219,6 +221,95 @@ test_supports_bare_child_not_named_git() {
   branch="$(git -C "$project/feature-x" branch --show-current)"
   assert_eq "feature-x" "$branch" "expected worktree branch from .bare repo"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+}
+
+test_bare_project_without_worktree_opens_default_branch_worktree() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$project/main" branch --show-current)"
+  worktree_real="$(cd "$project/main" && pwd -P)"
+  assert_eq "main" "$branch" "expected bare project default branch worktree"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_project_without_default_falls_back_to_master() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR" ".git" "master")"
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$project/master" branch --show-current)"
+  worktree_real="$(cd "$project/master" && pwd -P)"
+  assert_eq "master" "$branch" "expected bare project to fall back to master"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmaster'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_project_named_branch_without_worktree_opens_branch_worktree() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" -b develop
+
+  branch="$(git -C "$project/develop" branch --show-current)"
+  worktree_real="$(cd "$project/develop" && pwd -P)"
+  assert_eq "develop" "$branch" "expected bare -b to open branch worktree"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tdevelop'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_project_reuses_existing_default_branch_worktree_when_confirmed() {
+  local project fake_bin log branch existing_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$TEST_TMPDIR/main-existing" main >/dev/null 2>&1
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf 'y\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$TEST_TMPDIR/main-existing" branch --show-current)"
+  existing_real="$(cd "$TEST_TMPDIR/main-existing" && pwd -P)"
+  assert_eq "main" "$branch" "expected accepted existing worktree to stay on main"
+  assert_not_exists "$project/main"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain-existing'
+  assert_file_contains "$log" $'-c\t'"$existing_real"$'\tvim'
+}
+
+test_bare_project_branch_with_slash_creates_nested_worktree() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" branch "feature/nested" main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" -b "feature/nested"
+
+  branch="$(git -C "$project/feature/nested" branch --show-current)"
+  worktree_real="$(cd "$project/feature/nested" && pwd -P)"
+  assert_eq "feature/nested" "$branch" "expected branch with slash to create nested worktree"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tnested'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
 test_normal_repo_rejects_worktree_creation() {
@@ -386,6 +477,16 @@ test_case "taw: positional base ref overrides named branch" \
   test_positional_base_ref_overrides_named_branch
 test_case "taw: supports bare child not named .git" \
   test_supports_bare_child_not_named_git
+test_case "taw: bare project without worktree opens default branch worktree" \
+  test_bare_project_without_worktree_opens_default_branch_worktree
+test_case "taw: bare project without default falls back to master" \
+  test_bare_project_without_default_falls_back_to_master
+test_case "taw: bare project -b opens branch worktree" \
+  test_bare_project_named_branch_without_worktree_opens_branch_worktree
+test_case "taw: bare project reuses existing default branch worktree when confirmed" \
+  test_bare_project_reuses_existing_default_branch_worktree_when_confirmed
+test_case "taw: bare project branch with slash creates nested worktree" \
+  test_bare_project_branch_with_slash_creates_nested_worktree
 test_case "taw: normal repo rejects worktree creation" \
   test_normal_repo_rejects_worktree_creation
 test_case "taw: normal repo rejects existing worktree path" \
