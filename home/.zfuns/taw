@@ -252,10 +252,9 @@ _taw_checkout_existing_worktree_branch() {
 
   if git -C "$_taw_path" show-ref --verify --quiet "refs/heads/$_taw_expected_branch"; then
     git -C "$_taw_path" checkout "$_taw_expected_branch" || return 1
-  elif [[ -n "$_taw_ref" ]]; then
-    git -C "$_taw_path" checkout -b "$_taw_expected_branch" "$_taw_ref" || return 1
   else
-    git -C "$_taw_path" checkout -b "$_taw_expected_branch" || return 1
+    [[ -n "$_taw_ref" ]] || _taw_ref="$(_taw_current_head_ref)"
+    git -C "$_taw_path" checkout -b "$_taw_expected_branch" "$_taw_ref" || return 1
   fi
 }
 
@@ -350,11 +349,13 @@ while (( $# > 0 )); do
       ;;
     -p|-proj|-prj|-r|-repo|-repository)
       (( $# >= 2 )) || _taw_die "$1 requires a value" || return 1
+      [[ -n "$2" ]] || _taw_die "$1 requires a non-empty value" || return 1
       _taw_project_arg="$2"
       shift 2
       ;;
     -p=*|-proj=*|-prj=*|-r=*|-repo=*|-repository=*)
       _taw_project_arg="${1#*=}"
+      [[ -n "$_taw_project_arg" ]] || _taw_die "${1%%=*} requires a non-empty value" || return 1
       shift
       ;;
     -agent)
@@ -381,11 +382,13 @@ while (( $# > 0 )); do
       ;;
     -b|-branch)
       (( $# >= 2 )) || _taw_die "$1 requires a value" || return 1
+      [[ -n "$2" ]] || _taw_die "$1 requires a non-empty value" || return 1
       _taw_named_branch="$2"
       shift 2
       ;;
     -b=*|-branch=*)
       _taw_named_branch="${1#*=}"
+      [[ -n "$_taw_named_branch" ]] || _taw_die "${1%%=*} requires a non-empty value" || return 1
       shift
       ;;
     -sh|-shell)

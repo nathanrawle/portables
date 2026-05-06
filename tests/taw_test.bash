@@ -279,6 +279,58 @@ test_existing_worktree_branch_switch_prompts() {
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
 }
 
+test_existing_worktree_without_base_uses_project_head() {
+  local project fake_bin log expected actual branch
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git -C "$project" branch other develop
+  git -C "$project" worktree add "$project/feature-x" other >/dev/null 2>&1
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf 'y\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" feature-x
+
+  branch="$(git -C "$project/feature-x" branch --show-current)"
+  expected="$(git -C "$project" rev-parse HEAD)"
+  actual="$(git -C "$project/feature-x" rev-parse HEAD)"
+  assert_eq "feature-x" "$branch" "expected existing worktree to switch to basename branch"
+  assert_eq "$expected" "$actual" "expected missing basename branch to start from project HEAD"
+}
+
+test_rejects_empty_project_and_branch_values() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p ""; then
+    fail "expected empty -p value to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after empty -p value"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p=; then
+    fail "expected empty -p= value to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after empty -p= value"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b ""; then
+    fail "expected empty -b value to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after empty -b value"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b=; then
+    fail "expected empty -b= value to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after empty -b= value"
+}
+
 test_prompts_for_existing_repo_when_not_inside_git() {
   local repo fake_bin log
 
@@ -314,5 +366,9 @@ test_case "taw: rejects empty required command values" \
   test_rejects_empty_required_command_values
 test_case "taw: existing worktree branch switch prompts" \
   test_existing_worktree_branch_switch_prompts
+test_case "taw: existing worktree without base uses project head" \
+  test_existing_worktree_without_base_uses_project_head
+test_case "taw: rejects empty project and branch values" \
+  test_rejects_empty_project_and_branch_values
 test_case "taw: prompts for repo path outside git" \
   test_prompts_for_existing_repo_when_not_inside_git
