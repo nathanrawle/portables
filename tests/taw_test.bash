@@ -121,6 +121,24 @@ test_layout_with_overrides_and_shell_panes() {
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%3'
   assert_file_contains "$log" $'send-keys\t-t\t%4\t--\tnpm test\tC-m'
+  assert_file_contains "$log" $'select-window\t-t\t@1'
+  assert_file_contains "$log" $'attach-session\t-t\trepo'
+}
+
+test_existing_session_adds_window_and_selects_it_before_attach() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo"
+
+  assert_file_contains "$log" $'has-session\t-t\trepo'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\trepo:\t-n\trepo'
+  assert_file_contains "$log" $'select-window\t-t\t@1'
   assert_file_contains "$log" $'attach-session\t-t\trepo'
 }
 
@@ -207,6 +225,43 @@ test_normal_repo_rejects_worktree_creation() {
   [[ ! -f "$log" ]] || fail "expected tmux not to run after worktree error"
 }
 
+test_normal_repo_rejects_existing_worktree_path() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add -b feature-x "$repo/feature-x" >/dev/null 2>&1
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" feature-x; then
+    fail "expected normal repo existing worktree path to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after existing worktree error"
+}
+
+test_rejects_empty_required_command_values() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -agent=; then
+    fail "expected empty -agent= to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after empty -agent="
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -ed=; then
+    fail "expected empty -ed= to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after empty -ed="
+}
+
 test_existing_worktree_branch_switch_prompts() {
   local project fake_bin log branch
 
@@ -241,6 +296,8 @@ test_prompts_for_existing_repo_when_not_inside_git() {
 
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
+test_case "taw: existing session selects new window before attach" \
+  test_existing_session_adds_window_and_selects_it_before_attach
 test_case "taw: named branch checks out normal repo" \
   test_named_branch_checks_out_normal_repo
 test_case "taw: creates bare worktree from positional base ref" \
@@ -251,6 +308,10 @@ test_case "taw: supports bare child not named .git" \
   test_supports_bare_child_not_named_git
 test_case "taw: normal repo rejects worktree creation" \
   test_normal_repo_rejects_worktree_creation
+test_case "taw: normal repo rejects existing worktree path" \
+  test_normal_repo_rejects_existing_worktree_path
+test_case "taw: rejects empty required command values" \
+  test_rejects_empty_required_command_values
 test_case "taw: existing worktree branch switch prompts" \
   test_existing_worktree_branch_switch_prompts
 test_case "taw: prompts for repo path outside git" \
