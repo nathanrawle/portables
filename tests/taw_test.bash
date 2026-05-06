@@ -333,6 +333,21 @@ test_bare_project_branch_with_slash_creates_nested_worktree() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_bare_project_invalid_branch_does_not_create_parent_dirs() {
+  local project fake_bin log
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" -b "../outside/foo"; then
+    fail "expected invalid bare branch to fail"
+  fi
+  assert_not_exists "$TEST_TMPDIR/outside"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after invalid bare branch"
+}
+
 test_normal_repo_rejects_worktree_creation() {
   local repo fake_bin log
 
@@ -510,6 +525,8 @@ test_case "taw: bare project reuses existing default branch worktree when confir
   test_bare_project_reuses_existing_default_branch_worktree_when_confirmed
 test_case "taw: bare project branch with slash creates nested worktree" \
   test_bare_project_branch_with_slash_creates_nested_worktree
+test_case "taw: bare project invalid branch does not create parent dirs" \
+  test_bare_project_invalid_branch_does_not_create_parent_dirs
 test_case "taw: normal repo rejects worktree creation" \
   test_normal_repo_rejects_worktree_creation
 test_case "taw: normal repo rejects existing worktree path" \

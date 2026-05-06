@@ -338,6 +338,10 @@ _taw_prepare_worktree() {
     _taw_die "creating worktrees requires a bare project"
     return 1
   }
+  git check-ref-format --branch "$_taw_branch" >/dev/null 2>&1 || {
+    _taw_die "invalid worktree branch: $_taw_branch"
+    return 1
+  }
 
   if [[ -e "$_taw_path" ]]; then
     git -C "$_taw_path" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
