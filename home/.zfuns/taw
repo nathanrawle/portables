@@ -9,6 +9,7 @@ local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_is_bare
 local _taw_session_name _taw_project_name _taw_project_session_name
 local _taw_default_branch_result _taw_default_base_ref
+local _taw_picker_kind _taw_picker_branch _taw_picker_ref _taw_picker_path
 
 _taw_shell_cmds=()
 _taw_positionals=()
@@ -321,6 +322,132 @@ _taw_default_branch() {
   return 1
 }
 
+_taw_bare_picker_rows() {
+  local _taw_worktrees _taw_refs _taw_line _taw_path _taw_branch_ref
+  local _taw_is_bare_entry _taw_is_detached_entry _taw_branch _taw_key
+  local _taw_ref _taw_rest _taw_remote _taw_source _taw_display
+  local -A _taw_kind_by_key _taw_branch_by_key _taw_ref_by_key _taw_path_by_key
+  local -A _taw_display_by_key _taw_source_by_branch _taw_key_by_branch
+
+  _taw_worktrees="$(_taw_git worktree list --porcelain 2>/dev/null)" || return 1
+  for _taw_line in "${(@f)_taw_worktrees}" ""; do
+    case "$_taw_line" in
+      worktree\ *)
+        _taw_path="${_taw_line#worktree }"
+        _taw_branch_ref=
+        _taw_is_bare_entry=false
+        _taw_is_detached_entry=false
+        ;;
+      branch\ *)
+        _taw_branch_ref="${_taw_line#branch }"
+        ;;
+      bare)
+        _taw_is_bare_entry=true
+        ;;
+      detached)
+        _taw_is_detached_entry=true
+        ;;
+      "")
+        if [[ -n "$_taw_path" && "$_taw_is_bare_entry" != true ]]; then
+          if [[ "$_taw_branch_ref" == refs/heads/* ]]; then
+            _taw_branch="${_taw_branch_ref#refs/heads/}"
+            _taw_key="branch:$_taw_branch"
+            _taw_kind_by_key[$_taw_key]=worktree
+            _taw_branch_by_key[$_taw_key]="$_taw_branch"
+            _taw_ref_by_key[$_taw_key]="$_taw_branch"
+            _taw_path_by_key[$_taw_key]="$_taw_path"
+            _taw_display_by_key[$_taw_key]="$_taw_branch [worktree] $_taw_path"
+            _taw_source_by_branch[$_taw_branch]=worktree
+            _taw_key_by_branch[$_taw_branch]="$_taw_key"
+          elif [[ "$_taw_is_detached_entry" == true ]]; then
+            _taw_key="detached:$_taw_path"
+            _taw_kind_by_key[$_taw_key]=worktree
+            _taw_branch_by_key[$_taw_key]=
+            _taw_ref_by_key[$_taw_key]=
+            _taw_path_by_key[$_taw_key]="$_taw_path"
+            _taw_display_by_key[$_taw_key]="${_taw_path:t} [detached] $_taw_path"
+          fi
+        fi
+        ;;
+    esac
+  done
+
+  _taw_refs="$(_taw_git for-each-ref --sort=refname --format='%(refname)' refs/heads refs/remotes 2>/dev/null)" \
+    || _taw_refs=
+  for _taw_ref in "${(@f)_taw_refs}"; do
+    _taw_source=
+    case "$_taw_ref" in
+      refs/heads/*)
+        _taw_branch="${_taw_ref#refs/heads/}"
+        _taw_source=local
+        ;;
+      refs/remotes/*/HEAD)
+        continue
+        ;;
+      refs/remotes/*/*)
+        _taw_rest="${_taw_ref#refs/remotes/}"
+        _taw_remote="${_taw_rest%%/*}"
+        _taw_branch="${_taw_rest#*/}"
+        _taw_ref="$_taw_remote/$_taw_branch"
+        _taw_source=remote
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    [[ -n "$_taw_branch" ]] || continue
+    [[ "${_taw_source_by_branch[$_taw_branch]-}" != worktree ]] || continue
+    if [[ "$_taw_source" == local ]]; then
+      _taw_key="branch:$_taw_branch"
+      _taw_source_by_branch[$_taw_branch]=local
+      _taw_key_by_branch[$_taw_branch]="$_taw_key"
+      _taw_kind_by_key[$_taw_key]=branch
+      _taw_branch_by_key[$_taw_key]="$_taw_branch"
+      _taw_ref_by_key[$_taw_key]="$_taw_branch"
+      _taw_path_by_key[$_taw_key]=
+      _taw_display_by_key[$_taw_key]="$_taw_branch"
+      continue
+    fi
+
+    if [[ -n "${_taw_source_by_branch[$_taw_branch]-}" ]]; then
+      [[ "${_taw_source_by_branch[$_taw_branch]}" == remote && "$_taw_remote" == origin ]] || continue
+    fi
+
+    _taw_key="branch:$_taw_branch"
+    _taw_source_by_branch[$_taw_branch]=remote
+    _taw_key_by_branch[$_taw_branch]="$_taw_key"
+    _taw_kind_by_key[$_taw_key]=branch
+    _taw_branch_by_key[$_taw_key]="$_taw_branch"
+    _taw_ref_by_key[$_taw_key]="$_taw_ref"
+    _taw_path_by_key[$_taw_key]=
+    _taw_display_by_key[$_taw_key]="$_taw_branch"
+  done
+
+  for _taw_key in "${(@ok)_taw_kind_by_key}"; do
+    _taw_display="${_taw_display_by_key[$_taw_key]}"
+    print -r -- "$_taw_display	${_taw_kind_by_key[$_taw_key]}	${_taw_branch_by_key[$_taw_key]}	${_taw_ref_by_key[$_taw_key]}	${_taw_path_by_key[$_taw_key]}"
+  done
+}
+
+_taw_select_bare_target_with_fzf() {
+  local _taw_rows _taw_choice
+  local -a _taw_fields
+
+  _taw_rows="$(_taw_bare_picker_rows)" || return 2
+  [[ -n "$_taw_rows" ]] || return 2
+  _taw_choice="$(print -r -- "$_taw_rows" \
+    | fzf --delimiter=$'\t' --with-nth=1 --prompt='taw> ')" || return 1
+  [[ -n "$_taw_choice" ]] || return 1
+
+  _taw_fields=( "${(@ps:\t:)_taw_choice}" )
+  (( ${#_taw_fields[@]} >= 5 )) || return 1
+  _taw_picker_kind="${_taw_fields[2]}"
+  _taw_picker_branch="${_taw_fields[3]}"
+  _taw_picker_ref="${_taw_fields[4]}"
+  _taw_picker_path="${_taw_fields[5]}"
+}
+
 _taw_existing_worktree_for_branch() {
   local _taw_branch="refs/heads/$1" _taw_output _taw_line
   local _taw_path _taw_seen_branch _taw_is_bare_entry
@@ -619,11 +746,52 @@ if [[ -n "$_taw_worktree_arg" ]]; then
   _taw_window_name="${_taw_window_dir:t}"
   _taw_prepare_worktree "$_taw_window_dir" "$_taw_window_name" "$_taw_base_ref" || return 1
 elif [[ "$_taw_is_bare" == true ]]; then
-  local _taw_branch_worktree _taw_branch_ref _taw_existing_worktree
+  local _taw_branch_worktree _taw_branch_ref _taw_existing_worktree _taw_skip_prepare_worktree
 
+  _taw_skip_prepare_worktree=false
   if [[ -n "$_taw_base_ref" ]]; then
     _taw_branch_worktree="$_taw_base_ref"
     _taw_branch_ref="$_taw_base_ref"
+  elif command -v fzf >/dev/null 2>&1; then
+    _taw_select_bare_target_with_fzf
+    case $? in
+      0)
+        case "$_taw_picker_kind" in
+          worktree)
+            [[ -n "$_taw_picker_path" ]] || {
+              _taw_die "selected worktree is missing a path"
+              return 1
+            }
+            _taw_window_dir="${_taw_picker_path:A}"
+            _taw_skip_prepare_worktree=true
+            ;;
+          branch)
+            [[ -n "$_taw_picker_branch" && -n "$_taw_picker_ref" ]] || {
+              _taw_die "selected branch is incomplete"
+              return 1
+            }
+            _taw_branch_worktree="$_taw_picker_branch"
+            _taw_branch_ref="$_taw_picker_ref"
+            ;;
+          *)
+            _taw_die "unknown picker selection: $_taw_picker_kind"
+            return 1
+            ;;
+        esac
+        ;;
+      2)
+        _taw_default_branch || {
+          _taw_die "could not determine default branch for bare project"
+          return 1
+        }
+        _taw_branch_worktree="$_taw_default_branch_result"
+        _taw_branch_ref="$_taw_default_base_ref"
+        ;;
+      *)
+        _taw_die "worktree selection cancelled"
+        return 1
+        ;;
+    esac
   else
     _taw_default_branch || {
       _taw_die "could not determine default branch for bare project"
@@ -633,17 +801,21 @@ elif [[ "$_taw_is_bare" == true ]]; then
     _taw_branch_ref="$_taw_default_base_ref"
   fi
 
-  _taw_window_dir="${_taw_project_dir:A}/$_taw_branch_worktree"
-  _taw_existing_worktree="$(_taw_existing_worktree_for_branch "$_taw_branch_worktree")" \
-    || _taw_existing_worktree=
-  if [[ -n "$_taw_existing_worktree" && "${_taw_existing_worktree:A}" != "${_taw_window_dir:A}" ]]; then
-    if _taw_confirm "Branch $_taw_branch_worktree already has a worktree at $_taw_existing_worktree; open it?"; then
-      _taw_window_dir="${_taw_existing_worktree:A}"
+  if [[ "$_taw_skip_prepare_worktree" != true ]]; then
+    _taw_window_dir="${_taw_project_dir:A}/$_taw_branch_worktree"
+    _taw_existing_worktree="$(_taw_existing_worktree_for_branch "$_taw_branch_worktree")" \
+      || _taw_existing_worktree=
+    if [[ -n "$_taw_existing_worktree" && "${_taw_existing_worktree:A}" != "${_taw_window_dir:A}" ]]; then
+      if _taw_confirm "Branch $_taw_branch_worktree already has a worktree at $_taw_existing_worktree; open it?"; then
+        _taw_window_dir="${_taw_existing_worktree:A}"
+      fi
     fi
   fi
 
   _taw_window_name="${_taw_window_dir:t}"
-  _taw_prepare_worktree "$_taw_window_dir" "$_taw_branch_worktree" "$_taw_branch_ref" || return 1
+  if [[ "$_taw_skip_prepare_worktree" != true ]]; then
+    _taw_prepare_worktree "$_taw_window_dir" "$_taw_branch_worktree" "$_taw_branch_ref" || return 1
+  fi
 elif [[ -n "$_taw_base_ref" ]]; then
   git -C "$_taw_project_dir" checkout "$_taw_base_ref" || return 1
   _taw_window_dir="$_taw_project_dir"

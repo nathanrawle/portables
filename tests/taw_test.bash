@@ -79,6 +79,51 @@ EOF
   printf '%s\n' "$bin"
 }
 
+make_fake_fzf() {
+  local bin="$1"
+
+  cat >"$bin/fzf" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+lines=()
+while IFS= read -r line; do
+  lines+=( "$line" )
+done
+
+if [[ -n "${TAW_FZF_INPUT_LOG:-}" ]]; then
+  printf '%s\n' "${lines[@]}" >"$TAW_FZF_INPUT_LOG"
+fi
+
+if [[ "${TAW_FAKE_FZF_CANCEL:-0}" = 1 ]]; then
+  exit 130
+fi
+
+if [[ ${#lines[@]} -eq 0 ]]; then
+  exit 1
+fi
+
+if [[ -n "${TAW_FAKE_FZF_MATCH:-}" ]]; then
+  for line in "${lines[@]}"; do
+    if [[ "$line" == *"$TAW_FAKE_FZF_MATCH"* ]]; then
+      printf '%s\n' "$line"
+      exit 0
+    fi
+  done
+  exit 1
+fi
+
+index="${TAW_FAKE_FZF_INDEX:-1}"
+if [[ "$index" =~ ^[0-9]+$ ]] && (( index >= 1 && index <= ${#lines[@]} )); then
+  printf '%s\n' "${lines[$((index - 1))]}"
+  exit 0
+fi
+
+exit 1
+EOF
+  chmod +x "$bin/fzf"
+}
+
 make_git_repo() {
   local repo="$1"
   local primary_branch="${2:-main}"
@@ -113,12 +158,14 @@ make_bare_wrapper() {
 
 run_taw() {
   local cwd="$1"
+  local taw_path
   shift
+  taw_path="${TAW_RUN_PATH:-$TAW_FAKE_TMUX_BIN:$PATH}"
 
   (
     cd "$cwd" || exit 1
     TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" \
-      PATH="$TAW_FAKE_TMUX_BIN:$PATH" \
+      PATH="$taw_path" \
       TMUX= \
       zsh -fc 'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw "$@"' taw "$@"
   )
@@ -370,9 +417,11 @@ test_bare_project_without_worktree_opens_default_branch_worktree() {
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'main\tbranch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
   branch="$(git -C "$project/main" branch --show-current)"
@@ -391,10 +440,12 @@ test_bare_default_worktree_window_is_reused() {
   git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
   worktree_real="$(cd "$project/main" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
   panes=$'@8\t'"$worktree_real"$'\n'
 
-  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_PANES="$panes" \
+  EDITOR=vim TAW_FAKE_FZF_MATCH='main [worktree]' \
+    TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_PANES="$panes" \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
@@ -418,6 +469,7 @@ test_bare_project_without_default_falls_back_to_master() {
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$fake_bin:/usr/bin:/bin" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
   branch="$(git -C "$project/master" branch --show-current)"
@@ -436,9 +488,11 @@ test_bare_project_origin_head_only_creates_local_default_worktree() {
   git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
   git --git-dir "$project/.git" update-ref -d refs/heads/main
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'main\tbranch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
   branch="$(git -C "$project/main" branch --show-current)"
@@ -446,6 +500,88 @@ test_bare_project_origin_head_only_creates_local_default_worktree() {
   assert_eq "main" "$branch" "expected origin/HEAD-only repo to create local main worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_picker_lists_deduped_branches() {
+  local project fake_bin log fzf_log main_count remote_count
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/main refs/heads/develop
+  git --git-dir "$project/.git" update-ref refs/remotes/upstream/remote-only refs/heads/main
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/remote-only refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'main\tbranch' TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  main_count="$(grep -F $'main\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
+  remote_count="$(grep -F $'remote-only\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
+  assert_eq "1" "$main_count" "expected local and remote main to dedupe to one picker row"
+  assert_eq "1" "$remote_count" "expected duplicate remote branches to dedupe to one picker row"
+  assert_file_contains "$fzf_log" $'remote-only\tbranch\tremote-only\torigin/remote-only\t'
+  assert_file_not_contains "$fzf_log" $'origin/main'
+  assert_file_not_contains "$fzf_log" $'upstream/remote-only'
+}
+
+test_bare_picker_remote_branch_creates_local_worktree() {
+  local project fake_bin log branch worktree_real expected actual
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/feature/remote refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'feature/remote\tbranch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$project/feature/remote" branch --show-current)"
+  worktree_real="$(cd "$project/feature/remote" && pwd -P)"
+  expected="$(git --git-dir "$project/.git" rev-parse refs/remotes/origin/feature/remote)"
+  actual="$(git -C "$project/feature/remote" rev-parse HEAD)"
+  assert_eq "feature/remote" "$branch" "expected remote picker branch to create local branch"
+  assert_eq "$expected" "$actual" "expected remote picker branch to start from remote ref"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tremote'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_picker_prefers_origin_for_duplicate_remotes() {
+  local project fake_bin log expected actual
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" update-ref refs/remotes/upstream/remote-choice refs/heads/main
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/remote-choice refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'remote-choice\tbranch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  expected="$(git --git-dir "$project/.git" rev-parse refs/remotes/origin/remote-choice)"
+  actual="$(git -C "$project/remote-choice" rev-parse HEAD)"
+  assert_eq "$expected" "$actual" "expected duplicate remote branch to prefer origin"
+}
+
+test_bare_picker_cancel_aborts_before_tmux() {
+  local project fake_bin log
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_CANCEL=1 TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"; then
+    fail "expected fzf cancellation to abort taw"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after fzf cancellation"
 }
 
 test_bare_project_named_branch_without_worktree_opens_branch_worktree() {
@@ -471,9 +607,11 @@ test_bare_project_reuses_existing_default_branch_worktree_when_confirmed() {
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   git --git-dir "$project/.git" worktree add "$TEST_TMPDIR/main-existing" main >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
 
-  printf 'y\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  printf 'y\n' | EDITOR=vim TAW_FAKE_FZF_MATCH='main [worktree]' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
   branch="$(git -C "$TEST_TMPDIR/main-existing" branch --show-current)"
@@ -702,6 +840,14 @@ test_case "taw: bare project without default falls back to master" \
   test_bare_project_without_default_falls_back_to_master
 test_case "taw: bare project with only origin HEAD creates local default worktree" \
   test_bare_project_origin_head_only_creates_local_default_worktree
+test_case "taw: bare picker lists deduped branches" \
+  test_bare_picker_lists_deduped_branches
+test_case "taw: bare picker remote branch creates local worktree" \
+  test_bare_picker_remote_branch_creates_local_worktree
+test_case "taw: bare picker prefers origin for duplicate remotes" \
+  test_bare_picker_prefers_origin_for_duplicate_remotes
+test_case "taw: bare picker cancel aborts before tmux" \
+  test_bare_picker_cancel_aborts_before_tmux
 test_case "taw: bare project -b opens branch worktree" \
   test_bare_project_named_branch_without_worktree_opens_branch_worktree
 test_case "taw: bare project reuses existing default branch worktree when confirmed" \
