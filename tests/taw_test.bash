@@ -124,6 +124,16 @@ EOF
   chmod +x "$bin/fzf"
 }
 
+make_path_without_fzf() {
+  local bin="$1"
+
+  ln -sf "$(command -v bash)" "$bin/bash"
+  ln -sf "$(command -v git)" "$bin/git"
+  ln -sf "$(command -v mkdir)" "$bin/mkdir"
+  ln -sf "$(command -v zsh)" "$bin/zsh"
+  printf '%s\n' "$bin"
+}
+
 make_git_repo() {
   local repo="$1"
   local primary_branch="${2:-main}"
@@ -461,15 +471,16 @@ test_bare_default_worktree_window_is_reused() {
 }
 
 test_bare_project_without_default_falls_back_to_master() {
-  local project fake_bin log branch worktree_real
+  local project fake_bin log branch worktree_real no_fzf_path
 
   project="$(make_bare_wrapper "$TEST_TMPDIR" ".git" "master")"
   git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    TAW_RUN_PATH="$fake_bin:/usr/bin:/bin" \
+    TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
   branch="$(git -C "$project/master" branch --show-current)"
@@ -567,6 +578,31 @@ test_bare_picker_prefers_origin_for_duplicate_remotes() {
   expected="$(git --git-dir "$project/.git" rev-parse refs/remotes/origin/remote-choice)"
   actual="$(git -C "$project/remote-choice" rev-parse HEAD)"
   assert_eq "$expected" "$actual" "expected duplicate remote branch to prefer origin"
+}
+
+test_bare_picker_strips_slash_remote_names() {
+  local project fake_bin log expected actual branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" remote add "foo/bar" "$TEST_TMPDIR/remote.git"
+  git --git-dir "$project/.git" update-ref refs/remotes/foo/bar/topic refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'topic\tbranch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$project/topic" branch --show-current)"
+  worktree_real="$(cd "$project/topic" && pwd -P)"
+  expected="$(git --git-dir "$project/.git" rev-parse refs/remotes/foo/bar/topic)"
+  actual="$(git -C "$project/topic" rev-parse HEAD)"
+  assert_eq "topic" "$branch" "expected slash remote name to be stripped from branch"
+  assert_eq "$expected" "$actual" "expected slash remote branch to start from full remote ref"
+  assert_not_exists "$project/bar/topic"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\ttopic'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
 test_bare_picker_cancel_aborts_before_tmux() {
@@ -846,6 +882,8 @@ test_case "taw: bare picker remote branch creates local worktree" \
   test_bare_picker_remote_branch_creates_local_worktree
 test_case "taw: bare picker prefers origin for duplicate remotes" \
   test_bare_picker_prefers_origin_for_duplicate_remotes
+test_case "taw: bare picker strips slash remote names" \
+  test_bare_picker_strips_slash_remote_names
 test_case "taw: bare picker cancel aborts before tmux" \
   test_bare_picker_cancel_aborts_before_tmux
 test_case "taw: bare project -b opens branch worktree" \

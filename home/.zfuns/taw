@@ -326,6 +326,8 @@ _taw_bare_picker_rows() {
   local _taw_worktrees _taw_refs _taw_line _taw_path _taw_branch_ref
   local _taw_is_bare_entry _taw_is_detached_entry _taw_branch _taw_key
   local _taw_ref _taw_rest _taw_remote _taw_source _taw_display
+  local _taw_remote_candidate _taw_remote_prefix
+  local -a _taw_remotes
   local -A _taw_kind_by_key _taw_branch_by_key _taw_ref_by_key _taw_path_by_key
   local -A _taw_display_by_key _taw_source_by_branch _taw_key_by_branch
 
@@ -374,6 +376,7 @@ _taw_bare_picker_rows() {
 
   _taw_refs="$(_taw_git for-each-ref --sort=refname --format='%(refname)' refs/heads refs/remotes 2>/dev/null)" \
     || _taw_refs=
+  _taw_remotes=( "${(@f)$(_taw_git remote 2>/dev/null)}" )
   for _taw_ref in "${(@f)_taw_refs}"; do
     _taw_source=
     case "$_taw_ref" in
@@ -381,13 +384,22 @@ _taw_bare_picker_rows() {
         _taw_branch="${_taw_ref#refs/heads/}"
         _taw_source=local
         ;;
-      refs/remotes/*/HEAD)
-        continue
-        ;;
-      refs/remotes/*/*)
+      refs/remotes/*)
         _taw_rest="${_taw_ref#refs/remotes/}"
-        _taw_remote="${_taw_rest%%/*}"
-        _taw_branch="${_taw_rest#*/}"
+        _taw_remote=
+        for _taw_remote_candidate in "${_taw_remotes[@]}"; do
+          _taw_remote_prefix="$_taw_remote_candidate/"
+          if [[ "${_taw_rest[1,${#_taw_remote_prefix}]}" == "$_taw_remote_prefix" \
+              && ${#_taw_remote_candidate} -gt ${#_taw_remote} ]]; then
+            _taw_remote="$_taw_remote_candidate"
+            _taw_branch="${_taw_rest[$(( ${#_taw_remote_prefix} + 1 )),-1]}"
+          fi
+        done
+        if [[ -z "$_taw_remote" ]]; then
+          _taw_remote="${_taw_rest%%/*}"
+          _taw_branch="${_taw_rest#*/}"
+        fi
+        [[ -n "$_taw_remote" && "$_taw_branch" != "$_taw_rest" && "$_taw_branch" != HEAD ]] || continue
         _taw_ref="$_taw_remote/$_taw_branch"
         _taw_source=remote
         ;;
