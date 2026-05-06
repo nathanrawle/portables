@@ -424,11 +424,49 @@ _taw_parse_created_window() {
   _taw_created_pane="${_taw_created##* }"
 }
 
+_taw_existing_tmux_window_for_dir() {
+  local _taw_panes _taw_line _taw_window _taw_pane_path _taw_pane_real
+  local _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
+
+  _taw_panes="$(tmux list-panes -s -t "$_taw_session_name:" \
+    -F '#{window_id}	#{pane_current_path}' 2>/dev/null)" || return 1
+
+  for _taw_line in "${(@f)_taw_panes}"; do
+    _taw_window="${_taw_line%%${_taw_tab}*}"
+    _taw_pane_path="${_taw_line#*${_taw_tab}}"
+    [[ "$_taw_pane_path" != "$_taw_line" && -n "$_taw_window" && -d "$_taw_pane_path" ]] || continue
+    _taw_pane_real="${_taw_pane_path:A}"
+    if [[ "$_taw_pane_real" == "$_taw_target_dir" || "$_taw_pane_real" == "$_taw_target_dir"/* ]]; then
+      print -r -- "$_taw_window"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+_taw_switch_to_tmux_window() {
+  local _taw_window_id="$1"
+
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "$_taw_session_name" || return 1
+    tmux select-window -t "$_taw_window_id" || return 1
+  else
+    tmux select-window -t "$_taw_window_id" || return 1
+    tmux attach-session -t "$_taw_session_name" || return 1
+  fi
+}
+
 _taw_create_tmux_window() {
   local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_editor_pane
-  local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd
+  local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
 
   if tmux has-session -t "$_taw_session_name" 2>/dev/null; then
+    if _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
+      _taw_switch_to_tmux_window "$_taw_existing_window"
+      return
+    fi
+
     _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
       -t "$_taw_session_name:" -n "$_taw_window_name" -c "$_taw_window_dir" \
       "$_taw_editor_cmd")" || return 1
@@ -472,13 +510,7 @@ _taw_create_tmux_window() {
   fi
 
   tmux select-pane -t "$_taw_editor_pane" >/dev/null 2>&1 || return 1
-  if [[ -n "${TMUX:-}" ]]; then
-    tmux switch-client -t "$_taw_session_name" || return 1
-    tmux select-window -t "$_taw_window_id" || return 1
-  else
-    tmux select-window -t "$_taw_window_id" || return 1
-    tmux attach-session -t "$_taw_session_name" || return 1
-  fi
+  _taw_switch_to_tmux_window "$_taw_window_id"
 }
 
 while (( $# > 0 )); do

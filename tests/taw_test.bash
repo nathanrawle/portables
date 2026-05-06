@@ -50,6 +50,11 @@ case "${1:-}" in
     fi
     exit 1
     ;;
+  list-panes)
+    [[ -n "${TAW_FAKE_TMUX_PANES+x}" ]] || exit 1
+    printf '%b' "$TAW_FAKE_TMUX_PANES"
+    [[ "$TAW_FAKE_TMUX_PANES" = *$'\n' ]] || printf '\n'
+    ;;
   list-sessions)
     [[ -n "${TAW_FAKE_TMUX_SESSIONS+x}" ]] || exit 1
     printf '%b' "$TAW_FAKE_TMUX_SESSIONS"
@@ -163,6 +168,31 @@ test_existing_session_adds_window_and_selects_it_before_attach() {
   assert_file_contains "$log" $'rename-window\t-t\t@1\trepo'
   assert_file_contains "$log" $'select-window\t-t\t@1'
   assert_file_contains "$log" $'attach-session\t-t\trepo'
+}
+
+test_existing_worktree_window_is_reused() {
+  local repo repo_real fake_bin log panes
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  mkdir -p "$repo/src"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'@9\t'"$repo_real"$'/src\n'
+
+  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_PANES="$panes" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo"
+
+  assert_file_contains "$log" $'has-session\t-t\trepo'
+  assert_file_contains "$log" $'list-panes\t-s\t-t\trepo:\t-F\t#{window_id}\t#{pane_current_path}'
+  assert_file_contains "$log" $'select-window\t-t\t@9'
+  assert_file_contains "$log" $'attach-session\t-t\trepo'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'new-session\t'
+  assert_file_not_contains "$log" $'split-window\t'
+  assert_file_not_contains "$log" $'rename-window\t'
 }
 
 test_named_branch_checks_out_normal_repo() {
@@ -352,6 +382,31 @@ test_bare_project_without_worktree_opens_default_branch_worktree() {
   assert_file_contains "$log" $'set-window-option\t-t\t@1\tallow-rename\toff'
   assert_file_contains "$log" $'rename-window\t-t\t@1\tmain'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_default_worktree_window_is_reused() {
+  local project fake_bin log branch worktree_real panes
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  worktree_real="$(cd "$project/main" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'@8\t'"$worktree_real"$'\n'
+
+  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_PANES="$panes" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$project/main" branch --show-current)"
+  assert_eq "main" "$branch" "expected bare project default branch worktree"
+  assert_file_contains "$log" $'has-session\t-t\tproject'
+  assert_file_contains "$log" $'list-panes\t-s\t-t\tproject:\t-F\t#{window_id}\t#{pane_current_path}'
+  assert_file_contains "$log" $'select-window\t-t\t@8'
+  assert_file_contains "$log" $'attach-session\t-t\tproject'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'new-session\t'
+  assert_file_not_contains "$log" $'split-window\t'
 }
 
 test_bare_project_without_default_falls_back_to_master() {
@@ -619,6 +674,8 @@ test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
 test_case "taw: existing session selects new window before attach" \
   test_existing_session_adds_window_and_selects_it_before_attach
+test_case "taw: reuses existing worktree window" \
+  test_existing_worktree_window_is_reused
 test_case "taw: named branch checks out normal repo" \
   test_named_branch_checks_out_normal_repo
 test_case "taw: -p resolves from PROJECTS_HOME" \
@@ -639,6 +696,8 @@ test_case "taw: supports bare child not named .git" \
   test_supports_bare_child_not_named_git
 test_case "taw: bare project without worktree opens default branch worktree" \
   test_bare_project_without_worktree_opens_default_branch_worktree
+test_case "taw: bare default worktree reuses existing window" \
+  test_bare_default_worktree_window_is_reused
 test_case "taw: bare project without default falls back to master" \
   test_bare_project_without_default_falls_back_to_master
 test_case "taw: bare project with only origin HEAD creates local default worktree" \
