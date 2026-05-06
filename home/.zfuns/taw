@@ -8,6 +8,7 @@ local _taw_project_arg _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_is_bare
 local _taw_session_name _taw_project_name
+local _taw_default_branch_result _taw_default_base_ref
 
 _taw_shell_cmds=()
 _taw_positionals=()
@@ -234,23 +235,38 @@ _taw_branch_exists() {
 _taw_default_branch() {
   local _taw_branch _taw_remote_head
 
-  _taw_branch="$(_taw_git symbolic-ref --quiet --short HEAD 2>/dev/null)" \
-    && _taw_branch="${_taw_branch#refs/heads/}" \
-    && _taw_branch="${_taw_branch#heads/}" \
-    && _taw_branch="${_taw_branch#origin/}" \
-    && _taw_branch_exists "$_taw_branch" \
-    && print -r -- "$_taw_branch" \
-    && return 0
+  _taw_default_branch_result=
+  _taw_default_base_ref=
 
-  _taw_remote_head="$(_taw_git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" \
-    && _taw_branch="${_taw_remote_head#origin/}" \
-    && _taw_branch_exists "$_taw_branch" \
-    && print -r -- "$_taw_branch" \
-    && return 0
+  if _taw_branch="$(_taw_git symbolic-ref --quiet --short HEAD 2>/dev/null)"; then
+    _taw_branch="${_taw_branch#refs/heads/}"
+    _taw_branch="${_taw_branch#heads/}"
+    _taw_branch="${_taw_branch#origin/}"
+    if _taw_branch_exists "$_taw_branch"; then
+      _taw_default_branch_result="$_taw_branch"
+      _taw_default_base_ref="$_taw_branch"
+      return 0
+    fi
+  fi
+
+  if _taw_remote_head="$(_taw_git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
+    _taw_branch="${_taw_remote_head#origin/}"
+    if _taw_branch_exists "$_taw_branch"; then
+      _taw_default_branch_result="$_taw_branch"
+      _taw_default_base_ref="$_taw_branch"
+      return 0
+    fi
+    if _taw_git rev-parse --verify --quiet "refs/remotes/origin/$_taw_branch^{commit}" >/dev/null; then
+      _taw_default_branch_result="$_taw_branch"
+      _taw_default_base_ref="origin/$_taw_branch"
+      return 0
+    fi
+  fi
 
   for _taw_branch in main master; do
     _taw_branch_exists "$_taw_branch" || continue
-    print -r -- "$_taw_branch"
+    _taw_default_branch_result="$_taw_branch"
+    _taw_default_base_ref="$_taw_branch"
     return 0
   done
 
@@ -516,15 +532,18 @@ if [[ -n "$_taw_worktree_arg" ]]; then
   _taw_window_name="${_taw_window_dir:t}"
   _taw_prepare_worktree "$_taw_window_dir" "$_taw_window_name" "$_taw_base_ref" || return 1
 elif [[ "$_taw_is_bare" == true ]]; then
-  local _taw_branch_worktree _taw_existing_worktree
+  local _taw_branch_worktree _taw_branch_ref _taw_existing_worktree
 
   if [[ -n "$_taw_base_ref" ]]; then
     _taw_branch_worktree="$_taw_base_ref"
+    _taw_branch_ref="$_taw_base_ref"
   else
-    _taw_branch_worktree="$(_taw_default_branch)" || {
+    _taw_default_branch || {
       _taw_die "could not determine default branch for bare project"
       return 1
     }
+    _taw_branch_worktree="$_taw_default_branch_result"
+    _taw_branch_ref="$_taw_default_base_ref"
   fi
 
   _taw_window_dir="${_taw_project_dir:A}/$_taw_branch_worktree"
@@ -537,7 +556,7 @@ elif [[ "$_taw_is_bare" == true ]]; then
   fi
 
   _taw_window_name="${_taw_window_dir:t}"
-  _taw_prepare_worktree "$_taw_window_dir" "$_taw_branch_worktree" "$_taw_branch_worktree" || return 1
+  _taw_prepare_worktree "$_taw_window_dir" "$_taw_branch_worktree" "$_taw_branch_ref" || return 1
 elif [[ -n "$_taw_base_ref" ]]; then
   git -C "$_taw_project_dir" checkout "$_taw_base_ref" || return 1
   _taw_window_dir="$_taw_project_dir"

@@ -258,6 +258,27 @@ test_bare_project_without_default_falls_back_to_master() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_bare_project_origin_head_only_creates_local_default_worktree() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/main refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$project/main" branch --show-current)"
+  worktree_real="$(cd "$project/main" && pwd -P)"
+  assert_eq "main" "$branch" "expected origin/HEAD-only repo to create local main worktree"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
 test_bare_project_named_branch_without_worktree_opens_branch_worktree() {
   local project fake_bin log branch worktree_real
 
@@ -481,6 +502,8 @@ test_case "taw: bare project without worktree opens default branch worktree" \
   test_bare_project_without_worktree_opens_default_branch_worktree
 test_case "taw: bare project without default falls back to master" \
   test_bare_project_without_default_falls_back_to_master
+test_case "taw: bare project with only origin HEAD creates local default worktree" \
+  test_bare_project_origin_head_only_creates_local_default_worktree
 test_case "taw: bare project -b opens branch worktree" \
   test_bare_project_named_branch_without_worktree_opens_branch_worktree
 test_case "taw: bare project reuses existing default branch worktree when confirmed" \
