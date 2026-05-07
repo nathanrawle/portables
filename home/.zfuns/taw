@@ -53,6 +53,29 @@ _taw_is_bare_git_dir() {
   [[ "$_taw_bare" == true ]]
 }
 
+_taw_project_dir_for_bare_git_dir() {
+  local _taw_bare_git_dir="${1:A}" _taw_fallback="${2:-}" _taw_name
+
+  _taw_name="${_taw_bare_git_dir:t}"
+  if [[ "$_taw_name" == .* ]]; then
+    print -r -- "${_taw_bare_git_dir:h}"
+  elif [[ "$_taw_name" == *.git ]]; then
+    print -r -- "${_taw_bare_git_dir:h}/${_taw_name%.git}"
+  elif [[ -n "$_taw_fallback" ]]; then
+    print -r -- "${_taw_fallback:A}"
+  else
+    print -r -- "$_taw_bare_git_dir"
+  fi
+}
+
+_taw_set_bare_project() {
+  local _taw_bare_git_dir="$1" _taw_fallback="${2:-}"
+
+  _taw_git_dir="${_taw_bare_git_dir:A}"
+  _taw_project_dir="$(_taw_project_dir_for_bare_git_dir "$_taw_git_dir" "$_taw_fallback")" || return 1
+  _taw_is_bare=true
+}
+
 _taw_abs_path() {
   local _taw_path="$1"
   if [[ "$_taw_path" == /* ]]; then
@@ -67,18 +90,14 @@ _taw_detect_bare_child() {
 
   for _taw_child in "$_taw_dir"/.git "$_taw_dir"/.bare; do
     if _taw_is_bare_git_dir "$_taw_child"; then
-      _taw_project_dir="${_taw_dir:A}"
-      _taw_git_dir="${_taw_child:A}"
-      _taw_is_bare=true
+      _taw_set_bare_project "$_taw_child" "$_taw_dir"
       return 0
     fi
   done
 
   for _taw_child in "$_taw_dir"/*(N/); do
     if _taw_is_bare_git_dir "$_taw_child"; then
-      _taw_project_dir="${_taw_dir:A}"
-      _taw_git_dir="${_taw_child:A}"
-      _taw_is_bare=true
+      _taw_set_bare_project "$_taw_child" "$_taw_dir"
       return 0
     fi
   done
@@ -101,13 +120,7 @@ _taw_detect_project() {
     _taw_common="${_taw_common:A}"
 
     if _taw_is_bare_git_dir "$_taw_common"; then
-      _taw_git_dir="$_taw_common"
-      if [[ "$_taw_top" == "$_taw_common"/* ]]; then
-        _taw_project_dir="$_taw_common"
-      else
-        _taw_project_dir="${_taw_common:h}"
-      fi
-      _taw_is_bare=true
+      _taw_set_bare_project "$_taw_common" "${_taw_common:h}"
     else
       _taw_project_dir="$_taw_top"
       _taw_git_dir="$_taw_common"
@@ -120,15 +133,7 @@ _taw_detect_project() {
   if [[ "$_taw_bare" == true ]]; then
     _taw_git="$(git -C "$_taw_start" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
     _taw_git="${_taw_git:A}"
-    _taw_git_dir="$_taw_git"
-    if [[ "$_taw_git" == "$_taw_start"/* ]]; then
-      _taw_project_dir="$_taw_start"
-    elif [[ "${_taw_start:t}" == .* ]]; then
-      _taw_project_dir="${_taw_start:h}"
-    else
-      _taw_project_dir="$_taw_start"
-    fi
-    _taw_is_bare=true
+    _taw_set_bare_project "$_taw_git" "$_taw_start"
     return 0
   fi
 

@@ -166,6 +166,18 @@ make_bare_wrapper() {
   printf '%s\n' "$project"
 }
 
+make_conventional_bare_clone() {
+  local root="$1"
+  local name="${2:-project}"
+  local primary_branch="${3:-main}"
+  local src="$root/src"
+  local bare="$root/$name.git"
+
+  make_git_repo "$src" "$primary_branch"
+  git clone --bare "$src" "$bare" >/dev/null 2>&1
+  printf '%s\n' "$bare"
+}
+
 run_taw() {
   local cwd="$1"
   local taw_path
@@ -458,6 +470,48 @@ test_supports_bare_child_not_named_git() {
   branch="$(git -C "$project/feature-x" branch --show-current)"
   assert_eq "feature-x" "$branch" "expected worktree branch from .bare repo"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+}
+
+test_conventional_bare_clone_places_worktrees_outside_git_dir() {
+  local bare project fake_bin log branch worktree_real expected actual
+
+  bare="$(make_conventional_bare_clone "$TEST_TMPDIR" "project")"
+  project="${bare%.git}"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$bare" feature-x develop
+
+  branch="$(git -C "$project/feature-x" branch --show-current)"
+  expected="$(git --git-dir "$bare" rev-parse develop)"
+  actual="$(git -C "$project/feature-x" rev-parse HEAD)"
+  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  assert_eq "feature-x" "$branch" "expected conventional bare clone worktree branch"
+  assert_eq "$expected" "$actual" "expected worktree branch to start from positional base ref"
+  assert_not_exists "$bare/feature-x"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_conventional_bare_worktree_detection_keeps_project_root() {
+  local bare project fake_bin log branch worktree_real
+
+  bare="$(make_conventional_bare_clone "$TEST_TMPDIR" "project")"
+  project="${bare%.git}"
+  git --git-dir "$bare" worktree add "$project/main" main >/dev/null 2>&1
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$project/main" feature-x develop
+
+  branch="$(git -C "$project/feature-x" branch --show-current)"
+  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  assert_eq "feature-x" "$branch" "expected detected conventional bare project root"
+  assert_not_exists "$TEST_TMPDIR/feature-x"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
 test_bare_project_without_worktree_opens_default_branch_worktree() {
@@ -914,6 +968,10 @@ test_case "taw: positional base ref overrides named branch" \
   test_positional_base_ref_overrides_named_branch
 test_case "taw: supports bare child not named .git" \
   test_supports_bare_child_not_named_git
+test_case "taw: conventional bare clone places worktrees outside git dir" \
+  test_conventional_bare_clone_places_worktrees_outside_git_dir
+test_case "taw: conventional bare worktree detection keeps project root" \
+  test_conventional_bare_worktree_detection_keeps_project_root
 test_case "taw: bare project without worktree opens default branch worktree" \
   test_bare_project_without_worktree_opens_default_branch_worktree
 test_case "taw: bare default worktree reuses existing window" \
