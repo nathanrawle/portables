@@ -4,11 +4,13 @@ return {
   lazy = false,
   opts = {
     lazygit = { enabled = true },
-    image = { enabled = true },
-    doc = {
+    image = {
       enabled = true,
-      inline = true,
-      float = true,
+      doc = {
+        enabled = true,
+        inline = true,
+        float = true,
+      },
     },
   },
   keys = {
