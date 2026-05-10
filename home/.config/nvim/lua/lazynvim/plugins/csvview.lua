@@ -30,6 +30,38 @@ return {
   config = function(_, opts)
     require("csvview").setup(opts)
 
+    local function set_csv_highlights()
+      local syntax_links = {
+        csvCol1 = "Statement",
+        csvCol2 = "Constant",
+        csvCol3 = "Type",
+        csvCol4 = "PreProc",
+        csvCol5 = "Identifier",
+        csvCol6 = "Special",
+        csvCol7 = "String",
+        csvCol8 = "Comment",
+        escCsvCol1 = "csvCol1",
+        escCsvCol2 = "csvCol2",
+        escCsvCol3 = "csvCol3",
+        escCsvCol4 = "csvCol4",
+        escCsvCol5 = "csvCol5",
+        escCsvCol6 = "csvCol6",
+        escCsvCol7 = "csvCol7",
+        escCsvCol8 = "csvCol8",
+      }
+
+      -- Match Neovim's syntax/csv.vim defaults; it intentionally has no csvCol0 link.
+      for name, link in pairs(syntax_links) do
+        vim.api.nvim_set_hl(0, name, { link = link, default = true })
+      end
+    end
+
+    set_csv_highlights()
+    vim.api.nvim_create_autocmd("ColorScheme", {
+      group = vim.api.nvim_create_augroup("user_csvview_highlights", { clear = true }),
+      callback = set_csv_highlights,
+    })
+
     local function enable(buf)
       if vim.b[buf].csvview_auto_enable_pending then
         return
