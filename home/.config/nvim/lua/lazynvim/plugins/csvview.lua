@@ -54,6 +54,8 @@ return {
       for name, link in pairs(syntax_links) do
         vim.api.nvim_set_hl(0, name, { link = link, default = true })
       end
+
+      vim.api.nvim_set_hl(0, "CsvViewHeaderLine", { link = "CursorLine" })
     end
 
     set_csv_highlights()
