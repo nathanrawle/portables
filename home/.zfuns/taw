@@ -46,11 +46,14 @@ _taw_is_url() {
 }
 
 _taw_is_bare_git_dir() {
-  local _taw_candidate="$1" _taw_bare
+  local _taw_candidate="$1" _taw_bare _taw_git
 
   [[ -d "$_taw_candidate" ]] || return 1
+  _taw_candidate="${_taw_candidate:A}"
   _taw_bare="$(git -C "$_taw_candidate" rev-parse --is-bare-repository 2>/dev/null)" || return 1
-  [[ "$_taw_bare" == true ]]
+  [[ "$_taw_bare" == true ]] || return 1
+  _taw_git="$(git -C "$_taw_candidate" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  [[ "${_taw_git:A}" == "$_taw_candidate" ]]
 }
 
 _taw_project_dir_for_bare_git_dir() {

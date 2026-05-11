@@ -1056,6 +1056,27 @@ test_non_git_child_under_bare_wrapper_prompts_for_project() {
   assert_not_exists "$project/main"
 }
 
+test_non_git_parent_with_bare_wrapper_child_prompts_for_project() {
+  local parent project repo repo_real fake_bin no_fzf_path log
+
+  parent="$TEST_TMPDIR/parent"
+  project="$(make_bare_wrapper "$parent")"
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf '%s\n' "$repo" | EDITOR=vim \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$parent"
+
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_not_contains "$log" $'-s\tproject'
+  assert_not_exists "$project/main"
+}
+
 test_current_bare_wrapper_auto_detects_without_prompt() {
   local project fake_bin no_fzf_path log branch worktree_real
 
@@ -1157,5 +1178,7 @@ test_case "taw: prompted project resolves from PROJECTS_HOME" \
   test_prompted_project_resolves_from_projects_home
 test_case "taw: non-git child under bare wrapper prompts for project" \
   test_non_git_child_under_bare_wrapper_prompts_for_project
+test_case "taw: non-git parent with bare wrapper child prompts for project" \
+  test_non_git_parent_with_bare_wrapper_child_prompts_for_project
 test_case "taw: current bare wrapper auto-detects without prompt" \
   test_current_bare_wrapper_auto_detects_without_prompt
