@@ -33,6 +33,34 @@ _taw_prompt() {
   print -r -- "$_taw_reply"
 }
 
+_taw_prompt_project() {
+  local _taw_prompt_text="$1" _taw_key _taw_rest _taw_reply
+
+  if [[ -t 0 && -t 1 ]]; then
+    IFS= read -r -k 1 "_taw_key?$_taw_prompt_text" || return 1
+    case "$_taw_key" in
+      $'\e')
+        print
+        return 130
+        ;;
+      $'\n'|$'\r')
+        print
+        return 0
+        ;;
+      *)
+        print -n -- "$_taw_key"
+        IFS= read -r _taw_rest || return 1
+        print -r -- "$_taw_key$_taw_rest"
+        ;;
+    esac
+    return
+  fi
+
+  _taw_reply="$(_taw_prompt "$_taw_prompt_text")" || return 1
+  [[ "$_taw_reply" == $'\e' ]] && return 130
+  print -r -- "$_taw_reply"
+}
+
 _taw_confirm() {
   local _taw_reply
   read "_taw_reply?$1 [y/N] " || return 1
@@ -276,8 +304,72 @@ _taw_resolve_project_from_tmux() {
   return 1
 }
 
+_taw_tmux_sessionizer_picker_rows() {
+  local CONFIG_FILE_NAME="tmux-sessionizer.conf"
+  local CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer"
+  local CONFIG_FILE="$CONFIG_DIR/$CONFIG_FILE_NAME"
+  local TS_MAX_DEPTH
+  local -a TS_SEARCH_PATHS TS_EXTRA_SEARCH_PATHS TS_SESSION_COMMANDS
+  local _taw_current_session _taw_sessions _taw_session_line
+  local _taw_entry _taw_path _taw_depth
+
+  if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+  fi
+
+  if [[ -f "$CONFIG_FILE_NAME" ]]; then
+    source "./$CONFIG_FILE_NAME"
+  fi
+
+  [[ ${#TS_SEARCH_PATHS[@]} -gt 0 ]] || TS_SEARCH_PATHS=(~ ~/personal ~/personal/dev/env/.config)
+  if (( ${#TS_EXTRA_SEARCH_PATHS[@]} > 0 )); then
+    TS_SEARCH_PATHS+=( "${TS_EXTRA_SEARCH_PATHS[@]}" )
+  fi
+
+  if [[ -n "${TMUX:-}" ]]; then
+    _taw_current_session="$(tmux display-message -p '#S' 2>/dev/null)" || _taw_current_session=
+    _taw_sessions="$(tmux list-sessions -F '[TMUX] #{session_name}' 2>/dev/null)" || _taw_sessions=
+    for _taw_session_line in "${(@f)_taw_sessions}"; do
+      [[ "$_taw_session_line" == "[TMUX] $_taw_current_session" ]] && continue
+      print -r -- "$_taw_session_line"
+    done
+  else
+    tmux list-sessions -F '[TMUX] #{session_name}' 2>/dev/null || true
+  fi
+
+  for _taw_entry in "${TS_SEARCH_PATHS[@]}"; do
+    if [[ "$_taw_entry" == *:<-> ]]; then
+      _taw_path="${_taw_entry%:*}"
+      _taw_depth="${_taw_entry##*:}"
+    else
+      _taw_path="$_taw_entry"
+      _taw_depth="${TS_MAX_DEPTH:-1}"
+    fi
+
+    [[ -d "$_taw_path" ]] || continue
+    find "$_taw_path" -mindepth 1 -maxdepth "$_taw_depth" -path '*/.git' -prune -o -type d -print
+  done
+}
+
+_taw_select_project_with_fzf() {
+  local _taw_rows _taw_choice
+
+  command -v fzf >/dev/null 2>&1 || return 2
+  _taw_rows="$(_taw_tmux_sessionizer_picker_rows)" || return 2
+  [[ -n "$_taw_rows" ]] || return 2
+
+  _taw_choice="$(print -r -- "$_taw_rows" | fzf --prompt='taw project> ')" || return 1
+  [[ -n "$_taw_choice" ]] || return 1
+
+  if [[ "$_taw_choice" == "[TMUX] "* ]]; then
+    print -r -- "${_taw_choice#"[TMUX] "}"
+  else
+    print -r -- "$_taw_choice"
+  fi
+}
+
 _taw_resolve_project() {
-  local _taw_input
+  local _taw_input _taw_status
 
   if [[ -n "$_taw_project_arg" ]]; then
     _taw_resolve_project_arg "$_taw_project_arg"
@@ -288,11 +380,31 @@ _taw_resolve_project() {
     return 0
   fi
 
-  _taw_input="$(_taw_prompt "Project, GitHub URL, or git repository directory: ")" || return 1
-  [[ -n "$_taw_input" ]] || {
-    _taw_die "repository input is required"
-    return 1
-  }
+  _taw_input="$(_taw_prompt_project "Project, GitHub URL, or git repository directory: ")"
+  _taw_status=$?
+  case "$_taw_status" in
+    0) ;;
+    130) return 130 ;;
+    *) return 1 ;;
+  esac
+
+  if [[ -z "$_taw_input" ]]; then
+    _taw_input="$(_taw_select_project_with_fzf)"
+    _taw_status=$?
+    case "$_taw_status" in
+      0)
+        _taw_resolve_project_arg "$_taw_input"
+        return
+        ;;
+      1|130)
+        return 130
+        ;;
+      *)
+        _taw_die "project picker requires fzf and at least one project"
+        return 1
+        ;;
+    esac
+  fi
 
   _taw_resolve_project_arg "$_taw_input"
 }
@@ -824,7 +936,12 @@ if [[ -z "$_taw_editor_cmd" ]]; then
 fi
 
 _taw_debug_dump "before project resolution"
-_taw_resolve_project || return 1
+_taw_resolve_project
+case $? in
+  0) ;;
+  130) return 0 ;;
+  *) return 1 ;;
+esac
 
 if [[ -n "$_taw_worktree_arg" ]]; then
   if [[ "$_taw_worktree_arg" == /* ]]; then
