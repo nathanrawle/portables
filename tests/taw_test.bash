@@ -134,6 +134,31 @@ make_path_without_fzf() {
   printf '%s\n' "$bin"
 }
 
+make_fake_git_url_clone() {
+  local bin="$1"
+  local real_git
+
+  real_git="$(command -v git)"
+  rm -f "$bin/git"
+  cat >"$bin/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_git="$real_git"
+
+if [[ "\${1:-}" = clone && -n "\${TAW_FAKE_GIT_CLONE_SOURCE:-}" ]]; then
+  if [[ "\${2:-}" = --bare && "\${3:-}" = "\${TAW_FAKE_GIT_CLONE_URL:-}" ]]; then
+    exec "\$real_git" clone --bare "\$TAW_FAKE_GIT_CLONE_SOURCE" "\${4:-}"
+  elif [[ "\${2:-}" = "\${TAW_FAKE_GIT_CLONE_URL:-}" ]]; then
+    exec "\$real_git" clone "\$TAW_FAKE_GIT_CLONE_SOURCE" "\${3:-}"
+  fi
+fi
+
+exec "\$real_git" "\$@"
+EOF
+  chmod +x "$bin/git"
+}
+
 make_git_repo() {
   local repo="$1"
   local primary_branch="${2:-main}"
@@ -344,6 +369,31 @@ test_project_arg_preserves_invoking_shell_cwd() {
   )" || fail "expected taw to succeed"
 
   assert_eq "$start_real" "$after" "expected taw to preserve invoking shell cwd"
+}
+
+test_project_arg_github_url_clones_and_opens_project() {
+  local src dest fake_bin no_fzf_path log url branch worktree_real
+
+  src="$TEST_TMPDIR/src"
+  dest="$TEST_TMPDIR/cloned"
+  url="https://example.invalid/repo.git"
+  make_git_repo "$src"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  make_fake_git_url_clone "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf '%s\n\n' "$dest" | EDITOR=vim \
+    TAW_FAKE_GIT_CLONE_SOURCE="$src" TAW_FAKE_GIT_CLONE_URL="$url" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$TEST_TMPDIR" -p "$url"
+
+  branch="$(git -C "$dest/main" branch --show-current)"
+  worktree_real="$(cd "$dest/main" && pwd -P)"
+  assert_eq "main" "$branch" "expected -p URL to clone and open default branch worktree"
+  assert_exists "$dest/.git"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tcloned\t-n\tmain'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
 test_project_arg_resolves_by_tmux_session_name() {
@@ -964,6 +1014,110 @@ test_prompts_for_existing_repo_when_not_inside_git() {
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
 }
 
+test_debug_option_prints_state_snapshot() {
+  local repo fake_bin log output
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" --debug -p "$repo" 2>&1)"
+
+  if ! grep -F "taw debug: before project resolution" <<<"$output" >/dev/null; then
+    fail "expected --debug to print state before project resolution"
+  fi
+  if ! grep -F "taw debug: before tmux window" <<<"$output" >/dev/null; then
+    fail "expected --debug to print state before tmux window"
+  fi
+  if ! grep -F "_taw_project_arg='$repo'" <<<"$output" >/dev/null; then
+    fail "expected --debug output to include taw project arg"
+  fi
+}
+
+test_prompted_project_resolves_from_projects_home() {
+  local projects_home repo repo_real fake_bin log
+
+  projects_home="$TEST_TMPDIR/projects"
+  repo="$projects_home/foo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf 'foo\n' | PROJECTS_HOME="$projects_home" EDITOR=vim \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere"
+
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tfoo\t-n\tfoo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_not_contains "$log" $'list-sessions\t'
+}
+
+test_non_git_child_under_bare_wrapper_prompts_for_project() {
+  local wrapper_root project scratch repo repo_real fake_bin no_fzf_path log
+
+  wrapper_root="$TEST_TMPDIR/wrapper"
+  project="$(make_bare_wrapper "$wrapper_root")"
+  scratch="$project/scratch"
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  mkdir -p "$scratch"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf '%s\n' "$repo" | EDITOR=vim \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$scratch"
+
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_not_contains "$log" $'-s\tproject'
+  assert_not_exists "$project/main"
+}
+
+test_non_git_parent_with_bare_wrapper_child_prompts_for_project() {
+  local parent project repo repo_real fake_bin no_fzf_path log
+
+  parent="$TEST_TMPDIR/parent"
+  project="$(make_bare_wrapper "$parent")"
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf '%s\n' "$repo" | EDITOR=vim \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$parent"
+
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_not_contains "$log" $'-s\tproject'
+  assert_not_exists "$project/main"
+}
+
+test_current_bare_wrapper_auto_detects_without_prompt() {
+  local project fake_bin no_fzf_path log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project"
+
+  branch="$(git -C "$project/main" branch --show-current)"
+  worktree_real="$(cd "$project/main" && pwd -P)"
+  assert_eq "main" "$branch" "expected current bare wrapper to auto-detect"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
 test_case "taw: existing session selects new window before attach" \
@@ -978,6 +1132,8 @@ test_case "taw: direct -p path precedes PROJECTS_HOME" \
   test_project_arg_direct_path_precedes_projects_home
 test_case "taw: -p preserves invoking shell cwd" \
   test_project_arg_preserves_invoking_shell_cwd
+test_case "taw: -p GitHub URL clones and opens project" \
+  test_project_arg_github_url_clones_and_opens_project
 test_case "taw: -p resolves by tmux session name" \
   test_project_arg_resolves_by_tmux_session_name
 test_case "taw: -p resolves by tmux session path basename" \
@@ -1040,3 +1196,13 @@ test_case "taw: rejects empty project and branch values" \
   test_rejects_empty_project_and_branch_values
 test_case "taw: prompts for repo path outside git" \
   test_prompts_for_existing_repo_when_not_inside_git
+test_case "taw: debug option prints state snapshot" \
+  test_debug_option_prints_state_snapshot
+test_case "taw: prompted project resolves from PROJECTS_HOME" \
+  test_prompted_project_resolves_from_projects_home
+test_case "taw: non-git child under bare wrapper prompts for project" \
+  test_non_git_child_under_bare_wrapper_prompts_for_project
+test_case "taw: non-git parent with bare wrapper child prompts for project" \
+  test_non_git_parent_with_bare_wrapper_child_prompts_for_project
+test_case "taw: current bare wrapper auto-detects without prompt" \
+  test_current_bare_wrapper_auto_detects_without_prompt

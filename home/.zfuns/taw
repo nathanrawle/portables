@@ -5,7 +5,7 @@ setopt pipefail
 
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_agent_cmd _taw_editor_cmd _taw_named_branch
-local _taw_agent_arg_provided _taw_editor_arg_provided
+local _taw_agent_arg_provided _taw_editor_arg_provided _taw_debug
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_is_bare
 local _taw_session_name _taw_project_name _taw_project_session_name
@@ -20,6 +20,7 @@ _taw_editor_cmd=
 _taw_named_branch=
 _taw_agent_arg_provided=false
 _taw_editor_arg_provided=false
+_taw_debug=false
 
 _taw_die() {
   print -u2 -- "taw: $*"
@@ -41,16 +42,47 @@ _taw_confirm() {
   esac
 }
 
+_taw_debug_dump() {
+  [[ "$_taw_debug" == true ]] || return 0
+
+  print -u2 -r -- "taw debug: $1"
+  print -u2 -r -- "_taw_project_arg='$_taw_project_arg'"
+  print -u2 -r -- "_taw_agent_cmd=$_taw_agent_cmd"
+  print -u2 -r -- "_taw_editor_cmd=$_taw_editor_cmd"
+  print -u2 -r -- "_taw_named_branch='$_taw_named_branch'"
+  print -u2 -r -- "_taw_agent_arg_provided=$_taw_agent_arg_provided"
+  print -u2 -r -- "_taw_editor_arg_provided=$_taw_editor_arg_provided"
+  print -u2 -r -- "_taw_worktree_arg='$_taw_worktree_arg'"
+  print -u2 -r -- "_taw_base_ref='$_taw_base_ref'"
+  print -u2 -r -- "_taw_window_dir='$_taw_window_dir'"
+  print -u2 -r -- "_taw_window_name='$_taw_window_name'"
+  print -u2 -r -- "_taw_project_dir=$_taw_project_dir"
+  print -u2 -r -- "_taw_git_dir=$_taw_git_dir"
+  print -u2 -r -- "_taw_is_bare=$_taw_is_bare"
+  print -u2 -r -- "_taw_session_name='$_taw_session_name'"
+  print -u2 -r -- "_taw_project_name='$_taw_project_name'"
+  print -u2 -r -- "_taw_project_session_name='$_taw_project_session_name'"
+  print -u2 -r -- "_taw_default_branch_result='$_taw_default_branch_result'"
+  print -u2 -r -- "_taw_default_base_ref='$_taw_default_base_ref'"
+  print -u2 -r -- "_taw_picker_kind='$_taw_picker_kind'"
+  print -u2 -r -- "_taw_picker_branch='$_taw_picker_branch'"
+  print -u2 -r -- "_taw_picker_ref='$_taw_picker_ref'"
+  print -u2 -r -- "_taw_picker_path='$_taw_picker_path'"
+}
+
 _taw_is_url() {
   [[ "$1" == http://* || "$1" == https://* || "$1" == git@*:* || "$1" == ssh://* ]]
 }
 
 _taw_is_bare_git_dir() {
-  local _taw_candidate="$1" _taw_bare
+  local _taw_candidate="$1" _taw_bare _taw_git
 
   [[ -d "$_taw_candidate" ]] || return 1
+  _taw_candidate="${_taw_candidate:A}"
   _taw_bare="$(git -C "$_taw_candidate" rev-parse --is-bare-repository 2>/dev/null)" || return 1
-  [[ "$_taw_bare" == true ]]
+  [[ "$_taw_bare" == true ]] || return 1
+  _taw_git="$(git -C "$_taw_candidate" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  [[ "${_taw_git:A}" == "$_taw_candidate" ]]
 }
 
 _taw_project_dir_for_bare_git_dir() {
@@ -105,9 +137,8 @@ _taw_detect_bare_child() {
   return 1
 }
 
-_taw_detect_project() {
+_taw_detect_project_here() {
   local _taw_start="$1" _taw_inside _taw_bare _taw_top _taw_common _taw_git
-  local _taw_dir _taw_parent
 
   [[ -d "$_taw_start" ]] || return 1
   _taw_start="${_taw_start:A}"
@@ -133,9 +164,24 @@ _taw_detect_project() {
   if [[ "$_taw_bare" == true ]]; then
     _taw_git="$(git -C "$_taw_start" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
     _taw_git="${_taw_git:A}"
+    [[ "$_taw_git" == "$_taw_start" || "${_taw_git:h}" == "$_taw_start" ]] || return 1
     _taw_set_bare_project "$_taw_git" "$_taw_start"
     return 0
   fi
+
+  if _taw_detect_bare_child "$_taw_start"; then
+    return 0
+  fi
+
+  return 1
+}
+
+_taw_detect_project() {
+  local _taw_start="$1" _taw_dir _taw_parent
+
+  _taw_detect_project_here "$_taw_start" && return 0
+  [[ -d "$_taw_start" ]] || return 1
+  _taw_start="${_taw_start:A}"
 
   _taw_dir="$_taw_start"
   while [[ -n "$_taw_dir" && "$_taw_dir" != "/" ]]; do
@@ -231,51 +277,58 @@ _taw_resolve_project_from_tmux() {
 }
 
 _taw_resolve_project() {
-  local _taw_input _taw_resolved _taw_projects_candidate
+  local _taw_input
 
   if [[ -n "$_taw_project_arg" ]]; then
-    if [[ -d "$_taw_project_arg" ]]; then
-      _taw_use_project_path "$_taw_project_arg" "$_taw_project_arg"
-      return
-    fi
-    [[ ! -e "$_taw_project_arg" && ! -L "$_taw_project_arg" ]] || {
-      _taw_die "could not cd to project: $_taw_project_arg"
-      return 1
-    }
-
-    if [[ "$_taw_project_arg" != /* && "$_taw_project_arg" != */* && -n "${PROJECTS_HOME:-}" ]]; then
-      _taw_projects_candidate="${PROJECTS_HOME:A}/$_taw_project_arg"
-      if [[ -d "$_taw_projects_candidate" ]]; then
-        _taw_use_project_path "$_taw_projects_candidate" "$_taw_projects_candidate"
-        return
-      fi
-    fi
-
-    if _taw_resolve_project_from_tmux "$_taw_project_arg"; then
-      return 0
-    fi
-
-    _taw_die "could not resolve project: $_taw_project_arg"
-    return 1
+    _taw_resolve_project_arg "$_taw_project_arg"
+    return
   fi
 
-  if _taw_detect_project "$PWD"; then
+  if _taw_detect_project_here "$PWD"; then
     return 0
   fi
 
-  _taw_input="$(_taw_prompt "GitHub URL or git repository directory: ")" || return 1
+  _taw_input="$(_taw_prompt "Project, GitHub URL, or git repository directory: ")" || return 1
   [[ -n "$_taw_input" ]] || {
     _taw_die "repository input is required"
     return 1
   }
 
-  if _taw_is_url "$_taw_input"; then
-    _taw_resolved="$(_taw_clone_prompted_repo "$_taw_input")" || return 1
-  else
-    _taw_resolved="$(_taw_abs_path "$_taw_input")"
+  _taw_resolve_project_arg "$_taw_input"
+}
+
+_taw_resolve_project_arg() {
+  local _taw_arg="$1" _taw_resolved _taw_projects_candidate
+
+  if _taw_is_url "$_taw_arg"; then
+    _taw_resolved="$(_taw_clone_prompted_repo "$_taw_arg")" || return 1
+    _taw_use_project_path "$_taw_resolved" "$_taw_resolved"
+    return
   fi
 
-  _taw_use_project_path "$_taw_resolved" "$_taw_resolved"
+  if [[ -d "$_taw_arg" ]]; then
+    _taw_use_project_path "$_taw_arg" "$_taw_arg"
+    return
+  fi
+  [[ ! -e "$_taw_arg" && ! -L "$_taw_arg" ]] || {
+    _taw_die "could not cd to project: $_taw_arg"
+    return 1
+  }
+
+  if [[ "$_taw_arg" != /* && "$_taw_arg" != */* && -n "${PROJECTS_HOME:-}" ]]; then
+    _taw_projects_candidate="${PROJECTS_HOME:A}/$_taw_arg"
+    if [[ -d "$_taw_projects_candidate" ]]; then
+      _taw_use_project_path "$_taw_projects_candidate" "$_taw_projects_candidate"
+      return
+    fi
+  fi
+
+  if _taw_resolve_project_from_tmux "$_taw_arg"; then
+    return 0
+  fi
+
+  _taw_die "could not resolve project: $_taw_arg"
+  return 1
 }
 
 _taw_git() {
@@ -674,6 +727,10 @@ while (( $# > 0 )); do
       _taw_positionals+=( "$@" )
       break
       ;;
+    -debug|--debug)
+      _taw_debug=true
+      shift
+      ;;
     -p|-proj|-prj|-r|-repo|-repository)
       (( $# >= 2 )) || _taw_die "$1 requires a value" || return 1
       [[ -n "$2" ]] || _taw_die "$1 requires a non-empty value" || return 1
@@ -766,6 +823,7 @@ if [[ -z "$_taw_editor_cmd" ]]; then
   fi
 fi
 
+_taw_debug_dump "before project resolution"
 _taw_resolve_project || return 1
 
 if [[ -n "$_taw_worktree_arg" ]]; then
@@ -866,4 +924,5 @@ else
   _taw_session_name="${_taw_project_name//:/_}"
 fi
 
+_taw_debug_dump "before tmux window"
 _taw_create_tmux_window
