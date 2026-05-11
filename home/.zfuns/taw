@@ -189,13 +189,14 @@ _taw_clone_prompted_repo() {
 }
 
 _taw_use_project_path() {
-  local _taw_path="$1" _taw_label="$2" _taw_session_name="${3:-}"
+  local _taw_path="$1" _taw_label="$2" _taw_session_name="${3:-}" _taw_abs
 
-  cd -- "$_taw_path" 2>/dev/null || {
+  [[ -d "$_taw_path" ]] || {
     _taw_die "could not cd to project: $_taw_label"
     return 1
   }
-  _taw_detect_project "$PWD" || {
+  _taw_abs="${_taw_path:A}"
+  _taw_detect_project "$_taw_abs" || {
     _taw_die "not a git project: $_taw_label"
     return 1
   }

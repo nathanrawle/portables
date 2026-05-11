@@ -322,6 +322,30 @@ test_project_arg_direct_path_precedes_projects_home() {
   assert_file_not_contains "$log" $'-c\t'"$projects_real"$'\tvim'
 }
 
+test_project_arg_preserves_invoking_shell_cwd() {
+  local repo start start_real fake_bin log after
+
+  repo="$TEST_TMPDIR/repo"
+  start="$TEST_TMPDIR/start"
+  make_git_repo "$repo"
+  mkdir -p "$start"
+  start_real="$(cd "$start" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  after="$(
+    cd "$start" || exit 1
+    TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" \
+      PATH="$fake_bin:$PATH" \
+      TMUX= \
+      EDITOR=vim \
+      TAW_TMUX_LOG="$log" \
+      zsh -fc 'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw "$@" || return; print -r -- "${PWD:A}"' taw -p "$repo"
+  )" || fail "expected taw to succeed"
+
+  assert_eq "$start_real" "$after" "expected taw to preserve invoking shell cwd"
+}
+
 test_project_arg_resolves_by_tmux_session_name() {
   local repo repo_real fake_bin log sessions
 
@@ -952,6 +976,8 @@ test_case "taw: -p resolves from PROJECTS_HOME" \
   test_project_arg_resolves_from_projects_home
 test_case "taw: direct -p path precedes PROJECTS_HOME" \
   test_project_arg_direct_path_precedes_projects_home
+test_case "taw: -p preserves invoking shell cwd" \
+  test_project_arg_preserves_invoking_shell_cwd
 test_case "taw: -p resolves by tmux session name" \
   test_project_arg_resolves_by_tmux_session_name
 test_case "taw: -p resolves by tmux session path basename" \
