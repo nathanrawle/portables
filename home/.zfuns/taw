@@ -4,7 +4,7 @@ emulate -L zsh
 setopt pipefail
 
 local -a _taw_shell_cmds _taw_positionals
-local _taw_project_arg _taw_agent_cmd _taw_editor_cmd _taw_named_branch
+local _taw_project_arg _taw_project_picker_requested _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_agent_arg_provided _taw_editor_arg_provided _taw_debug
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_is_bare
@@ -15,6 +15,7 @@ local _taw_picker_kind _taw_picker_branch _taw_picker_ref _taw_picker_path
 _taw_shell_cmds=()
 _taw_positionals=()
 _taw_project_arg=
+_taw_project_picker_requested=false
 _taw_agent_cmd=codex
 _taw_editor_cmd=
 _taw_named_branch=
@@ -75,6 +76,7 @@ _taw_debug_dump() {
 
   print -u2 -r -- "taw debug: $1"
   print -u2 -r -- "_taw_project_arg='$_taw_project_arg'"
+  print -u2 -r -- "_taw_project_picker_requested=$_taw_project_picker_requested"
   print -u2 -r -- "_taw_agent_cmd=$_taw_agent_cmd"
   print -u2 -r -- "_taw_editor_cmd=$_taw_editor_cmd"
   print -u2 -r -- "_taw_named_branch='$_taw_named_branch'"
@@ -368,8 +370,33 @@ _taw_select_project_with_fzf() {
   fi
 }
 
+_taw_resolve_project_from_picker() {
+  local _taw_input _taw_status
+
+  _taw_input="$(_taw_select_project_with_fzf)"
+  _taw_status=$?
+  case "$_taw_status" in
+    0)
+      _taw_resolve_project_arg "$_taw_input"
+      return
+      ;;
+    1|130)
+      return 130
+      ;;
+    *)
+      _taw_die "project picker requires fzf and at least one project"
+      return 1
+      ;;
+  esac
+}
+
 _taw_resolve_project() {
   local _taw_input _taw_status
+
+  if [[ "$_taw_project_picker_requested" == true ]]; then
+    _taw_resolve_project_from_picker
+    return
+  fi
 
   if [[ -n "$_taw_project_arg" ]]; then
     _taw_resolve_project_arg "$_taw_project_arg"
@@ -389,21 +416,8 @@ _taw_resolve_project() {
   esac
 
   if [[ -z "$_taw_input" ]]; then
-    _taw_input="$(_taw_select_project_with_fzf)"
-    _taw_status=$?
-    case "$_taw_status" in
-      0)
-        _taw_resolve_project_arg "$_taw_input"
-        return
-        ;;
-      1|130)
-        return 130
-        ;;
-      *)
-        _taw_die "project picker requires fzf and at least one project"
-        return 1
-        ;;
-    esac
+    _taw_resolve_project_from_picker
+    return
   fi
 
   _taw_resolve_project_arg "$_taw_input"
@@ -843,6 +857,10 @@ while (( $# > 0 )); do
       _taw_debug=true
       shift
       ;;
+    -ts|--ts|-picker|--picker|-pick-project|--pick-project)
+      _taw_project_picker_requested=true
+      shift
+      ;;
     -p|-proj|-prj|-r|-repo|-repository)
       (( $# >= 2 )) || _taw_die "$1 requires a value" || return 1
       [[ -n "$2" ]] || _taw_die "$1 requires a non-empty value" || return 1
@@ -919,6 +937,11 @@ done
   _taw_die "expected at most worktree and branch positional arguments"
   return 1
 }
+
+if [[ "$_taw_project_picker_requested" == true && -n "$_taw_project_arg" ]]; then
+  _taw_die "--pick-project cannot be combined with -p"
+  return 1
+fi
 
 _taw_worktree_arg="${_taw_positionals[1]:-}"
 _taw_base_ref="${_taw_positionals[2]:-${_taw_named_branch:-}}"
