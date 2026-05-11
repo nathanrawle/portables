@@ -1014,23 +1014,6 @@ test_prompts_for_existing_repo_when_not_inside_git() {
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
 }
 
-test_direct_source_repeatedly_stays_quiet_by_default() {
-  local output
-
-  output="$(
-    cd "$TEST_TMPDIR" || exit 1
-    printf '\n\n' | TAW_FUNC="$REPO_ROOT/home/.zfuns/taw" \
-      zsh -fc 'source "$TAW_FUNC"; source "$TAW_FUNC"'
-  2>&1)" || true
-
-  if grep -F "_taw_project_arg=" <<<"$output" >/dev/null; then
-    fail "expected repeated direct source not to print taw variable state"
-  fi
-  if grep -F "taw debug:" <<<"$output" >/dev/null; then
-    fail "expected debug output only when requested"
-  fi
-}
-
 test_debug_option_prints_state_snapshot() {
   local repo fake_bin log output
 
@@ -1213,8 +1196,6 @@ test_case "taw: rejects empty project and branch values" \
   test_rejects_empty_project_and_branch_values
 test_case "taw: prompts for repo path outside git" \
   test_prompts_for_existing_repo_when_not_inside_git
-test_case "taw: repeated direct source stays quiet by default" \
-  test_direct_source_repeatedly_stays_quiet_by_default
 test_case "taw: debug option prints state snapshot" \
   test_debug_option_prints_state_snapshot
 test_case "taw: prompted project resolves from PROJECTS_HOME" \

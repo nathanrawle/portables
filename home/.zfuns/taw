@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
 emulate -L zsh
-setopt pipefail typesetsilent
+setopt pipefail
 
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_agent_cmd _taw_editor_cmd _taw_named_branch
