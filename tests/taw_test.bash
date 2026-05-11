@@ -1014,6 +1014,45 @@ test_prompts_for_existing_repo_when_not_inside_git() {
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
 }
 
+test_direct_source_repeatedly_stays_quiet_by_default() {
+  local output
+
+  output="$(
+    cd "$TEST_TMPDIR" || exit 1
+    printf '\n\n' | TAW_FUNC="$REPO_ROOT/home/.zfuns/taw" \
+      zsh -fc 'source "$TAW_FUNC"; source "$TAW_FUNC"'
+  2>&1)" || true
+
+  if grep -F "_taw_project_arg=" <<<"$output" >/dev/null; then
+    fail "expected repeated direct source not to print taw variable state"
+  fi
+  if grep -F "taw debug:" <<<"$output" >/dev/null; then
+    fail "expected debug output only when requested"
+  fi
+}
+
+test_debug_option_prints_state_snapshot() {
+  local repo fake_bin log output
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" --debug -p "$repo" 2>&1)"
+
+  if ! grep -F "taw debug: before project resolution" <<<"$output" >/dev/null; then
+    fail "expected --debug to print state before project resolution"
+  fi
+  if ! grep -F "taw debug: before tmux window" <<<"$output" >/dev/null; then
+    fail "expected --debug to print state before tmux window"
+  fi
+  if ! grep -F "_taw_project_arg='$repo'" <<<"$output" >/dev/null; then
+    fail "expected --debug output to include taw project arg"
+  fi
+}
+
 test_prompted_project_resolves_from_projects_home() {
   local projects_home repo repo_real fake_bin log
 
@@ -1174,6 +1213,10 @@ test_case "taw: rejects empty project and branch values" \
   test_rejects_empty_project_and_branch_values
 test_case "taw: prompts for repo path outside git" \
   test_prompts_for_existing_repo_when_not_inside_git
+test_case "taw: repeated direct source stays quiet by default" \
+  test_direct_source_repeatedly_stays_quiet_by_default
+test_case "taw: debug option prints state snapshot" \
+  test_debug_option_prints_state_snapshot
 test_case "taw: prompted project resolves from PROJECTS_HOME" \
   test_prompted_project_resolves_from_projects_home
 test_case "taw: non-git child under bare wrapper prompts for project" \

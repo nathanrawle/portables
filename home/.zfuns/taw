@@ -1,11 +1,11 @@
 #!/usr/bin/env zsh
 
 emulate -L zsh
-setopt pipefail
+setopt pipefail typesetsilent
 
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_agent_cmd _taw_editor_cmd _taw_named_branch
-local _taw_agent_arg_provided _taw_editor_arg_provided
+local _taw_agent_arg_provided _taw_editor_arg_provided _taw_debug
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_is_bare
 local _taw_session_name _taw_project_name _taw_project_session_name
@@ -20,6 +20,7 @@ _taw_editor_cmd=
 _taw_named_branch=
 _taw_agent_arg_provided=false
 _taw_editor_arg_provided=false
+_taw_debug=false
 
 _taw_die() {
   print -u2 -- "taw: $*"
@@ -39,6 +40,34 @@ _taw_confirm() {
     y|yes) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+_taw_debug_dump() {
+  [[ "$_taw_debug" == true ]] || return 0
+
+  print -u2 -r -- "taw debug: $1"
+  print -u2 -r -- "_taw_project_arg='$_taw_project_arg'"
+  print -u2 -r -- "_taw_agent_cmd=$_taw_agent_cmd"
+  print -u2 -r -- "_taw_editor_cmd=$_taw_editor_cmd"
+  print -u2 -r -- "_taw_named_branch='$_taw_named_branch'"
+  print -u2 -r -- "_taw_agent_arg_provided=$_taw_agent_arg_provided"
+  print -u2 -r -- "_taw_editor_arg_provided=$_taw_editor_arg_provided"
+  print -u2 -r -- "_taw_worktree_arg='$_taw_worktree_arg'"
+  print -u2 -r -- "_taw_base_ref='$_taw_base_ref'"
+  print -u2 -r -- "_taw_window_dir='$_taw_window_dir'"
+  print -u2 -r -- "_taw_window_name='$_taw_window_name'"
+  print -u2 -r -- "_taw_project_dir=$_taw_project_dir"
+  print -u2 -r -- "_taw_git_dir=$_taw_git_dir"
+  print -u2 -r -- "_taw_is_bare=$_taw_is_bare"
+  print -u2 -r -- "_taw_session_name='$_taw_session_name'"
+  print -u2 -r -- "_taw_project_name='$_taw_project_name'"
+  print -u2 -r -- "_taw_project_session_name='$_taw_project_session_name'"
+  print -u2 -r -- "_taw_default_branch_result='$_taw_default_branch_result'"
+  print -u2 -r -- "_taw_default_base_ref='$_taw_default_base_ref'"
+  print -u2 -r -- "_taw_picker_kind='$_taw_picker_kind'"
+  print -u2 -r -- "_taw_picker_branch='$_taw_picker_branch'"
+  print -u2 -r -- "_taw_picker_ref='$_taw_picker_ref'"
+  print -u2 -r -- "_taw_picker_path='$_taw_picker_path'"
 }
 
 _taw_is_url() {
@@ -698,6 +727,10 @@ while (( $# > 0 )); do
       _taw_positionals+=( "$@" )
       break
       ;;
+    -debug|--debug)
+      _taw_debug=true
+      shift
+      ;;
     -p|-proj|-prj|-r|-repo|-repository)
       (( $# >= 2 )) || _taw_die "$1 requires a value" || return 1
       [[ -n "$2" ]] || _taw_die "$1 requires a non-empty value" || return 1
@@ -790,6 +823,7 @@ if [[ -z "$_taw_editor_cmd" ]]; then
   fi
 fi
 
+_taw_debug_dump "before project resolution"
 _taw_resolve_project || return 1
 
 if [[ -n "$_taw_worktree_arg" ]]; then
@@ -890,4 +924,5 @@ else
   _taw_session_name="${_taw_project_name//:/_}"
 fi
 
+_taw_debug_dump "before tmux window"
 _taw_create_tmux_window
