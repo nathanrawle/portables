@@ -19,6 +19,16 @@ assert_file_not_contains() {
   fi
 }
 
+assert_no_tmux_work_window() {
+  local path="$1"
+
+  [[ -f "$path" ]] || return 0
+  assert_file_not_contains "$path" $'new-session\t'
+  assert_file_not_contains "$path" $'new-window\t'
+  assert_file_not_contains "$path" $'attach-session\t'
+  assert_file_not_contains "$path" $'switch-client\t'
+}
+
 make_fake_tmux() {
   local root="$1"
   local bin="$root/bin"
@@ -57,8 +67,23 @@ case "${1:-}" in
     ;;
   list-sessions)
     [[ -n "${TAW_FAKE_TMUX_SESSIONS+x}" ]] || exit 1
-    printf '%b' "$TAW_FAKE_TMUX_SESSIONS"
-    [[ "$TAW_FAKE_TMUX_SESSIONS" = *$'\n' ]] || printf '\n'
+    format=""
+    while [[ $# -gt 0 ]]; do
+      if [[ "$1" = "-F" && $# -ge 2 ]]; then
+        format="$2"
+        break
+      fi
+      shift
+    done
+    if [[ "$format" = "[TMUX] #{session_name}" ]]; then
+      while IFS=$'\t' read -r session _; do
+        [[ -n "$session" ]] || continue
+        printf '[TMUX] %s\n' "$session"
+      done <<<"$TAW_FAKE_TMUX_SESSIONS"
+    else
+      printf '%b' "$TAW_FAKE_TMUX_SESSIONS"
+      [[ "$TAW_FAKE_TMUX_SESSIONS" = *$'\n' ]] || printf '\n'
+    fi
     ;;
   new-session|new-window)
     printf '@1 %%1\n'
@@ -1118,6 +1143,172 @@ test_current_bare_wrapper_auto_detects_without_prompt() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_empty_prompt_selects_project_from_tmux_sessionizer_config() {
+  local xdg projects_home repo repo_real elsewhere fake_bin log fzf_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  repo="$projects_home/repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$repo" \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere"
+
+  assert_file_contains "$fzf_log" "$repo"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+}
+
+test_empty_prompt_project_picker_resolves_tmux_session_row() {
+  local xdg empty_search repo repo_real elsewhere fake_bin log fzf_log sessions
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  repo="$TEST_TMPDIR/repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  sessions=$'agent\t'"$repo_real"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_MATCH='[TMUX] agent' \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere"
+
+  assert_file_contains "$fzf_log" '[TMUX] agent'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tagent:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+}
+
+test_empty_prompt_project_picker_cancel_returns_without_tmux_window() {
+  local xdg projects_home repo elsewhere fake_bin log rc
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  repo="$projects_home/repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$repo"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  set +e
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_CANCEL=1 \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere"
+  rc=$?
+  set -e
+
+  assert_eq "0" "$rc" "expected fzf cancellation to return successfully"
+  assert_no_tmux_work_window "$log"
+}
+
+test_project_prompt_escape_returns_without_tmux_window() {
+  local elsewhere fake_bin log rc
+
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  set +e
+  printf '\033\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere"
+  rc=$?
+  set -e
+
+  assert_eq "0" "$rc" "expected prompt escape to return successfully"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after prompt escape"
+}
+
+test_project_picker_flag_bypasses_current_repo_detection() {
+  local xdg projects_home current_repo picked_repo picked_real fake_bin log fzf_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  current_repo="$TEST_TMPDIR/current"
+  picked_repo="$projects_home/picked"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$current_repo"
+  make_git_repo "$picked_repo"
+  picked_real="$(cd "$picked_repo" && pwd -P)"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$picked_repo" \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$current_repo" --pick-project
+
+  assert_file_contains "$fzf_log" "$picked_repo"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tpicked\t-n\tpicked\t-c\t'"$picked_real"$'\tvim'
+  assert_file_not_contains "$log" $'-s\tcurrent'
+}
+
+test_project_picker_flag_cancel_returns_without_tmux_window() {
+  local xdg projects_home repo current_repo fake_bin log rc
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  repo="$projects_home/repo"
+  current_repo="$TEST_TMPDIR/current"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$repo"
+  make_git_repo "$current_repo"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  set +e
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_CANCEL=1 \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$current_repo" --pick-project
+  rc=$?
+  set -e
+
+  assert_eq "0" "$rc" "expected project picker flag cancellation to return successfully"
+  assert_no_tmux_work_window "$log"
+}
+
+test_project_picker_flag_rejects_project_arg() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" --pick-project -p "$repo"; then
+    fail "expected --pick-project with -p to fail"
+  fi
+
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after invalid picker/project args"
+}
+
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
 test_case "taw: existing session selects new window before attach" \
@@ -1206,3 +1397,17 @@ test_case "taw: non-git parent with bare wrapper child prompts for project" \
   test_non_git_parent_with_bare_wrapper_child_prompts_for_project
 test_case "taw: current bare wrapper auto-detects without prompt" \
   test_current_bare_wrapper_auto_detects_without_prompt
+test_case "taw: empty project prompt opens tmux-sessionizer project picker" \
+  test_empty_prompt_selects_project_from_tmux_sessionizer_config
+test_case "taw: empty project prompt picker resolves tmux session rows" \
+  test_empty_prompt_project_picker_resolves_tmux_session_row
+test_case "taw: empty project prompt picker cancel returns without tmux window" \
+  test_empty_prompt_project_picker_cancel_returns_without_tmux_window
+test_case "taw: project prompt escape returns without tmux window" \
+  test_project_prompt_escape_returns_without_tmux_window
+test_case "taw: project picker flag bypasses current repo detection" \
+  test_project_picker_flag_bypasses_current_repo_detection
+test_case "taw: project picker flag cancel returns without tmux window" \
+  test_project_picker_flag_cancel_returns_without_tmux_window
+test_case "taw: project picker flag rejects -p" \
+  test_project_picker_flag_rejects_project_arg
