@@ -150,17 +150,18 @@ status_line = [
   "five-hour-limit",
   "weekly-limit",
 ]
+session_picker_view = "comfortable"
 
 [tui.model_availability_nux]
 "gpt-5.5" = 4
 
 [marketplaces.openai-bundled]
-last_updated = "2026-05-05T19:54:09Z"
+last_updated = "2026-05-17T00:25:08Z"
 source_type = "local"
 source = "/Users/nathan/.codex/.tmp/bundled-marketplaces/openai-bundled"
 
 [marketplaces.openai-primary-runtime]
-last_updated = "2026-05-05T20:39:07Z"
+last_updated = "2026-05-17T00:39:13Z"
 source_type = "local"
 source = "/Users/nathan/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
 
@@ -176,5 +177,5 @@ enabled = true
 [plugins."github@openai-curated"]
 enabled = true
 
-[plugins."browser-use@openai-bundled"]
+[plugins."browser@openai-bundled"]
 enabled = true
