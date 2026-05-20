@@ -19,6 +19,16 @@ assert_file_not_contains() {
   fi
 }
 
+assert_string_not_contains() {
+  local value="$1"
+  local unexpected="$2"
+
+  case "$value" in
+    *"$unexpected"*) fail "expected string not to contain: $unexpected" ;;
+    *) ;;
+  esac
+}
+
 assert_no_tmux_work_window() {
   local path="$1"
 
@@ -573,6 +583,27 @@ test_explicit_normal_branch_ignores_stale_unconfigured_remote_ref() {
   assert_eq "origin/feature/foo" "$upstream_ref" "expected configured remote to win over stale remote ref"
 }
 
+test_explicit_normal_configured_remote_prefix_missing_ref_fails() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" remote add upstream "$TEST_TMPDIR/upstream.git"
+  git -C "$repo" update-ref refs/remotes/upstream/origin/topic refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b origin/topic; then
+    fail "expected configured remote prefix with missing ref to fail"
+  fi
+  if git -C "$repo" show-ref --verify --quiet refs/heads/origin/topic; then
+    fail "expected origin/topic local branch not to be created from another remote"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after missing configured remote ref"
+}
+
 test_explicit_normal_branch_rejects_refs_remotes_prefix() {
   local repo fake_bin log
 
@@ -1011,6 +1042,42 @@ test_existing_file_and_broken_symlink_fail_without_create_prompt() {
     fail "expected broken symlink to fail"
   fi
   [[ ! -f "$log" ]] || fail "expected tmux not to run after broken symlink"
+}
+
+test_projects_home_file_and_broken_symlink_fail_without_create_prompt() {
+  local projects_home elsewhere fake_bin log output file symlink target rc
+
+  projects_home="$TEST_TMPDIR/projects"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$projects_home" "$elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  file="$projects_home/existing-file"
+  printf 'content\n' >"$file"
+  set +e
+  output="$(printf 'y\nrepo\n' | PROJECTS_HOME="$projects_home" EDITOR=vim \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere" -p existing-file 2>&1)"
+  rc=$?
+  set -e
+  [[ $rc -ne 0 ]] || fail "expected PROJECTS_HOME file candidate to fail"
+  assert_string_not_contains "$output" "Create project at"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after PROJECTS_HOME file"
+
+  rm -f "$log"
+  target="$projects_home/missing"
+  symlink="$projects_home/broken-link"
+  ln -s "$target" "$symlink"
+  set +e
+  output="$(printf 'y\nrepo\n' | PROJECTS_HOME="$projects_home" EDITOR=vim \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere" -p broken-link 2>&1)"
+  rc=$?
+  set -e
+  [[ $rc -ne 0 ]] || fail "expected PROJECTS_HOME broken symlink candidate to fail"
+  assert_string_not_contains "$output" "Create project at"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after PROJECTS_HOME broken symlink"
 }
 
 test_creates_bare_worktree_from_positional_base_ref() {
@@ -1613,6 +1680,21 @@ test_bare_project_invalid_branch_does_not_create_parent_dirs() {
   [[ ! -f "$log" ]] || fail "expected tmux not to run after invalid bare branch"
 }
 
+test_bare_project_relative_worktree_escape_is_rejected() {
+  local project fake_bin log
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" "../outside/foo"; then
+    fail "expected relative bare worktree escape to fail"
+  fi
+  assert_not_exists "$TEST_TMPDIR/outside"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after escaping bare worktree path"
+}
+
 test_normal_repo_checks_out_branch_from_single_positional() {
   local repo repo_real fake_bin log branch
 
@@ -1899,6 +1981,10 @@ test_empty_prompt_selects_project_from_tmux_sessionizer_config() {
 
   assert_file_contains "$fzf_log" "$repo"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+}
+
+test_empty_project_prompt_mentions_fzf() {
+  assert_file_contains "$REPO_ROOT/home/.zfuns/taw" "empty opens fzf"
 }
 
 test_empty_prompt_project_picker_resolves_tmux_session_row() {
@@ -2256,6 +2342,8 @@ test_case "taw: explicit normal remote-only branch tracks upstream" \
   test_explicit_normal_branch_resolves_remote_only_by_branch_name
 test_case "taw: explicit normal stale unconfigured remote ref is ignored" \
   test_explicit_normal_branch_ignores_stale_unconfigured_remote_ref
+test_case "taw: explicit normal configured remote prefix missing ref fails" \
+  test_explicit_normal_configured_remote_prefix_missing_ref_fails
 test_case "taw: explicit normal refs/remotes prefix is rejected" \
   test_explicit_normal_branch_rejects_refs_remotes_prefix
 test_case "taw: -p resolves from PROJECTS_HOME" \
@@ -2296,6 +2384,8 @@ test_case "taw: URL clone failure does not prompt create" \
   test_url_clone_failure_does_not_prompt_create
 test_case "taw: existing file and broken symlink fail without create prompt" \
   test_existing_file_and_broken_symlink_fail_without_create_prompt
+test_case "taw: PROJECTS_HOME file and broken symlink fail without create prompt" \
+  test_projects_home_file_and_broken_symlink_fail_without_create_prompt
 test_case "taw: outside promotion uses single positional as project arg" \
   test_outside_promotion_uses_single_positional_as_project_arg
 test_case "taw: outside promotion uses project and operand positionals" \
@@ -2362,6 +2452,8 @@ test_case "taw: bare project local slash base ref stays local" \
   test_bare_project_local_slash_base_ref_stays_local
 test_case "taw: bare project invalid branch does not create parent dirs" \
   test_bare_project_invalid_branch_does_not_create_parent_dirs
+test_case "taw: bare project relative worktree escape is rejected" \
+  test_bare_project_relative_worktree_escape_is_rejected
 test_case "taw: normal repo checks out branch from single positional" \
   test_normal_repo_checks_out_branch_from_single_positional
 test_case "taw: normal repo rejects two positional operands" \
@@ -2390,6 +2482,8 @@ test_case "taw: current bare wrapper auto-detects without prompt" \
   test_current_bare_wrapper_auto_detects_without_prompt
 test_case "taw: empty project prompt opens tmux-sessionizer project picker" \
   test_empty_prompt_selects_project_from_tmux_sessionizer_config
+test_case "taw: empty project prompt mentions fzf" \
+  test_empty_project_prompt_mentions_fzf
 test_case "taw: empty project prompt picker resolves tmux session rows" \
   test_empty_prompt_project_picker_resolves_tmux_session_row
 test_case "taw: empty project prompt picker cancel returns without tmux window" \

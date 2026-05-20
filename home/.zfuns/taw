@@ -529,7 +529,7 @@ _taw_resolve_project() {
 
     case "${#_taw_positionals[@]}" in
       0)
-        _taw_input="$(_taw_prompt_project "Project, GitHub URL, or git repository directory: ")"
+        _taw_input="$(_taw_prompt_project "Project, GitHub URL, or git repository directory (empty opens fzf): ")"
         _taw_status=$?
         case "$_taw_status" in
           0) ;;
@@ -588,6 +588,10 @@ _taw_resolve_project_arg() {
       _taw_use_project_path "$_taw_projects_candidate" "$_taw_projects_candidate"
       return
     fi
+    [[ ! -e "$_taw_projects_candidate" && ! -L "$_taw_projects_candidate" ]] || {
+      _taw_die "could not cd to project: $_taw_projects_candidate"
+      return 1
+    }
     _taw_create_target="$_taw_projects_candidate"
   fi
 
@@ -766,6 +770,7 @@ _taw_resolve_branch_target() {
         _taw_branch_target_ref="$_taw_remote/$_taw_branch"
         return 0
       fi
+      return 1
     fi
   fi
 
@@ -1175,6 +1180,24 @@ _taw_prepare_worktree() {
   fi
 }
 
+_taw_resolve_bare_worktree_arg() {
+  local _taw_arg="$1" _taw_project_root _taw_path
+
+  _taw_project_root="${_taw_project_dir:A}"
+  if [[ "$_taw_arg" == /* ]]; then
+    _taw_path="${_taw_arg:A}"
+  else
+    _taw_path="${_taw_project_root}/$_taw_arg"
+    _taw_path="${_taw_path:A}"
+    if [[ "$_taw_path" != "$_taw_project_root"/* ]]; then
+      _taw_die "worktree path must stay under project root: $_taw_arg"
+      return 1
+    fi
+  fi
+
+  print -r -- "$_taw_path"
+}
+
 _taw_prepare_orphan_worktree() {
   local _taw_path="$1" _taw_branch="$2" _taw_existing_common
 
@@ -1490,11 +1513,7 @@ if [[ "$_taw_project_kind" == normal ]]; then
     esac
   fi
 elif [[ -n "$_taw_worktree_arg" ]]; then
-  if [[ "$_taw_worktree_arg" == /* ]]; then
-    _taw_window_dir="${_taw_worktree_arg:A}"
-  else
-    _taw_window_dir="${_taw_project_dir:A}/$_taw_worktree_arg"
-  fi
+  _taw_window_dir="$(_taw_resolve_bare_worktree_arg "$_taw_worktree_arg")" || return 1
   _taw_window_name="${_taw_window_dir:t}"
   if [[ -n "$_taw_base_ref" ]]; then
     _taw_resolve_branch_target "$_taw_base_ref" || return 1
