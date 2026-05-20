@@ -448,10 +448,13 @@ _taw_tmux_sessionizer_picker_rows() {
     _taw_sessions="$(tmux list-sessions -F '[TMUX] #{session_name}' 2>/dev/null)" || _taw_sessions=
     for _taw_session_line in "${(@f)_taw_sessions}"; do
       [[ "$_taw_session_line" == "[TMUX] $_taw_current_session" ]] && continue
-      print -r -- "$_taw_session_line"
+      print -r -- "$_taw_session_line"$'\t'"tmux"$'\t'"${_taw_session_line#"[TMUX] "}"
     done
   else
-    tmux list-sessions -F '[TMUX] #{session_name}' 2>/dev/null || true
+    _taw_sessions="$(tmux list-sessions -F '[TMUX] #{session_name}' 2>/dev/null)" || _taw_sessions=
+    for _taw_session_line in "${(@f)_taw_sessions}"; do
+      print -r -- "$_taw_session_line"$'\t'"tmux"$'\t'"${_taw_session_line#"[TMUX] "}"
+    done
   fi
 
   for _taw_entry in "${TS_SEARCH_PATHS[@]}"; do
@@ -464,38 +467,55 @@ _taw_tmux_sessionizer_picker_rows() {
     fi
 
     [[ -d "$_taw_path" ]] || continue
-    find "$_taw_path" -mindepth 1 -maxdepth "$_taw_depth" -path '*/.git' -prune -o -type d -print
+    find "$_taw_path" -mindepth 1 -maxdepth "$_taw_depth" -path '*/.git' -prune -o -type d -print \
+      | while IFS= read -r _taw_found_path; do
+        print -r -- "$_taw_found_path"$'\t'"path"$'\t'"$_taw_found_path"
+      done
   done
 }
 
 _taw_select_project_with_fzf() {
-  local _taw_rows _taw_choice
+  local _taw_rows _taw_choice _taw_status
 
   command -v fzf >/dev/null 2>&1 || return 2
   _taw_rows="$(_taw_tmux_sessionizer_picker_rows)" || return 2
   [[ -n "$_taw_rows" ]] || return 2
 
-  _taw_choice="$(print -r -- "$_taw_rows" | fzf --prompt='taw project> ')" || return 1
+  _taw_choice="$(print -r -- "$_taw_rows" | fzf --delimiter=$'\t' --with-nth=1 --prompt='taw project> ')"
+  _taw_status=$?
+  [[ $_taw_status -eq 0 ]] || return "$_taw_status"
   [[ -n "$_taw_choice" ]] || return 1
 
-  if [[ "$_taw_choice" == "[TMUX] "* ]]; then
-    print -r -- "${_taw_choice#"[TMUX] "}"
-  else
-    print -r -- "$_taw_choice"
-  fi
+  print -r -- "${_taw_choice#*$'\t'}"
 }
 
 _taw_resolve_project_from_picker() {
-  local _taw_input _taw_status
+  local _taw_input _taw_status _taw_kind _taw_value
 
   _taw_input="$(_taw_select_project_with_fzf)"
   _taw_status=$?
   case "$_taw_status" in
     0)
-      _taw_resolve_project_arg "$_taw_input"
+      _taw_kind="${_taw_input%%$'\t'*}"
+      _taw_value="${_taw_input#*$'\t'}"
+      case "$_taw_kind" in
+        path)
+          _taw_resolve_project_arg "$_taw_value"
+          ;;
+        tmux)
+          _taw_resolve_project_from_tmux "$_taw_value" || {
+            _taw_die "could not resolve tmux session: $_taw_value"
+            return 1
+          }
+          ;;
+        *)
+          _taw_die "project picker returned an invalid row"
+          return 1
+          ;;
+      esac
       return
       ;;
-    1|130)
+    130)
       return 130
       ;;
     *)

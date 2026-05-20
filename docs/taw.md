@@ -64,6 +64,7 @@ Project picker aliases:
 
 Picker result handling:
 
+- `[TMUX]` rows resolve by tmux session identity, not by generic project-name lookup
 - `normal` and `plain` projects open directly
 - `bare` projects open their default worktree directly
 

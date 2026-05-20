@@ -142,6 +142,10 @@ if [[ -n "${TAW_FZF_INPUT_LOG:-}" ]]; then
   printf '%s\n' "${lines[@]}" >>"$TAW_FZF_INPUT_LOG"
 fi
 
+if [[ -n "${TAW_FAKE_FZF_STATUS:-}" ]]; then
+  exit "$TAW_FAKE_FZF_STATUS"
+fi
+
 if [[ "${TAW_FAKE_FZF_CANCEL:-0}" = 1 ]]; then
   exit 130
 fi
@@ -451,6 +455,34 @@ test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch() {
   assert_eq "origin/feature/foo" "$upstream_ref" "expected remote branch tracking"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
   assert_file_not_contains "$log" $'send-keys\t'
+}
+
+test_normal_repo_picker_lists_deduped_branches() {
+  local repo fake_bin log fzf_log main_count remote_count
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" remote add upstream "$TEST_TMPDIR/upstream.git"
+  git -C "$repo" update-ref refs/remotes/origin/main refs/heads/develop
+  git -C "$repo" update-ref refs/remotes/upstream/remote-only refs/heads/main
+  git -C "$repo" update-ref refs/remotes/origin/remote-only refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'remote-only\tbranch' TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo"
+
+  main_count="$(grep -F $'main\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
+  remote_count="$(grep -F $'remote-only\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
+  assert_eq "1" "$main_count" "expected local main to suppress remote main"
+  assert_eq "1" "$remote_count" "expected duplicate remote branches to dedupe to one picker row"
+  assert_file_contains "$fzf_log" $'remote-only\tbranch\tremote-only\torigin/remote-only\t'
+  assert_file_not_contains "$fzf_log" $'origin/main'
+  assert_file_not_contains "$fzf_log" $'upstream/remote-only'
 }
 
 test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged() {
@@ -2016,6 +2048,37 @@ test_empty_prompt_project_picker_resolves_tmux_session_row() {
   assert_file_not_contains "$log" $'ignored-agent'
 }
 
+test_project_picker_tmux_row_uses_session_identity() {
+  local xdg empty_search tmux_repo tmux_real collision elsewhere fake_bin log fzf_log sessions no_fzf_path
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  tmux_repo="$TEST_TMPDIR/session-repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  collision="$elsewhere/dupe"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$tmux_repo"
+  make_git_repo "$collision"
+  tmux_real="$(cd "$tmux_repo" && pwd -P)"
+  sessions=$'dupe\t'"$tmux_real"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_MATCH='[TMUX] dupe' TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere"
+
+  assert_file_contains "$fzf_log" '[TMUX] dupe'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tdupe:\t-n\tsession-repo\t-c\t'"$tmux_real"$'\tvim'
+  assert_file_not_contains "$log" $'-c\t'"$collision"
+}
+
 test_empty_prompt_project_picker_cancel_returns_without_tmux_window() {
   local xdg projects_home repo elsewhere fake_bin log rc
 
@@ -2039,6 +2102,33 @@ test_empty_prompt_project_picker_cancel_returns_without_tmux_window() {
   set -e
 
   assert_eq "0" "$rc" "expected fzf cancellation to return successfully"
+  assert_no_tmux_work_window "$log"
+}
+
+test_project_picker_flag_error_fails_without_tmux_window() {
+  local xdg projects_home repo current_repo fake_bin log rc
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  repo="$projects_home/repo"
+  current_repo="$TEST_TMPDIR/current"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$repo"
+  make_git_repo "$current_repo"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  set +e
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_STATUS=1 \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$current_repo" --pick-project
+  rc=$?
+  set -e
+
+  [[ $rc -ne 0 ]] || fail "expected project picker fzf error to fail"
   assert_no_tmux_work_window "$log"
 }
 
@@ -2328,6 +2418,8 @@ test_case "taw: named branch checks out normal repo" \
   test_named_branch_checks_out_normal_repo
 test_case "taw: normal repo no explicit branch uses picker" \
   test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch
+test_case "taw: normal repo picker lists deduped branches" \
+  test_normal_repo_picker_lists_deduped_branches
 test_case "taw: normal repo no explicit branch without fzf opens unchanged" \
   test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged
 test_case "taw: normal repo picker cancel returns success" \
@@ -2486,6 +2578,8 @@ test_case "taw: empty project prompt mentions fzf" \
   test_empty_project_prompt_mentions_fzf
 test_case "taw: empty project prompt picker resolves tmux session rows" \
   test_empty_prompt_project_picker_resolves_tmux_session_row
+test_case "taw: project picker tmux row uses session identity" \
+  test_project_picker_tmux_row_uses_session_identity
 test_case "taw: empty project prompt picker cancel returns without tmux window" \
   test_empty_prompt_project_picker_cancel_returns_without_tmux_window
 test_case "taw: project prompt escape returns without tmux window" \
@@ -2494,6 +2588,8 @@ test_case "taw: project picker flag bypasses current repo detection" \
   test_project_picker_flag_bypasses_current_repo_detection
 test_case "taw: project picker flag cancel returns without tmux window" \
   test_project_picker_flag_cancel_returns_without_tmux_window
+test_case "taw: project picker flag error fails without tmux window" \
+  test_project_picker_flag_error_fails_without_tmux_window
 test_case "taw: project picker flag ignores TAW_AGENT without explicit agent" \
   test_project_picker_flag_ignores_taw_agent_without_explicit_agent
 test_case "taw: project picker flag opens bare wrapper default worktree without second picker" \
