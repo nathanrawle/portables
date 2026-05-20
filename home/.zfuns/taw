@@ -6,6 +6,7 @@ setopt pipefail
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_project_picker_requested _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_agent_arg_provided _taw_editor_arg_provided _taw_agent_enabled _taw_created_repo_branch_applied _taw_debug
+local _taw_agent_env_override
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_project_kind _taw_is_bare
 local _taw_selected_worktree_dir
@@ -26,6 +27,7 @@ _taw_editor_arg_provided=false
 _taw_agent_enabled=true
 _taw_created_repo_branch_applied=false
 _taw_debug=false
+_taw_agent_env_override=false
 
 _taw_die() {
   print -u2 -- "taw: $*"
@@ -867,11 +869,14 @@ _taw_bare_worktree_count() {
 }
 
 _taw_default_bare_target() {
-  local _taw_head_branch
+  local _taw_head_branch _taw_refs
 
   if _taw_default_branch; then
     return 0
   fi
+
+  _taw_refs="$(_taw_git for-each-ref --count=1 --format='%(refname)' 2>/dev/null)" || return 1
+  [[ -n "$_taw_refs" ]] && return 1
 
   if _taw_head_branch="$(_taw_git symbolic-ref --quiet --short HEAD 2>/dev/null)"; then
     _taw_default_branch_result="$_taw_head_branch"
@@ -1258,7 +1263,8 @@ _taw_switch_to_tmux_window() {
 _taw_can_reuse_existing_window() {
   [[ "$_taw_agent_arg_provided" != true \
     && "$_taw_editor_arg_provided" != true \
-    && ${#_taw_shell_cmds[@]} -eq 0 ]]
+    && ${#_taw_shell_cmds[@]} -eq 0 \
+    && "$_taw_agent_env_override" != true ]]
 }
 
 _taw_create_tmux_window() {
@@ -1608,6 +1614,7 @@ else
     _taw_agent_override="$(_taw_trim_whitespace "$TAW_AGENT")"
     if [[ -n "$_taw_agent_override" ]]; then
       _taw_agent_cmd="$_taw_agent_override"
+      _taw_agent_env_override=true
     fi
   fi
 fi

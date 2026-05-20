@@ -376,6 +376,29 @@ test_existing_worktree_window_is_reused() {
   assert_file_not_contains "$log" $'rename-window\t'
 }
 
+test_taw_agent_env_disables_existing_window_reuse() {
+  local repo repo_real fake_bin log panes no_fzf_path
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  mkdir -p "$repo/src"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'@9\t%9\t'"$repo_real"$'/src\n'
+
+  TAW_AGENT='  env-agent  ' EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_PANES="$panes" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" -p "$repo"
+
+  assert_file_contains "$log" $'has-session\t-t\trepo'
+  assert_file_not_contains "$log" $'list-panes\t-s\t-t\trepo:\t-F\t#{window_id}\t#{pane_id}\t#{pane_current_path}'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\trepo:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tenv-agent'
+  assert_file_not_contains "$log" $'select-window\t-t\t@9'
+}
+
 test_named_branch_checks_out_normal_repo() {
   local repo repo_real fake_bin log branch
 
@@ -1400,8 +1423,8 @@ test_bare_zero_worktree_uses_head_branch_when_no_refs_exist() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
-test_bare_zero_worktree_uses_head_branch_even_when_refs_exist() {
-  local project fake_bin log branch worktree_real
+test_bare_zero_worktree_fails_when_refs_exist_but_no_default_resolves() {
+  local project fake_bin log
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   git --git-dir "$project/.git" branch topic develop
@@ -1411,14 +1434,33 @@ test_bare_zero_worktree_uses_head_branch_even_when_refs_exist() {
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$TEST_TMPDIR" -p "$project"
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"; then
+    fail "expected bare project with unresolved refs to fail"
+  fi
 
-  branch="$(git -C "$project/missing" branch --show-current)"
-  worktree_real="$(cd "$project/missing" && pwd -P)"
-  assert_eq "missing" "$branch" "expected orphan worktree branch to use HEAD symbolic-ref"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmissing'
-  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+  assert_not_exists "$project/missing"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after unresolved bare default"
+}
+
+test_bare_zero_worktree_fails_when_only_tag_ref_exists() {
+  local project fake_bin log
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" tag release main
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  git --git-dir "$project/.git" update-ref -d refs/heads/develop
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"; then
+    fail "expected bare project with only a tag ref to fail"
+  fi
+
+  assert_not_exists "$project/missing"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after tag-only bare default"
 }
 
 test_bare_project_named_branch_without_worktree_opens_branch_worktree() {
@@ -2190,6 +2232,8 @@ test_case "taw: TAW_AGENT whitespace defaults to codex" \
   test_taw_agent_whitespace_only_defaults_to_codex
 test_case "taw: TAW_AGENT env override trims whitespace" \
   test_taw_agent_env_override_uses_trimmed_value
+test_case "taw: TAW_AGENT env disables existing window reuse" \
+  test_taw_agent_env_disables_existing_window_reuse
 test_case "taw: existing session selects new window before attach" \
   test_existing_session_adds_window_and_selects_it_before_attach
 test_case "taw: reuses existing worktree window" \
@@ -2280,6 +2324,10 @@ test_case "taw: bare project without default falls back to master" \
   test_bare_project_without_default_falls_back_to_master
 test_case "taw: bare project with only origin HEAD creates local default worktree" \
   test_bare_project_origin_head_only_creates_local_default_worktree
+test_case "taw: bare default worktree fails when refs exist but no default resolves" \
+  test_bare_zero_worktree_fails_when_refs_exist_but_no_default_resolves
+test_case "taw: bare default worktree fails when only tag ref exists" \
+  test_bare_zero_worktree_fails_when_only_tag_ref_exists
 test_case "taw: bare picker lists deduped branches" \
   test_bare_picker_lists_deduped_branches
 test_case "taw: bare picker remote branch creates local worktree" \
@@ -2298,8 +2346,6 @@ test_case "taw: bare remote-only branch tracks upstream" \
   test_bare_remote_only_branch_sets_upstream_tracking
 test_case "taw: bare zero worktree uses head branch when no refs exist" \
   test_bare_zero_worktree_uses_head_branch_when_no_refs_exist
-test_case "taw: bare zero worktree uses head branch even when refs exist" \
-  test_bare_zero_worktree_uses_head_branch_even_when_refs_exist
 test_case "taw: bare project -b opens branch worktree" \
   test_bare_project_named_branch_without_worktree_opens_branch_worktree
 test_case "taw: explicit bare worktree subdir with -b opens project root worktree" \

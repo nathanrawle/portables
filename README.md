@@ -63,6 +63,8 @@ bash ./configure
 
 Runs all available tool config hooks.
 
+For the `taw` zsh function, see [docs/taw.md](docs/taw.md).
+
 ## How Tool Installation Works
 
 Each script in `machine-tools/` can emit install tokens from its `install` case. `instantiate` collects those tokens, groups them by installer, installs dependencies, then calls each relevant script's `config` case.
