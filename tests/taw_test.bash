@@ -117,7 +117,7 @@ while IFS= read -r line; do
 done
 
 if [[ -n "${TAW_FZF_INPUT_LOG:-}" ]]; then
-  printf '%s\n' "${lines[@]}" >"$TAW_FZF_INPUT_LOG"
+  printf '%s\n' "${lines[@]}" >>"$TAW_FZF_INPUT_LOG"
 fi
 
 if [[ "${TAW_FAKE_FZF_CANCEL:-0}" = 1 ]]; then
@@ -135,6 +135,9 @@ if [[ -n "${TAW_FAKE_FZF_MATCH:-}" ]]; then
       exit 0
     fi
   done
+  if [[ "${TAW_FAKE_FZF_MATCH_FALLBACK_OK:-0}" = 1 ]]; then
+    exit 2
+  fi
   exit 1
 fi
 
@@ -154,6 +157,7 @@ make_path_without_fzf() {
 
   ln -sf "$(command -v bash)" "$bin/bash"
   ln -sf "$(command -v git)" "$bin/git"
+  ln -sf "$(command -v find)" "$bin/find"
   ln -sf "$(command -v mkdir)" "$bin/mkdir"
   ln -sf "$(command -v zsh)" "$bin/zsh"
   printf '%s\n' "$bin"
@@ -244,15 +248,16 @@ run_taw() {
 }
 
 test_layout_with_overrides_and_shell_panes() {
-  local repo repo_real fake_bin log
+  local repo repo_real fake_bin log no_fzf_path
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
   repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" -p "$repo" -agent "claude --resume" -ed "nvim ." -sh -sh "npm test"
 
   assert_file_contains "$log" $'has-session\t-t\trepo'
@@ -269,15 +274,16 @@ test_layout_with_overrides_and_shell_panes() {
 }
 
 test_existing_session_adds_window_and_selects_it_before_attach() {
-  local repo repo_real fake_bin log
+  local repo repo_real fake_bin log no_fzf_path
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
   repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" -p "$repo"
 
   assert_file_contains "$log" $'has-session\t-t\trepo'
@@ -290,18 +296,19 @@ test_existing_session_adds_window_and_selects_it_before_attach() {
 }
 
 test_existing_worktree_window_is_reused() {
-  local repo repo_real fake_bin log panes
+  local repo repo_real fake_bin log panes no_fzf_path
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
   mkdir -p "$repo/src"
   repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
   panes=$'@9\t'"$repo_real"$'/src\n'
 
   EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_PANES="$panes" \
-    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" -p "$repo"
 
   assert_file_contains "$log" $'has-session\t-t\trepo'
@@ -334,8 +341,177 @@ test_named_branch_checks_out_normal_repo() {
   assert_file_not_contains "$log" $'send-keys\t'
 }
 
+test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch() {
+  local repo repo_real fake_bin log branch upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/foo refs/heads/develop
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'feature/foo\tbranch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo"
+
+  branch="$(git -C "$repo" branch --show-current)"
+  upstream_ref="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq "feature/foo" "$branch" "expected picker branch checkout"
+  assert_eq "origin/feature/foo" "$upstream_ref" "expected remote branch tracking"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_not_contains "$log" $'send-keys\t'
+}
+
+test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged() {
+  local repo repo_real fake_bin log branch no_fzf_path
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" -p "$repo"
+
+  branch="$(git -C "$repo" branch --show-current)"
+  assert_eq "main" "$branch" "expected repo to remain on current branch"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_not_contains "$log" $'checkout\t'
+}
+
+test_normal_repo_picker_cancel_returns_success_without_tmux() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_CANCEL=1 TAW_FAKE_FZF_MATCH=$'main\tbranch' TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo"
+
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after picker cancel"
+}
+
+test_normal_repo_picker_error_fails_without_tmux() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_INDEX=99 TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo"; then
+    fail "expected picker error to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after picker error"
+}
+
+test_explicit_normal_origin_topic_local_branch_wins_over_remote() {
+  local repo fake_bin log branch
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" branch origin/topic main
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/topic refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b origin/topic
+
+  branch="$(git -C "$repo" branch --show-current)"
+  assert_eq "origin/topic" "$branch" "expected exact local branch to win"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
+}
+
+test_explicit_normal_longest_remote_prefix_resolves_to_nested_remote_branch() {
+  local repo fake_bin log branch upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" config remote.foo.url "$TEST_TMPDIR/foo.git"
+  git -C "$repo" config remote.foo.fetch "+refs/heads/*:refs/remotes/foo/*"
+  git -C "$repo" config remote.foo/bar.url "$TEST_TMPDIR/foo-bar.git"
+  git -C "$repo" config remote.foo/bar.fetch "+refs/heads/*:refs/remotes/foo/bar/*"
+  git -C "$repo" update-ref refs/remotes/foo/bar/topic refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b foo/bar/topic
+
+  branch="$(git -C "$repo" branch --show-current)"
+  upstream_ref="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq "topic" "$branch" "expected longest remote prefix to resolve nested remote branch"
+  assert_eq "foo/bar/topic" "$upstream_ref" "expected nested remote branch tracking"
+}
+
+test_explicit_normal_branch_resolves_remote_only_by_branch_name() {
+  local repo fake_bin log branch upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/foo refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b feature/foo
+
+  branch="$(git -C "$repo" branch --show-current)"
+  upstream_ref="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq "feature/foo" "$branch" "expected remote-only branch to create local branch"
+  assert_eq "origin/feature/foo" "$upstream_ref" "expected remote-only branch tracking"
+}
+
+test_explicit_normal_branch_ignores_stale_unconfigured_remote_ref() {
+  local repo fake_bin log branch upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/foo refs/heads/develop
+  git -C "$repo" update-ref refs/remotes/feature/foo refs/heads/main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b feature/foo
+
+  branch="$(git -C "$repo" branch --show-current)"
+  upstream_ref="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq "feature/foo" "$branch" "expected stale unconfigured remote ref to stay on the branch name"
+  assert_eq "origin/feature/foo" "$upstream_ref" "expected configured remote to win over stale remote ref"
+}
+
+test_explicit_normal_branch_rejects_refs_remotes_prefix() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" -b refs/remotes/origin/topic; then
+    fail "expected refs/remotes input to be rejected"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after rejected branch"
+}
+
 test_project_arg_resolves_from_projects_home() {
-  local projects_home repo repo_real fake_bin log
+  local projects_home repo repo_real fake_bin log no_fzf_path
 
   projects_home="$TEST_TMPDIR/projects"
   repo="$projects_home/foo"
@@ -343,9 +519,10 @@ test_project_arg_resolves_from_projects_home() {
   repo_real="$(cd "$repo" && pwd -P)"
   mkdir -p "$TEST_TMPDIR/elsewhere"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  PROJECTS_HOME="$projects_home" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  PROJECTS_HOME="$projects_home" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" -p foo
 
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tfoo\t-n\tfoo\t-c\t'"$repo_real"$'\tvim'
@@ -353,7 +530,7 @@ test_project_arg_resolves_from_projects_home() {
 }
 
 test_project_arg_direct_path_precedes_projects_home() {
-  local projects_home direct_repo projects_repo direct_real projects_real fake_bin log
+  local projects_home direct_repo projects_repo direct_real projects_real fake_bin log no_fzf_path
 
   projects_home="$TEST_TMPDIR/projects"
   direct_repo="$TEST_TMPDIR/current/foo"
@@ -363,9 +540,10 @@ test_project_arg_direct_path_precedes_projects_home() {
   direct_real="$(cd "$direct_repo" && pwd -P)"
   projects_real="$(cd "$projects_repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  PROJECTS_HOME="$projects_home" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  PROJECTS_HOME="$projects_home" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/current" -p foo
 
   assert_file_contains "$log" $'-c\t'"$direct_real"$'\tvim'
@@ -373,16 +551,17 @@ test_project_arg_direct_path_precedes_projects_home() {
 }
 
 test_project_arg_plain_path_opens_plain_project() {
-  local plain plain_real fake_bin log
+  local plain plain_real fake_bin log no_fzf_path
 
   plain="$TEST_TMPDIR/plain"
   mkdir -p "$TEST_TMPDIR/elsewhere"
   mkdir -p "$plain"
   plain_real="$(cd "$plain" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" -p "$plain"
 
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tplain\t-n\tplain\t-c\t'"$plain_real"$'\tvim'
@@ -391,16 +570,17 @@ test_project_arg_plain_path_opens_plain_project() {
 }
 
 test_outside_promotion_uses_single_positional_as_project_arg() {
-  local repo repo_real fake_bin log
+  local repo repo_real fake_bin log no_fzf_path
 
   repo="$TEST_TMPDIR/repo"
   mkdir -p "$TEST_TMPDIR/elsewhere"
   make_git_repo "$repo"
   repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" "$repo"
 
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
@@ -440,7 +620,7 @@ test_outside_promotion_rejects_branch_flag() {
 }
 
 test_project_arg_preserves_invoking_shell_cwd() {
-  local repo start start_real fake_bin log after
+  local repo start start_real fake_bin log after no_fzf_path
 
   repo="$TEST_TMPDIR/repo"
   start="$TEST_TMPDIR/start"
@@ -448,12 +628,13 @@ test_project_arg_preserves_invoking_shell_cwd() {
   mkdir -p "$start"
   start_real="$(cd "$start" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
   after="$(
     cd "$start" || exit 1
     TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" \
-      PATH="$fake_bin:$PATH" \
+      PATH="$no_fzf_path" \
       TMUX= \
       EDITOR=vim \
       TAW_TMUX_LOG="$log" \
@@ -489,18 +670,19 @@ test_project_arg_github_url_clones_and_opens_project() {
 }
 
 test_project_arg_resolves_by_tmux_session_name() {
-  local repo repo_real fake_bin log sessions
+  local repo repo_real fake_bin log sessions no_fzf_path
 
   repo="$TEST_TMPDIR/session-repo"
   make_git_repo "$repo"
   repo_real="$(cd "$repo" && pwd -P)"
   mkdir -p "$TEST_TMPDIR/elsewhere"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
   sessions=$'agent\t'"$repo_real"$'\n'
 
   EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_SESSIONS="$sessions" \
-    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" -p agent
 
   assert_file_contains "$log" $'list-sessions\t-F\t#{session_name}\t#{session_path}'
@@ -510,18 +692,19 @@ test_project_arg_resolves_by_tmux_session_name() {
 }
 
 test_project_arg_resolves_by_tmux_session_path_basename() {
-  local repo repo_real fake_bin log sessions
+  local repo repo_real fake_bin log sessions no_fzf_path
 
   repo="$TEST_TMPDIR/path-match"
   make_git_repo "$repo"
   repo_real="$(cd "$repo" && pwd -P)"
   mkdir -p "$TEST_TMPDIR/elsewhere"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
   sessions=$'alpha\t'"$repo_real"$'\n'
 
   EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_SESSIONS="$sessions" \
-    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" -p path-match
 
   assert_file_contains "$log" $'has-session\t-t\talpha'
@@ -681,15 +864,14 @@ test_conventional_bare_worktree_detection_keeps_project_root() {
 }
 
 test_bare_project_without_worktree_opens_default_branch_worktree() {
-  local project fake_bin log branch worktree_real
+  local project fake_bin log branch worktree_real no_fzf_path
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
-  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_FZF_MATCH=$'main\tbranch' \
-    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
   branch="$(git -C "$project/main" branch --show-current)"
@@ -753,7 +935,7 @@ test_bare_project_without_default_falls_back_to_master() {
 }
 
 test_bare_project_origin_head_only_creates_local_default_worktree() {
-  local project fake_bin log branch worktree_real
+  local project fake_bin log branch worktree_real no_fzf_path
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   git --git-dir "$project/.git" update-ref refs/remotes/origin/main refs/heads/main
@@ -761,11 +943,10 @@ test_bare_project_origin_head_only_creates_local_default_worktree() {
   git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
   git --git-dir "$project/.git" update-ref -d refs/heads/main
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
-  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_FZF_MATCH=$'main\tbranch' \
-    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
   branch="$(git -C "$project/main" branch --show-current)"
@@ -779,6 +960,7 @@ test_bare_picker_lists_deduped_branches() {
   local project fake_bin log fzf_log main_count remote_count
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" update-ref refs/remotes/origin/main refs/heads/develop
   git --git-dir "$project/.git" update-ref refs/remotes/upstream/remote-only refs/heads/main
   git --git-dir "$project/.git" update-ref refs/remotes/origin/remote-only refs/heads/develop
@@ -787,13 +969,13 @@ test_bare_picker_lists_deduped_branches() {
   log="$TEST_TMPDIR/tmux.log"
   fzf_log="$TEST_TMPDIR/fzf-input.log"
 
-  EDITOR=vim TAW_FAKE_FZF_MATCH=$'main\tbranch' TAW_FZF_INPUT_LOG="$fzf_log" \
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'remote-only\tbranch' TAW_FZF_INPUT_LOG="$fzf_log" \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
-  main_count="$(grep -F $'main\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
+  main_count="$(grep -F $'main [worktree]\tworktree\tmain\tmain\t' "$fzf_log" | wc -l | tr -d ' ')"
   remote_count="$(grep -F $'remote-only\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
-  assert_eq "1" "$main_count" "expected local and remote main to dedupe to one picker row"
+  assert_eq "1" "$main_count" "expected worktree main to suppress branch duplicates"
   assert_eq "1" "$remote_count" "expected duplicate remote branches to dedupe to one picker row"
   assert_file_contains "$fzf_log" $'remote-only\tbranch\tremote-only\torigin/remote-only\t'
   assert_file_not_contains "$fzf_log" $'origin/main'
@@ -804,6 +986,7 @@ test_bare_picker_remote_branch_creates_local_worktree() {
   local project fake_bin log branch worktree_real expected actual
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" update-ref refs/remotes/origin/feature/remote refs/heads/develop
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
@@ -827,6 +1010,7 @@ test_bare_picker_prefers_origin_for_duplicate_remotes() {
   local project fake_bin log expected actual
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" update-ref refs/remotes/upstream/remote-choice refs/heads/main
   git --git-dir "$project/.git" update-ref refs/remotes/origin/remote-choice refs/heads/develop
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
@@ -846,6 +1030,7 @@ test_bare_picker_strips_slash_remote_names() {
   local project fake_bin log expected actual branch worktree_real
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" remote add "foo/bar" "$TEST_TMPDIR/remote.git"
   git --git-dir "$project/.git" update-ref refs/remotes/foo/bar/topic refs/heads/develop
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
@@ -867,19 +1052,111 @@ test_bare_picker_strips_slash_remote_names() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
-test_bare_picker_cancel_aborts_before_tmux() {
+test_bare_picker_cancel_returns_success_without_tmux() {
   local project fake_bin log
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
 
-  if EDITOR=vim TAW_FAKE_FZF_CANCEL=1 TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$TEST_TMPDIR" -p "$project"; then
-    fail "expected fzf cancellation to abort taw"
-  fi
+  EDITOR=vim TAW_FAKE_FZF_CANCEL=1 TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
   [[ ! -f "$log" ]] || fail "expected tmux not to run after fzf cancellation"
+}
+
+test_bare_picker_without_fzf_falls_back_to_default_worktree() {
+  local project fake_bin log branch worktree_real no_fzf_path
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$project/main" branch --show-current)"
+  worktree_real="$(cd "$project/main" && pwd -P)"
+  assert_eq "main" "$branch" "expected bare picker fallback to open default worktree"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_picker_error_fails_without_tmux() {
+  local project fake_bin log
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_INDEX=99 TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"; then
+    fail "expected picker error to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after picker error"
+}
+
+test_bare_remote_only_branch_sets_upstream_tracking() {
+  local project fake_bin log branch upstream_ref worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/feature/foo refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" -b feature/foo
+
+  branch="$(git -C "$project/feature/foo" branch --show-current)"
+  upstream_ref="$(git -C "$project/feature/foo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  worktree_real="$(cd "$project/feature/foo" && pwd -P)"
+  assert_eq "feature/foo" "$branch" "expected bare remote-only branch to create local branch"
+  assert_eq "origin/feature/foo" "$upstream_ref" "expected bare remote-only branch tracking"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfoo'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_zero_worktree_creates_orphan_when_no_refs_exist() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  git --git-dir "$project/.git" update-ref -d refs/heads/develop
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"
+
+  branch="$(git -C "$project/project" branch --show-current)"
+  worktree_real="$(cd "$project/project" && pwd -P)"
+  assert_eq "project" "$branch" "expected orphan worktree branch to use path basename"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tproject'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_zero_worktree_fails_when_refs_exist_but_no_default_candidate() {
+  local project fake_bin log
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" branch topic develop
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  git --git-dir "$project/.git" update-ref -d refs/heads/develop
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project"; then
+    fail "expected bare project without a default candidate to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after default candidate failure"
 }
 
 test_bare_project_named_branch_without_worktree_opens_branch_worktree() {
@@ -993,6 +1270,27 @@ test_bare_project_branch_with_slash_creates_nested_worktree() {
   worktree_real="$(cd "$project/feature/nested" && pwd -P)"
   assert_eq "feature/nested" "$branch" "expected branch with slash to create nested worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tnested'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_project_local_slash_base_ref_stays_local() {
+  local project fake_bin log branch expected actual worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" branch "feature/base" main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" new-wt "feature/base"
+
+  branch="$(git -C "$project/new-wt" branch --show-current)"
+  expected="$(git --git-dir "$project/.git" rev-parse feature/base)"
+  actual="$(git -C "$project/new-wt" rev-parse HEAD)"
+  worktree_real="$(cd "$project/new-wt" && pwd -P)"
+  assert_eq "new-wt" "$branch" "expected local slash base to create the requested branch"
+  assert_eq "$expected" "$actual" "expected local slash base to be used as the start point"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tnew-wt'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1152,29 +1450,31 @@ test_rejects_empty_project_and_branch_values() {
 }
 
 test_prompts_for_existing_repo_when_not_inside_git() {
-  local repo fake_bin log
+  local repo fake_bin log no_fzf_path
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
   mkdir -p "$TEST_TMPDIR/elsewhere"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  printf '%s\n' "$repo" | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  printf '%s\n' "$repo" | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere"
 
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
 }
 
 test_debug_option_prints_state_snapshot() {
-  local repo fake_bin log output
+  local repo fake_bin log output no_fzf_path
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" --debug -p "$repo" 2>&1)"
 
   if ! grep -F "taw debug: before project resolution" <<<"$output" >/dev/null; then
@@ -1189,7 +1489,7 @@ test_debug_option_prints_state_snapshot() {
 }
 
 test_prompted_project_resolves_from_projects_home() {
-  local projects_home repo repo_real fake_bin log
+  local projects_home repo repo_real fake_bin log no_fzf_path
 
   projects_home="$TEST_TMPDIR/projects"
   repo="$projects_home/foo"
@@ -1197,10 +1497,11 @@ test_prompted_project_resolves_from_projects_home() {
   repo_real="$(cd "$repo" && pwd -P)"
   mkdir -p "$TEST_TMPDIR/elsewhere"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
   printf 'foo\n' | PROJECTS_HOME="$projects_home" EDITOR=vim \
-    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere"
 
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tfoo\t-n\tfoo\t-c\t'"$repo_real"$'\tvim'
@@ -1271,7 +1572,7 @@ test_current_bare_wrapper_auto_detects_without_prompt() {
 }
 
 test_empty_prompt_selects_project_from_tmux_sessionizer_config() {
-  local xdg projects_home repo repo_real elsewhere fake_bin log fzf_log
+  local xdg projects_home repo repo_real elsewhere fake_bin log fzf_log no_fzf_path
 
   xdg="$TEST_TMPDIR/xdg"
   projects_home="$TEST_TMPDIR/projects"
@@ -1284,11 +1585,12 @@ test_empty_prompt_selects_project_from_tmux_sessionizer_config() {
 
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
   fzf_log="$TEST_TMPDIR/fzf-input.log"
 
-  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$repo" \
-    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$repo" TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" "$repo"
@@ -1296,7 +1598,7 @@ test_empty_prompt_selects_project_from_tmux_sessionizer_config() {
 }
 
 test_empty_prompt_project_picker_resolves_tmux_session_row() {
-  local xdg empty_search repo repo_real elsewhere fake_bin log fzf_log sessions
+  local xdg empty_search repo repo_real elsewhere fake_bin log fzf_log sessions no_fzf_path
 
   xdg="$TEST_TMPDIR/xdg"
   empty_search="$TEST_TMPDIR/empty"
@@ -1310,12 +1612,13 @@ test_empty_prompt_project_picker_resolves_tmux_session_row() {
 
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
   fzf_log="$TEST_TMPDIR/fzf-input.log"
 
   printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 \
-    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_MATCH='[TMUX] agent' \
-    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_MATCH='[TMUX] agent' TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" '[TMUX] agent'
@@ -1367,7 +1670,7 @@ test_project_prompt_escape_returns_without_tmux_window() {
 }
 
 test_project_picker_flag_bypasses_current_repo_detection() {
-  local xdg projects_home current_repo picked_repo picked_real fake_bin log fzf_log
+  local xdg projects_home current_repo picked_repo picked_real fake_bin log fzf_log no_fzf_path
 
   xdg="$TEST_TMPDIR/xdg"
   projects_home="$TEST_TMPDIR/projects"
@@ -1381,11 +1684,12 @@ test_project_picker_flag_bypasses_current_repo_detection() {
 
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
   fzf_log="$TEST_TMPDIR/fzf-input.log"
 
   XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$picked_repo" \
-    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$current_repo" --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
 
   assert_file_contains "$fzf_log" "$picked_repo"
@@ -1482,6 +1786,24 @@ test_case "taw: reuses existing worktree window" \
   test_existing_worktree_window_is_reused
 test_case "taw: named branch checks out normal repo" \
   test_named_branch_checks_out_normal_repo
+test_case "taw: normal repo no explicit branch uses picker" \
+  test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch
+test_case "taw: normal repo no explicit branch without fzf opens unchanged" \
+  test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged
+test_case "taw: normal repo picker cancel returns success" \
+  test_normal_repo_picker_cancel_returns_success_without_tmux
+test_case "taw: normal repo picker error fails" \
+  test_normal_repo_picker_error_fails_without_tmux
+test_case "taw: explicit normal origin/topic local branch wins" \
+  test_explicit_normal_origin_topic_local_branch_wins_over_remote
+test_case "taw: explicit normal longest remote prefix resolves" \
+  test_explicit_normal_longest_remote_prefix_resolves_to_nested_remote_branch
+test_case "taw: explicit normal remote-only branch tracks upstream" \
+  test_explicit_normal_branch_resolves_remote_only_by_branch_name
+test_case "taw: explicit normal stale unconfigured remote ref is ignored" \
+  test_explicit_normal_branch_ignores_stale_unconfigured_remote_ref
+test_case "taw: explicit normal refs/remotes prefix is rejected" \
+  test_explicit_normal_branch_rejects_refs_remotes_prefix
 test_case "taw: -p resolves from PROJECTS_HOME" \
   test_project_arg_resolves_from_projects_home
 test_case "taw: direct -p path precedes PROJECTS_HOME" \
@@ -1534,8 +1856,18 @@ test_case "taw: bare picker prefers origin for duplicate remotes" \
   test_bare_picker_prefers_origin_for_duplicate_remotes
 test_case "taw: bare picker strips slash remote names" \
   test_bare_picker_strips_slash_remote_names
-test_case "taw: bare picker cancel aborts before tmux" \
-  test_bare_picker_cancel_aborts_before_tmux
+test_case "taw: bare picker cancel returns success" \
+  test_bare_picker_cancel_returns_success_without_tmux
+test_case "taw: bare picker without fzf falls back to default" \
+  test_bare_picker_without_fzf_falls_back_to_default_worktree
+test_case "taw: bare picker error fails" \
+  test_bare_picker_error_fails_without_tmux
+test_case "taw: bare remote-only branch tracks upstream" \
+  test_bare_remote_only_branch_sets_upstream_tracking
+test_case "taw: bare zero worktree creates orphan when no refs exist" \
+  test_bare_zero_worktree_creates_orphan_when_no_refs_exist
+test_case "taw: bare zero worktree fails when refs exist but no default candidate" \
+  test_bare_zero_worktree_fails_when_refs_exist_but_no_default_candidate
 test_case "taw: bare project -b opens branch worktree" \
   test_bare_project_named_branch_without_worktree_opens_branch_worktree
 test_case "taw: explicit bare worktree subdir with -b opens project root worktree" \
@@ -1548,6 +1880,8 @@ test_case "taw: bare project reuses existing default branch worktree when confir
   test_bare_project_reuses_existing_default_branch_worktree_when_confirmed
 test_case "taw: bare project branch with slash creates nested worktree" \
   test_bare_project_branch_with_slash_creates_nested_worktree
+test_case "taw: bare project local slash base ref stays local" \
+  test_bare_project_local_slash_base_ref_stays_local
 test_case "taw: bare project invalid branch does not create parent dirs" \
   test_bare_project_invalid_branch_does_not_create_parent_dirs
 test_case "taw: normal repo checks out branch from single positional" \
