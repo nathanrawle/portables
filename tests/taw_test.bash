@@ -77,6 +77,19 @@ case "${1:-}" in
     ;;
   list-sessions)
     [[ -n "${TAW_FAKE_TMUX_SESSIONS+x}" ]] || exit 1
+    sessions="$TAW_FAKE_TMUX_SESSIONS"
+    if [[ -n "${TAW_FAKE_TMUX_SESSIONS_AFTER_FIRST+x}" ]]; then
+      count_file="${TAW_FAKE_TMUX_LIST_SESSIONS_COUNT_FILE:-$TAW_TMUX_LOG.sessions.count}"
+      count=0
+      if [[ -f "$count_file" ]]; then
+        count="$(<"$count_file")"
+      fi
+      count=$((count + 1))
+      printf '%s\n' "$count" >"$count_file"
+      if (( count > 1 )); then
+        sessions="$TAW_FAKE_TMUX_SESSIONS_AFTER_FIRST"
+      fi
+    fi
     format=""
     while [[ $# -gt 0 ]]; do
       if [[ "$1" = "-F" && $# -ge 2 ]]; then
@@ -89,10 +102,10 @@ case "${1:-}" in
       while IFS=$'\t' read -r session _; do
         [[ -n "$session" ]] || continue
         printf '[TMUX] %s\n' "$session"
-      done <<<"$TAW_FAKE_TMUX_SESSIONS"
+      done <<<"$sessions"
     else
-      printf '%b' "$TAW_FAKE_TMUX_SESSIONS"
-      [[ "$TAW_FAKE_TMUX_SESSIONS" = *$'\n' ]] || printf '\n'
+      printf '%b' "$sessions"
+      [[ "$sessions" = *$'\n' ]] || printf '\n'
     fi
     ;;
   new-session|new-window)
@@ -2079,6 +2092,75 @@ test_project_picker_tmux_row_uses_session_identity() {
   assert_file_not_contains "$log" $'-c\t'"$collision"
 }
 
+test_project_picker_tmux_row_ignores_projects_home_collision() {
+  local xdg empty_search projects_home tmux_repo tmux_real collision elsewhere fake_bin log fzf_log sessions no_fzf_path
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  projects_home="$TEST_TMPDIR/projects"
+  tmux_repo="$TEST_TMPDIR/session-repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  collision="$projects_home/dupe"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$projects_home" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$tmux_repo"
+  make_git_repo "$collision"
+  tmux_real="$(cd "$tmux_repo" && pwd -P)"
+  sessions=$'dupe\t'"$tmux_real"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  printf '\n' | PROJECTS_HOME="$projects_home" XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_MATCH='[TMUX] dupe' TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere"
+
+  assert_file_contains "$fzf_log" '[TMUX] dupe'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tdupe:\t-n\tsession-repo\t-c\t'"$tmux_real"$'\tvim'
+  assert_file_not_contains "$log" $'-c\t'"$collision"
+}
+
+test_project_picker_tmux_row_fails_if_session_disappears() {
+  local xdg empty_search selected_repo basename_repo basename_real elsewhere fake_bin log fzf_log sessions after_sessions no_fzf_path rc
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  selected_repo="$TEST_TMPDIR/selected-repo"
+  basename_repo="$TEST_TMPDIR/dupe"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$selected_repo"
+  make_git_repo "$basename_repo"
+  basename_real="$(cd "$basename_repo" && pwd -P)"
+  sessions=$'dupe\t'"$selected_repo"
+  after_sessions=$'other\t'"$basename_real"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  set +e
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_TMUX_SESSIONS_AFTER_FIRST="$after_sessions" \
+    TAW_FAKE_FZF_MATCH='[TMUX] dupe' TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere"
+  rc=$?
+  set -e
+
+  [[ $rc -ne 0 ]] || fail "expected disappeared tmux session to fail"
+  assert_file_contains "$fzf_log" '[TMUX] dupe'
+  assert_no_tmux_work_window "$log"
+  assert_file_not_contains "$log" $'-c\t'"$basename_real"
+}
+
 test_empty_prompt_project_picker_cancel_returns_without_tmux_window() {
   local xdg projects_home repo elsewhere fake_bin log rc
 
@@ -2580,6 +2662,10 @@ test_case "taw: empty project prompt picker resolves tmux session rows" \
   test_empty_prompt_project_picker_resolves_tmux_session_row
 test_case "taw: project picker tmux row uses session identity" \
   test_project_picker_tmux_row_uses_session_identity
+test_case "taw: project picker tmux row ignores PROJECTS_HOME collision" \
+  test_project_picker_tmux_row_ignores_projects_home_collision
+test_case "taw: project picker tmux row fails if session disappears" \
+  test_project_picker_tmux_row_fails_if_session_disappears
 test_case "taw: empty project prompt picker cancel returns without tmux window" \
   test_empty_prompt_project_picker_cancel_returns_without_tmux_window
 test_case "taw: project prompt escape returns without tmux window" \

@@ -394,7 +394,7 @@ _taw_use_project_path() {
   [[ -z "$_taw_session_name" ]] || _taw_project_session_name="$_taw_session_name"
 }
 
-_taw_resolve_project_from_tmux() {
+_taw_resolve_project_from_tmux_exact() {
   local _taw_query="$1" _taw_sessions _taw_line _taw_session _taw_path
   local _taw_tab=$'\t'
 
@@ -408,6 +408,17 @@ _taw_resolve_project_from_tmux() {
     _taw_use_project_path "$_taw_path" "$_taw_path" "$_taw_session"
     return
   done
+
+  return 1
+}
+
+_taw_resolve_project_from_tmux() {
+  local _taw_query="$1" _taw_sessions _taw_line _taw_session _taw_path
+  local _taw_tab=$'\t'
+
+  _taw_resolve_project_from_tmux_exact "$_taw_query" && return
+
+  _taw_sessions="$(tmux list-sessions -F '#{session_name}	#{session_path}' 2>/dev/null)" || return 1
 
   for _taw_line in "${(@f)_taw_sessions}"; do
     _taw_session="${_taw_line%%${_taw_tab}*}"
@@ -503,7 +514,7 @@ _taw_resolve_project_from_picker() {
           _taw_resolve_project_arg "$_taw_value"
           ;;
         tmux)
-          _taw_resolve_project_from_tmux "$_taw_value" || {
+          _taw_resolve_project_from_tmux_exact "$_taw_value" || {
             _taw_die "could not resolve tmux session: $_taw_value"
             return 1
           }
