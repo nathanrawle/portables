@@ -98,10 +98,35 @@ case "${1:-}" in
       fi
       shift
     done
-    if [[ "$format" = "[TMUX] #{session_name}" ]]; then
-      while IFS=$'\t' read -r session _; do
-        [[ -n "$session" ]] || continue
-        printf '[TMUX] %s\n' "$session"
+    if [[ -n "$format" ]]; then
+      line_number=0
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        line_number=$((line_number + 1))
+        [[ -n "$line" ]] || continue
+        IFS=$'\t' read -r first second third _ <<<"$line"
+        if [[ "$first" = @* && -n "$third" ]]; then
+          session_id="$first"
+          session="$second"
+          path="$third"
+        else
+          session_id="@$line_number"
+          session="$first"
+          path="$second"
+        fi
+        case "$format" in
+          "[TMUX] #{session_name}")
+            printf '[TMUX] %s\n' "$session"
+            ;;
+          $'#{session_id}\t#{session_name}\t#{session_path}')
+            printf '%s\t%s\t%s\n' "$session_id" "$session" "$path"
+            ;;
+          $'#{session_name}\t#{session_path}')
+            printf '%s\t%s\n' "$session" "$path"
+            ;;
+          *)
+            printf '%s\n' "$line"
+            ;;
+        esac
       done <<<"$sessions"
     else
       printf '%b' "$sessions"
@@ -886,7 +911,7 @@ test_project_arg_resolves_by_tmux_session_name() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" -p agent
 
-  assert_file_contains "$log" $'list-sessions\t-F\t#{session_name}\t#{session_path}'
+  assert_file_contains "$log" $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}'
   assert_file_contains "$log" $'has-session\t-t\tagent'
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tagent:\t-n\tsession-repo\t-c\t'"$repo_real"$'\tvim'
   assert_file_contains "$log" $'rename-window\t-t\t@1\tsession-repo'
@@ -2187,20 +2212,18 @@ test_project_picker_tmux_row_fails_if_session_disappears() {
 }
 
 test_project_picker_tmux_row_rejects_same_name_replacement() {
-  local xdg empty_search selected_repo replacement_repo replacement_real elsewhere fake_bin log fzf_log sessions after_sessions no_fzf_path rc
+  local xdg empty_search selected_repo selected_real elsewhere fake_bin log fzf_log sessions after_sessions no_fzf_path rc
 
   xdg="$TEST_TMPDIR/xdg"
   empty_search="$TEST_TMPDIR/empty"
   selected_repo="$TEST_TMPDIR/selected-repo"
-  replacement_repo="$TEST_TMPDIR/replacement-repo"
   elsewhere="$TEST_TMPDIR/elsewhere"
   mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
   printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
   make_git_repo "$selected_repo"
-  make_git_repo "$replacement_repo"
-  replacement_real="$(cd "$replacement_repo" && pwd -P)"
-  sessions=$'dupe\t'"$selected_repo"
-  after_sessions=$'dupe\t'"$replacement_real"
+  selected_real="$(cd "$selected_repo" && pwd -P)"
+  sessions=$'@1\tdupe\t'"$selected_real"
+  after_sessions=$'@2\tdupe\t'"$selected_real"
 
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
@@ -2220,7 +2243,7 @@ test_project_picker_tmux_row_rejects_same_name_replacement() {
   [[ $rc -ne 0 ]] || fail "expected same-name replacement tmux session to fail"
   assert_file_contains "$fzf_log" '[TMUX] dupe'
   assert_no_tmux_work_window "$log"
-  assert_file_not_contains "$log" $'-c\t'"$replacement_real"
+  assert_file_not_contains "$log" $'-c\t'"$selected_real"
 }
 
 test_empty_prompt_project_picker_cancel_returns_without_tmux_window() {

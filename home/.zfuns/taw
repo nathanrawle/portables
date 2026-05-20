@@ -395,16 +395,23 @@ _taw_use_project_path() {
 }
 
 _taw_resolve_project_from_tmux_exact() {
-  local _taw_query="$1" _taw_expected_path="${2:-}" _taw_sessions _taw_line _taw_session _taw_path
+  local _taw_query="$1" _taw_expected_path="${2:-}" _taw_expected_id="${3:-}"
+  local _taw_sessions _taw_line _taw_session_id _taw_session _taw_path _taw_rest
   local _taw_tab=$'\t'
 
-  _taw_sessions="$(tmux list-sessions -F '#{session_name}	#{session_path}' 2>/dev/null)" || return 1
+  _taw_sessions="$(tmux list-sessions -F '#{session_id}	#{session_name}	#{session_path}' 2>/dev/null)" || return 1
 
   for _taw_line in "${(@f)_taw_sessions}"; do
-    _taw_session="${_taw_line%%${_taw_tab}*}"
-    _taw_path="${_taw_line#*${_taw_tab}}"
-    [[ "$_taw_path" == "$_taw_line" ]] && _taw_path=
+    _taw_session_id="${_taw_line%%${_taw_tab}*}"
+    _taw_rest="${_taw_line#*${_taw_tab}}"
+    [[ "$_taw_rest" == "$_taw_line" ]] && _taw_rest=
+    _taw_session="${_taw_rest%%${_taw_tab}*}"
+    _taw_path="${_taw_rest#*${_taw_tab}}"
+    [[ "$_taw_path" == "$_taw_rest" ]] && _taw_path=
     [[ "$_taw_session" == "$_taw_query" ]] || continue
+    if [[ -n "$_taw_expected_id" && "$_taw_session_id" != "$_taw_expected_id" ]]; then
+      return 2
+    fi
     [[ -n "$_taw_path" ]] || return 2
     if [[ -n "$_taw_expected_path" && "${_taw_path:A}" != "${_taw_expected_path:A}" ]]; then
       return 2
@@ -446,7 +453,7 @@ _taw_tmux_sessionizer_picker_rows() {
   local CONFIG_FILE="$CONFIG_DIR/$CONFIG_FILE_NAME"
   local TS_MAX_DEPTH
   local -a TS_SEARCH_PATHS TS_EXTRA_SEARCH_PATHS TS_SESSION_COMMANDS
-  local _taw_current_session _taw_sessions _taw_session_line _taw_session_name _taw_session_path
+  local _taw_current_session _taw_sessions _taw_session_line _taw_session_id _taw_session_name _taw_session_path _taw_session_rest
   local _taw_entry _taw_path _taw_depth
   local _taw_tab=$'\t'
 
@@ -465,21 +472,27 @@ _taw_tmux_sessionizer_picker_rows() {
 
   if [[ -n "${TMUX:-}" ]]; then
     _taw_current_session="$(tmux display-message -p '#S' 2>/dev/null)" || _taw_current_session=
-    _taw_sessions="$(tmux list-sessions -F '#{session_name}	#{session_path}' 2>/dev/null)" || _taw_sessions=
+    _taw_sessions="$(tmux list-sessions -F '#{session_id}	#{session_name}	#{session_path}' 2>/dev/null)" || _taw_sessions=
     for _taw_session_line in "${(@f)_taw_sessions}"; do
-      _taw_session_name="${_taw_session_line%%${_taw_tab}*}"
-      _taw_session_path="${_taw_session_line#*${_taw_tab}}"
-      [[ "$_taw_session_path" == "$_taw_session_line" ]] && _taw_session_path=
+      _taw_session_id="${_taw_session_line%%${_taw_tab}*}"
+      _taw_session_rest="${_taw_session_line#*${_taw_tab}}"
+      [[ "$_taw_session_rest" == "$_taw_session_line" ]] && _taw_session_rest=
+      _taw_session_name="${_taw_session_rest%%${_taw_tab}*}"
+      _taw_session_path="${_taw_session_rest#*${_taw_tab}}"
+      [[ "$_taw_session_path" == "$_taw_session_rest" ]] && _taw_session_path=
       [[ "$_taw_session_name" == "$_taw_current_session" ]] && continue
-      print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"
+      print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"
     done
   else
-    _taw_sessions="$(tmux list-sessions -F '#{session_name}	#{session_path}' 2>/dev/null)" || _taw_sessions=
+    _taw_sessions="$(tmux list-sessions -F '#{session_id}	#{session_name}	#{session_path}' 2>/dev/null)" || _taw_sessions=
     for _taw_session_line in "${(@f)_taw_sessions}"; do
-      _taw_session_name="${_taw_session_line%%${_taw_tab}*}"
-      _taw_session_path="${_taw_session_line#*${_taw_tab}}"
-      [[ "$_taw_session_path" == "$_taw_session_line" ]] && _taw_session_path=
-      print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"
+      _taw_session_id="${_taw_session_line%%${_taw_tab}*}"
+      _taw_session_rest="${_taw_session_line#*${_taw_tab}}"
+      [[ "$_taw_session_rest" == "$_taw_session_line" ]] && _taw_session_rest=
+      _taw_session_name="${_taw_session_rest%%${_taw_tab}*}"
+      _taw_session_path="${_taw_session_rest#*${_taw_tab}}"
+      [[ "$_taw_session_path" == "$_taw_session_rest" ]] && _taw_session_path=
+      print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"
     done
   fi
 
@@ -516,7 +529,7 @@ _taw_select_project_with_fzf() {
 }
 
 _taw_resolve_project_from_picker() {
-  local _taw_input _taw_status _taw_kind _taw_value _taw_tmux_session _taw_tmux_path
+  local _taw_input _taw_status _taw_kind _taw_value _taw_tmux_id _taw_tmux_session _taw_tmux_path _taw_tmux_rest
 
   _taw_input="$(_taw_select_project_with_fzf)"
   _taw_status=$?
@@ -529,10 +542,13 @@ _taw_resolve_project_from_picker() {
           _taw_resolve_project_arg "$_taw_value"
           ;;
         tmux)
-          _taw_tmux_session="${_taw_value%%$'\t'*}"
-          _taw_tmux_path="${_taw_value#*$'\t'}"
-          [[ "$_taw_tmux_path" == "$_taw_value" ]] && _taw_tmux_path=
-          _taw_resolve_project_from_tmux_exact "$_taw_tmux_session" "$_taw_tmux_path" || {
+          _taw_tmux_id="${_taw_value%%$'\t'*}"
+          _taw_tmux_rest="${_taw_value#*$'\t'}"
+          [[ "$_taw_tmux_rest" == "$_taw_value" ]] && _taw_tmux_rest=
+          _taw_tmux_session="${_taw_tmux_rest%%$'\t'*}"
+          _taw_tmux_path="${_taw_tmux_rest#*$'\t'}"
+          [[ "$_taw_tmux_path" == "$_taw_tmux_rest" ]] && _taw_tmux_path=
+          _taw_resolve_project_from_tmux_exact "$_taw_tmux_session" "$_taw_tmux_path" "$_taw_tmux_id" || {
             _taw_die "could not resolve tmux session: $_taw_tmux_session"
             return 1
           }
