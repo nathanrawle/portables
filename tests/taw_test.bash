@@ -912,6 +912,31 @@ test_project_arg_resolves_by_tmux_session_path_basename() {
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\talpha:\t-n\tpath-match\t-c\t'"$repo_real"$'\tvim'
 }
 
+test_project_arg_exact_tmux_match_failure_does_not_fallback() {
+  local fallback_repo fallback_real missing_path elsewhere fake_bin log sessions no_fzf_path
+
+  fallback_repo="$TEST_TMPDIR/agent"
+  missing_path="$TEST_TMPDIR/missing-agent"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  make_git_repo "$fallback_repo"
+  fallback_real="$(cd "$fallback_repo" && pwd -P)"
+  mkdir -p "$elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  sessions=$'agent\t'"$missing_path"$'\nalpha\t'"$fallback_real"$'\n'
+
+  if printf 'y\nrepo\n' | EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" -p agent; then
+    fail "expected unusable exact tmux session to fail"
+  fi
+
+  assert_not_exists "$elsewhere/agent"
+  assert_no_tmux_work_window "$log"
+  assert_file_not_contains "$log" $'-c\t'"$fallback_real"
+}
+
 test_project_arg_unresolved_create_refusal_makes_no_mutation() {
   local repo repo_real fake_bin log sessions
 
@@ -2161,6 +2186,43 @@ test_project_picker_tmux_row_fails_if_session_disappears() {
   assert_file_not_contains "$log" $'-c\t'"$basename_real"
 }
 
+test_project_picker_tmux_row_rejects_same_name_replacement() {
+  local xdg empty_search selected_repo replacement_repo replacement_real elsewhere fake_bin log fzf_log sessions after_sessions no_fzf_path rc
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  selected_repo="$TEST_TMPDIR/selected-repo"
+  replacement_repo="$TEST_TMPDIR/replacement-repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$selected_repo"
+  make_git_repo "$replacement_repo"
+  replacement_real="$(cd "$replacement_repo" && pwd -P)"
+  sessions=$'dupe\t'"$selected_repo"
+  after_sessions=$'dupe\t'"$replacement_real"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  set +e
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_HAS_SESSION=1 \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_TMUX_SESSIONS_AFTER_FIRST="$after_sessions" \
+    TAW_FAKE_FZF_MATCH='[TMUX] dupe' TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere"
+  rc=$?
+  set -e
+
+  [[ $rc -ne 0 ]] || fail "expected same-name replacement tmux session to fail"
+  assert_file_contains "$fzf_log" '[TMUX] dupe'
+  assert_no_tmux_work_window "$log"
+  assert_file_not_contains "$log" $'-c\t'"$replacement_real"
+}
+
 test_empty_prompt_project_picker_cancel_returns_without_tmux_window() {
   local xdg projects_home repo elsewhere fake_bin log rc
 
@@ -2538,6 +2600,8 @@ test_case "taw: -p resolves by tmux session name" \
   test_project_arg_resolves_by_tmux_session_name
 test_case "taw: -p resolves by tmux session path basename" \
   test_project_arg_resolves_by_tmux_session_path_basename
+test_case "taw: -p exact tmux match failure does not fallback" \
+  test_project_arg_exact_tmux_match_failure_does_not_fallback
 test_case "taw: unresolved -p refusal makes no mutation" \
   test_project_arg_unresolved_create_refusal_makes_no_mutation
 test_case "taw: unresolved -p rejects invalid create kind" \
@@ -2666,6 +2730,8 @@ test_case "taw: project picker tmux row ignores PROJECTS_HOME collision" \
   test_project_picker_tmux_row_ignores_projects_home_collision
 test_case "taw: project picker tmux row fails if session disappears" \
   test_project_picker_tmux_row_fails_if_session_disappears
+test_case "taw: project picker tmux row rejects same-name replacement" \
+  test_project_picker_tmux_row_rejects_same_name_replacement
 test_case "taw: empty project prompt picker cancel returns without tmux window" \
   test_empty_prompt_project_picker_cancel_returns_without_tmux_window
 test_case "taw: project prompt escape returns without tmux window" \
