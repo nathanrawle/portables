@@ -5,7 +5,7 @@ setopt pipefail
 
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_project_picker_requested _taw_agent_cmd _taw_editor_cmd _taw_named_branch
-local _taw_agent_arg_provided _taw_editor_arg_provided _taw_debug
+local _taw_agent_arg_provided _taw_editor_arg_provided _taw_agent_enabled _taw_created_repo_branch_applied _taw_debug
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_project_kind _taw_is_bare
 local _taw_selected_worktree_dir
@@ -23,6 +23,8 @@ _taw_editor_cmd=
 _taw_named_branch=
 _taw_agent_arg_provided=false
 _taw_editor_arg_provided=false
+_taw_agent_enabled=true
+_taw_created_repo_branch_applied=false
 _taw_debug=false
 
 _taw_die() {
@@ -73,6 +75,14 @@ _taw_confirm() {
   esac
 }
 
+_taw_trim_whitespace() {
+  local _taw_value="$1"
+
+  _taw_value="${_taw_value#"${_taw_value%%[![:space:]]*}"}"
+  _taw_value="${_taw_value%"${_taw_value##*[![:space:]]}"}"
+  print -r -- "$_taw_value"
+}
+
 _taw_debug_dump() {
   [[ "$_taw_debug" == true ]] || return 0
 
@@ -80,10 +90,12 @@ _taw_debug_dump() {
   print -u2 -r -- "_taw_project_arg='$_taw_project_arg'"
   print -u2 -r -- "_taw_project_picker_requested=$_taw_project_picker_requested"
   print -u2 -r -- "_taw_agent_cmd=$_taw_agent_cmd"
+  print -u2 -r -- "_taw_agent_enabled=$_taw_agent_enabled"
   print -u2 -r -- "_taw_editor_cmd=$_taw_editor_cmd"
   print -u2 -r -- "_taw_named_branch='$_taw_named_branch'"
   print -u2 -r -- "_taw_agent_arg_provided=$_taw_agent_arg_provided"
   print -u2 -r -- "_taw_editor_arg_provided=$_taw_editor_arg_provided"
+  print -u2 -r -- "_taw_created_repo_branch_applied=$_taw_created_repo_branch_applied"
   print -u2 -r -- "_taw_worktree_arg='$_taw_worktree_arg'"
   print -u2 -r -- "_taw_base_ref='$_taw_base_ref'"
   print -u2 -r -- "_taw_window_dir='$_taw_window_dir'"
@@ -163,10 +175,13 @@ _taw_set_plain_project() {
 
 _taw_abs_path() {
   local _taw_path="$1"
+  local _taw_cwd
+
+  _taw_cwd="$(pwd -P)" || return 1
   if [[ "$_taw_path" == /* ]]; then
     print -r -- "${_taw_path:A}"
   else
-    print -r -- "${PWD:A}/$_taw_path"
+    print -r -- "$_taw_cwd/$_taw_path"
   fi
 }
 
@@ -260,6 +275,109 @@ _taw_clone_prompted_repo() {
   esac
 
   print -r -- "$_taw_dest"
+}
+
+_taw_prompt_create_project() {
+  local _taw_target_path="$1" _taw_kind _taw_repo_branch _taw_worktree_input _taw_worktree_path _taw_worktree_branch
+
+  _taw_confirm "Create project at $_taw_target_path?" || return 1
+
+  _taw_kind="$(_taw_prompt "Create kind [plain/repo/bare] (repo): ")" || return 1
+  _taw_kind="${_taw_kind:l}"
+  [[ -n "$_taw_kind" ]] || _taw_kind=repo
+  case "$_taw_kind" in
+    plain|repo|bare) ;;
+    *)
+      _taw_die "create kind must be plain, repo, or bare"
+      return 1
+      ;;
+  esac
+
+  case "$_taw_kind" in
+    plain)
+      if [[ -n "$_taw_named_branch" || ${#_taw_positionals[@]} -gt 0 ]]; then
+        _taw_die "plain projects do not accept operands"
+        return 1
+      fi
+      mkdir -p -- "$_taw_target_path" || return 1
+      _taw_set_plain_project "$_taw_target_path"
+      ;;
+    repo)
+      if [[ -n "$_taw_named_branch" && ${#_taw_positionals[@]} -gt 0 ]] || (( ${#_taw_positionals[@]} > 1 )); then
+        _taw_die "repo projects do not accept two pending operands"
+        return 1
+      fi
+      if [[ -n "$_taw_named_branch" ]]; then
+        _taw_repo_branch="$_taw_named_branch"
+      elif (( ${#_taw_positionals[@]} > 0 )); then
+        _taw_repo_branch="${_taw_positionals[1]}"
+      fi
+      if [[ -n "$_taw_repo_branch" ]]; then
+        git check-ref-format --branch "$_taw_repo_branch" >/dev/null 2>&1 || {
+          _taw_die "invalid repo branch: $_taw_repo_branch"
+          return 1
+        }
+      fi
+      mkdir -p -- "$_taw_target_path" || return 1
+      git -C "$_taw_target_path" init || return 1
+      if [[ -n "$_taw_repo_branch" ]]; then
+        git -C "$_taw_target_path" symbolic-ref HEAD "refs/heads/$_taw_repo_branch" || return 1
+        _taw_created_repo_branch_applied=true
+      fi
+      _taw_set_normal_project "$_taw_target_path" "$_taw_target_path/.git"
+      _taw_named_branch=
+      _taw_positionals=()
+      ;;
+    bare)
+      if [[ -n "$_taw_named_branch" && ${#_taw_positionals[@]} -gt 0 ]] || (( ${#_taw_positionals[@]} > 1 )); then
+        _taw_die "bare projects do not accept two pending operands"
+        return 1
+      fi
+      if [[ -n "$_taw_named_branch" ]]; then
+        _taw_worktree_input="$_taw_named_branch"
+      elif (( ${#_taw_positionals[@]} > 0 )); then
+        _taw_worktree_input="${_taw_positionals[1]}"
+      fi
+      if [[ -n "$_taw_worktree_input" ]]; then
+        case "$_taw_worktree_input" in
+          /*|..|../*|*'/../'*|*'/..')
+            _taw_die "invalid bare worktree path: $_taw_worktree_input"
+            return 1
+            ;;
+        esac
+        _taw_worktree_path="${_taw_target_path:A}/$_taw_worktree_input"
+        _taw_worktree_branch="${_taw_worktree_input:t}"
+      fi
+      if [[ -n "$_taw_worktree_branch" ]]; then
+        git check-ref-format --branch "$_taw_worktree_branch" >/dev/null 2>&1 || {
+          _taw_die "invalid bare worktree branch: $_taw_worktree_branch"
+          return 1
+        }
+      fi
+      mkdir -p -- "$_taw_target_path" || return 1
+      git init --bare "$_taw_target_path/.git" || return 1
+      _taw_set_bare_project "$_taw_target_path/.git" "$_taw_target_path" || return 1
+      if [[ -n "$_taw_worktree_branch" ]]; then
+        _taw_prepare_orphan_worktree "$_taw_worktree_path" "$_taw_worktree_branch" || return 1
+        _taw_selected_worktree_dir="$_taw_worktree_path"
+      else
+        _taw_default_bare_target || {
+          _taw_die "could not determine default branch for bare project"
+          return 1
+        }
+        _taw_worktree_branch="$_taw_default_branch_result"
+        git check-ref-format --branch "$_taw_worktree_branch" >/dev/null 2>&1 || {
+          _taw_die "invalid bare worktree branch: $_taw_worktree_branch"
+          return 1
+        }
+        _taw_worktree_path="${_taw_target_path:A}/$_taw_worktree_branch"
+        _taw_prepare_orphan_worktree "$_taw_worktree_path" "$_taw_worktree_branch" || return 1
+        _taw_selected_worktree_dir="$_taw_worktree_path"
+      fi
+      _taw_named_branch=
+      _taw_positionals=()
+      ;;
+  esac
 }
 
 _taw_use_project_path() {
@@ -418,6 +536,7 @@ _taw_resolve_project() {
         esac
 
         if [[ -z "$_taw_input" ]]; then
+          _taw_project_picker_requested=true
           _taw_resolve_project_from_picker
           return
         fi
@@ -443,7 +562,7 @@ _taw_resolve_project() {
 }
 
 _taw_resolve_project_arg() {
-  local _taw_arg="$1" _taw_resolved _taw_projects_candidate
+  local _taw_arg="$1" _taw_resolved _taw_projects_candidate _taw_create_target
 
   if _taw_is_url "$_taw_arg"; then
     _taw_resolved="$(_taw_clone_prompted_repo "$_taw_arg")" || return 1
@@ -460,20 +579,21 @@ _taw_resolve_project_arg() {
     return 1
   }
 
+  _taw_create_target="$(_taw_abs_path "$_taw_arg")"
   if [[ "$_taw_arg" != /* && "$_taw_arg" != */* && -n "${PROJECTS_HOME:-}" ]]; then
     _taw_projects_candidate="${PROJECTS_HOME:A}/$_taw_arg"
     if [[ -d "$_taw_projects_candidate" ]]; then
       _taw_use_project_path "$_taw_projects_candidate" "$_taw_projects_candidate"
       return
     fi
+    _taw_create_target="$_taw_projects_candidate"
   fi
 
   if _taw_resolve_project_from_tmux "$_taw_arg"; then
     return 0
   fi
 
-  _taw_die "could not resolve project: $_taw_arg"
-  return 1
+  _taw_prompt_create_project "$_taw_create_target"
 }
 
 _taw_classify_operands() {
@@ -747,20 +867,19 @@ _taw_bare_worktree_count() {
 }
 
 _taw_default_bare_target() {
-  local _taw_refs_exist
+  local _taw_head_branch
 
   if _taw_default_branch; then
     return 0
   fi
 
-  _taw_refs_exist="$(_taw_git for-each-ref --count=1 --format='%(refname)' refs/heads refs/remotes 2>/dev/null)" || return 1
-  if [[ -n "$_taw_refs_exist" ]]; then
-    return 1
+  if _taw_head_branch="$(_taw_git symbolic-ref --quiet --short HEAD 2>/dev/null)"; then
+    _taw_default_branch_result="$_taw_head_branch"
+    _taw_default_base_ref=
+    return 0
   fi
 
-  _taw_default_branch_result="${_taw_project_dir:t}"
-  _taw_default_base_ref=
-  return 0
+  return 1
 }
 
 _taw_default_branch() {
@@ -1092,34 +1211,46 @@ _taw_parse_created_window() {
 }
 
 _taw_existing_tmux_window_for_dir() {
-  local _taw_panes _taw_line _taw_window _taw_pane_path _taw_pane_real
+  local _taw_panes _taw_line _taw_window _taw_pane _taw_pane_path _taw_pane_real _taw_window_match=
   local _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
 
   _taw_panes="$(tmux list-panes -s -t "$_taw_session_name:" \
-    -F '#{window_id}	#{pane_current_path}' 2>/dev/null)" || return 1
+    -F '#{window_id}	#{pane_id}	#{pane_current_path}' 2>/dev/null)" || return 1
 
   for _taw_line in "${(@f)_taw_panes}"; do
     _taw_window="${_taw_line%%${_taw_tab}*}"
-    _taw_pane_path="${_taw_line#*${_taw_tab}}"
-    [[ "$_taw_pane_path" != "$_taw_line" && -n "$_taw_window" && -d "$_taw_pane_path" ]] || continue
+    _taw_pane="${_taw_line#*${_taw_tab}}"
+    _taw_pane="${_taw_pane%%${_taw_tab}*}"
+    _taw_pane_path="${_taw_line##*${_taw_tab}}"
+    [[ "$_taw_pane_path" != "$_taw_line" && -n "$_taw_window" && -n "$_taw_pane" && -d "$_taw_pane_path" ]] || continue
     _taw_pane_real="${_taw_pane_path:A}"
-    if [[ "$_taw_pane_real" == "$_taw_target_dir" || "$_taw_pane_real" == "$_taw_target_dir"/* ]]; then
-      print -r -- "$_taw_window"
+    if [[ "$_taw_pane_real" == "$_taw_target_dir" ]]; then
+      print -r -- "$_taw_window	$_taw_pane"
       return 0
+    elif [[ "$_taw_pane_real" == "$_taw_target_dir"/* ]]; then
+      [[ -n "$_taw_window_match" ]] || _taw_window_match="$_taw_window"
     fi
   done
 
-  return 1
+  [[ -n "$_taw_window_match" ]] || return 1
+  print -r -- "$_taw_window_match"
+  return 0
 }
 
 _taw_switch_to_tmux_window() {
-  local _taw_window_id="$1"
+  local _taw_window_id="$1" _taw_pane_id="${2:-}"
 
   if [[ -n "${TMUX:-}" ]]; then
     tmux switch-client -t "$_taw_session_name" || return 1
     tmux select-window -t "$_taw_window_id" || return 1
+    if [[ -n "$_taw_pane_id" ]]; then
+      tmux select-pane -t "$_taw_pane_id" || return 1
+    fi
   else
     tmux select-window -t "$_taw_window_id" || return 1
+    if [[ -n "$_taw_pane_id" ]]; then
+      tmux select-pane -t "$_taw_pane_id" || return 1
+    fi
     tmux attach-session -t "$_taw_session_name" || return 1
   fi
 }
@@ -1133,10 +1264,18 @@ _taw_can_reuse_existing_window() {
 _taw_create_tmux_window() {
   local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_editor_pane
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
+  local _taw_shell_anchor_pane
+  local _taw_existing_window_id _taw_existing_pane_id
 
   if tmux has-session -t "$_taw_session_name" 2>/dev/null; then
     if _taw_can_reuse_existing_window && _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
-      _taw_switch_to_tmux_window "$_taw_existing_window"
+      _taw_existing_window_id="${_taw_existing_window%%$'\t'*}"
+      if [[ "$_taw_existing_window" == *$'\t'* ]]; then
+        _taw_existing_pane_id="${_taw_existing_window#*$'\t'}"
+      else
+        _taw_existing_pane_id=
+      fi
+      _taw_switch_to_tmux_window "$_taw_existing_window_id" "$_taw_existing_pane_id"
       return
     fi
 
@@ -1156,17 +1295,32 @@ _taw_create_tmux_window() {
   tmux set-window-option -t "$_taw_window_id" allow-rename off >/dev/null || return 1
   tmux rename-window -t "$_taw_window_id" "$_taw_window_name" >/dev/null || return 1
 
-  _taw_agent_pane="$(tmux split-window -h -P -F '#{pane_id}' \
-    -t "$_taw_editor_pane" -c "$_taw_window_dir" "$_taw_agent_cmd")" || return 1
+  _taw_shell_anchor_pane="$_taw_editor_pane"
+  if [[ "$_taw_agent_enabled" == true ]]; then
+    _taw_agent_pane="$(tmux split-window -h -P -F '#{pane_id}' \
+      -t "$_taw_editor_pane" -c "$_taw_window_dir" "$_taw_agent_cmd")" || return 1
+    _taw_shell_anchor_pane="$_taw_agent_pane"
+  fi
 
   if (( ${#_taw_shell_cmds[@]} > 0 )); then
     if [[ -n "${_taw_shell_cmds[1]}" ]]; then
-      _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
-        -t "$_taw_agent_pane" -c "$_taw_window_dir" \
-        "${_taw_shell_cmds[1]}")" || return 1
+      if [[ "$_taw_agent_enabled" == true ]]; then
+        _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
+          -t "$_taw_shell_anchor_pane" -c "$_taw_window_dir" \
+          "${_taw_shell_cmds[1]}")" || return 1
+      else
+        _taw_shell_pane="$(tmux split-window -h -P -F '#{pane_id}' \
+          -t "$_taw_shell_anchor_pane" -c "$_taw_window_dir" \
+          "${_taw_shell_cmds[1]}")" || return 1
+      fi
     else
-      _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
-        -t "$_taw_agent_pane" -c "$_taw_window_dir")" || return 1
+      if [[ "$_taw_agent_enabled" == true ]]; then
+        _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
+          -t "$_taw_shell_anchor_pane" -c "$_taw_window_dir")" || return 1
+      else
+        _taw_shell_pane="$(tmux split-window -h -P -F '#{pane_id}' \
+          -t "$_taw_shell_anchor_pane" -c "$_taw_window_dir")" || return 1
+      fi
     fi
     _taw_last_shell_pane="$_taw_shell_pane"
 
@@ -1306,6 +1460,8 @@ if [[ "$_taw_project_kind" == normal ]]; then
   if [[ -n "$_taw_base_ref" ]]; then
     _taw_resolve_branch_target "$_taw_base_ref" || return 1
     _taw_checkout_branch_target "$_taw_branch_target_name" "$_taw_branch_target_ref" || return 1
+  elif [[ "$_taw_created_repo_branch_applied" == true || "$_taw_project_picker_requested" == true ]]; then
+    :
   else
     _taw_select_branch_with_fzf
     case $? in
@@ -1353,7 +1509,7 @@ elif [[ "$_taw_is_bare" == true ]]; then
     _taw_branch_ref="$_taw_branch_target_ref"
   else
     _taw_nonbare_worktree_count="$(_taw_bare_worktree_count)" || return 1
-    if (( _taw_nonbare_worktree_count > 0 )) && command -v fzf >/dev/null 2>&1; then
+    if [[ "$_taw_project_picker_requested" != true ]] && (( _taw_nonbare_worktree_count > 0 )) && command -v fzf >/dev/null 2>&1; then
       _taw_select_bare_target_with_fzf
       case $? in
         0)
@@ -1438,6 +1594,22 @@ else
   _taw_project_name="${_taw_project_dir:t}"
   _taw_project_name="${_taw_project_name%.git}"
   _taw_session_name="${_taw_project_name//:/_}"
+fi
+
+if [[ "$_taw_agent_arg_provided" == true ]]; then
+  _taw_agent_enabled=true
+elif [[ "$_taw_project_picker_requested" == true ]]; then
+  _taw_agent_enabled=false
+else
+  _taw_agent_enabled=true
+  if [[ -n "${TAW_AGENT:-}" ]]; then
+    local _taw_agent_override
+
+    _taw_agent_override="$(_taw_trim_whitespace "$TAW_AGENT")"
+    if [[ -n "$_taw_agent_override" ]]; then
+      _taw_agent_cmd="$_taw_agent_override"
+    fi
+  fi
 fi
 
 _taw_debug_dump "before tmux window"
