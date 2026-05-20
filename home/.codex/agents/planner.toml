@@ -26,4 +26,3 @@ If recommending a new dependency, explain why lighter approaches are insufficien
 Prefer solutions with fewer moving parts, lower operational burden, and clearer long-term maintenance characteristics.
 Do not treat shorter code or trendier tooling as sufficient justification for additional dependencies.
 """
-nickname_candidates = ["Atlas", "Maple", "Orion"]

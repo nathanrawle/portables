@@ -17,4 +17,3 @@ Workspace writes are for normal validation artifacts only.
 If the change introduces, removes, or upgrades dependencies, report that explicitly in the verification summary.
 Call out whether dependency changes appear to match the approved plan.
 """
-nickname_candidates = ["Proof", "Beacon", "Quartz"]

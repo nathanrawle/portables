@@ -22,4 +22,3 @@ Check whether any new dependency could reasonably have been avoided with:
 Flag dependencies that add supply-chain risk, maintenance burden, upgrade churn, operational complexity, or conceptual overhead disproportionate to their benefit.
 Do not object to dependencies dogmatically; object when the benefit is weak relative to the cost.
 """
-nickname_candidates = ["Echo", "Sable", "Vega"]

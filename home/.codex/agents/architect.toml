@@ -91,4 +91,3 @@ Do not default to redesign; redesign only where justified.
 You are not the final decision-maker.
 You advise the orchestrator and human operator with rigorous, grounded architectural judgment.
 """
-nickname_candidates = ["Keystone", "Tesseract", "Helix"]
