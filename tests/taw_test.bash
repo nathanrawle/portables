@@ -372,6 +372,73 @@ test_project_arg_direct_path_precedes_projects_home() {
   assert_file_not_contains "$log" $'-c\t'"$projects_real"$'\tvim'
 }
 
+test_project_arg_plain_path_opens_plain_project() {
+  local plain plain_real fake_bin log
+
+  plain="$TEST_TMPDIR/plain"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  mkdir -p "$plain"
+  plain_real="$(cd "$plain" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -p "$plain"
+
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tplain\t-n\tplain\t-c\t'"$plain_real"$'\tvim'
+  assert_file_not_contains "$log" $'checkout\t'
+  assert_file_not_contains "$log" $'worktree\tadd'
+}
+
+test_outside_promotion_uses_single_positional_as_project_arg() {
+  local repo repo_real fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" "$repo"
+
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+}
+
+test_outside_promotion_uses_project_and_operand_positionals() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" branch feature-x main
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" "$project" feature-x
+
+  branch="$(git -C "$project/feature-x" branch --show-current)"
+  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  assert_eq "feature-x" "$branch" "expected promoted positional project to keep remaining operand"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_outside_promotion_rejects_branch_flag() {
+  local fake_bin log
+
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -b develop; then
+    fail "expected -b outside a project to fail"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after outside -b"
+}
+
 test_project_arg_preserves_invoking_shell_cwd() {
   local repo start start_real fake_bin log after
 
@@ -548,12 +615,12 @@ test_positional_base_ref_overrides_named_branch() {
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$TEST_TMPDIR" -p "$project" -b main feature-x develop
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" -b main feature-x develop; then
+    fail "expected -b with positional operands to fail"
+  fi
 
-  expected="$(git -C "$project" rev-parse develop)"
-  actual="$(git -C "$project/feature-x" rev-parse HEAD)"
-  assert_eq "$expected" "$actual" "expected positional base ref to override -b"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after invalid bare operands"
 }
 
 test_supports_bare_child_not_named_git() {
@@ -832,6 +899,64 @@ test_bare_project_named_branch_without_worktree_opens_branch_worktree() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_explicit_bare_worktree_subdir_with_branch_opens_project_root_worktree() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" branch feature-x main
+  mkdir -p "$project/main/src"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project/main/src" -b feature-x
+
+  branch="$(git -C "$project/feature-x" branch --show-current)"
+  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  assert_eq "feature-x" "$branch" "expected bare worktree subdir -b to target project root"
+  assert_not_exists "$project/main/src/feature-x"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_explicit_bare_worktree_subdir_without_operands_opens_containing_worktree_root() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/develop" develop >/dev/null 2>&1
+  mkdir -p "$project/develop/src"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project/develop/src"
+
+  branch="$(git -C "$project/develop" branch --show-current)"
+  worktree_real="$(cd "$project/develop" && pwd -P)"
+  assert_eq "develop" "$branch" "expected explicit bare subdir to open containing worktree"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tdevelop\t-c\t'"$worktree_real"$'\tvim'
+  assert_file_not_contains "$log" $'worktree\tadd'
+}
+
+test_explicit_bare_worktree_root_without_operands_opens_containing_worktree_root() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add "$project/develop" develop >/dev/null 2>&1
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project/develop"
+
+  branch="$(git -C "$project/develop" branch --show-current)"
+  worktree_real="$(cd "$project/develop" && pwd -P)"
+  assert_eq "develop" "$branch" "expected explicit bare worktree root to open itself"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tdevelop\t-c\t'"$worktree_real"$'\tvim'
+  assert_file_not_contains "$log" $'worktree\tadd'
+}
+
 test_bare_project_reuses_existing_default_branch_worktree_when_confirmed() {
   local project fake_bin log branch existing_real
 
@@ -886,35 +1011,37 @@ test_bare_project_invalid_branch_does_not_create_parent_dirs() {
   [[ ! -f "$log" ]] || fail "expected tmux not to run after invalid bare branch"
 }
 
-test_normal_repo_rejects_worktree_creation() {
-  local repo fake_bin log
+test_normal_repo_checks_out_branch_from_single_positional() {
+  local repo repo_real fake_bin log branch
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
+  git -C "$repo" branch feature-x develop
+  repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
-  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$repo" -p "$repo" feature-x; then
-    fail "expected normal repo worktree creation to fail"
-  fi
-  [[ ! -f "$log" ]] || fail "expected tmux not to run after worktree error"
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" feature-x
+
+  branch="$(git -C "$repo" branch --show-current)"
+  assert_eq "feature-x" "$branch" "expected single positional to check out branch in normal repo"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
 }
 
-test_normal_repo_rejects_existing_worktree_path() {
+test_normal_repo_rejects_two_positional_operands() {
   local repo fake_bin log
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
-  git -C "$repo" worktree add -b feature-x "$repo/feature-x" >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$repo" -p "$repo" feature-x; then
-    fail "expected normal repo existing worktree path to fail"
+    run_taw "$repo" -p "$repo" feature-x develop; then
+    fail "expected normal repo to reject two positional operands"
   fi
-  [[ ! -f "$log" ]] || fail "expected tmux not to run after existing worktree error"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after invalid normal operands"
 }
 
 test_rejects_unrelated_git_repo_at_worktree_path() {
@@ -1259,10 +1386,12 @@ test_project_picker_flag_bypasses_current_repo_detection() {
 
   XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$picked_repo" \
     TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$current_repo" --pick-project
+    run_taw "$current_repo" --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
 
   assert_file_contains "$fzf_log" "$picked_repo"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tpicked\t-n\tpicked\t-c\t'"$picked_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tpicked\t-n\tpicked\t-c\t'"$picked_real"$'\tnvim .'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$picked_real"$'\tclaude --resume'
+  assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$picked_real"$'\tnpm test'
   assert_file_not_contains "$log" $'-s\tcurrent'
 }
 
@@ -1309,6 +1438,42 @@ test_project_picker_flag_rejects_project_arg() {
   [[ ! -f "$log" ]] || fail "expected tmux not to run after invalid picker/project args"
 }
 
+test_project_picker_aliases_reject_project_branch_and_positionals() {
+  local repo fake_bin alias log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+
+  for alias in -ts --ts -picker --picker -pick-project --pick-project; do
+    log="$TEST_TMPDIR/tmux-${alias//[^[:alnum:]]/_}.log"
+
+    if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$repo" "$alias" -p "$repo"; then
+      fail "expected $alias with -p to fail"
+    fi
+    [[ ! -f "$log" ]] || fail "expected tmux not to run after $alias with -p"
+
+    if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$repo" "$alias" -b develop; then
+      fail "expected $alias with -b to fail"
+    fi
+    [[ ! -f "$log" ]] || fail "expected tmux not to run after $alias with -b"
+
+    if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$repo" "$alias" feature-x; then
+      fail "expected $alias with one positional to fail"
+    fi
+    [[ ! -f "$log" ]] || fail "expected tmux not to run after $alias with one positional"
+
+    if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$repo" "$alias" feature-x develop; then
+      fail "expected $alias with two positionals to fail"
+    fi
+    [[ ! -f "$log" ]] || fail "expected tmux not to run after $alias with two positionals"
+  done
+}
+
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
 test_case "taw: existing session selects new window before attach" \
@@ -1321,6 +1486,8 @@ test_case "taw: -p resolves from PROJECTS_HOME" \
   test_project_arg_resolves_from_projects_home
 test_case "taw: direct -p path precedes PROJECTS_HOME" \
   test_project_arg_direct_path_precedes_projects_home
+test_case "taw: plain -p path opens plain project" \
+  test_project_arg_plain_path_opens_plain_project
 test_case "taw: -p preserves invoking shell cwd" \
   test_project_arg_preserves_invoking_shell_cwd
 test_case "taw: -p GitHub URL clones and opens project" \
@@ -1331,6 +1498,12 @@ test_case "taw: -p resolves by tmux session path basename" \
   test_project_arg_resolves_by_tmux_session_path_basename
 test_case "taw: unresolved -p fails without creating window" \
   test_project_arg_unresolved_fails_without_creating_window
+test_case "taw: outside promotion uses single positional as project arg" \
+  test_outside_promotion_uses_single_positional_as_project_arg
+test_case "taw: outside promotion uses project and operand positionals" \
+  test_outside_promotion_uses_project_and_operand_positionals
+test_case "taw: outside promotion rejects -b outside a project" \
+  test_outside_promotion_rejects_branch_flag
 test_case "taw: creates bare worktree from positional base ref" \
   test_creates_bare_worktree_from_positional_base_ref
 test_case "taw: bare positional worktree supports -sh= command" \
@@ -1365,16 +1538,22 @@ test_case "taw: bare picker cancel aborts before tmux" \
   test_bare_picker_cancel_aborts_before_tmux
 test_case "taw: bare project -b opens branch worktree" \
   test_bare_project_named_branch_without_worktree_opens_branch_worktree
+test_case "taw: explicit bare worktree subdir with -b opens project root worktree" \
+  test_explicit_bare_worktree_subdir_with_branch_opens_project_root_worktree
+test_case "taw: explicit bare worktree subdir without operands opens containing worktree root" \
+  test_explicit_bare_worktree_subdir_without_operands_opens_containing_worktree_root
+test_case "taw: explicit bare worktree root without operands opens containing worktree root" \
+  test_explicit_bare_worktree_root_without_operands_opens_containing_worktree_root
 test_case "taw: bare project reuses existing default branch worktree when confirmed" \
   test_bare_project_reuses_existing_default_branch_worktree_when_confirmed
 test_case "taw: bare project branch with slash creates nested worktree" \
   test_bare_project_branch_with_slash_creates_nested_worktree
 test_case "taw: bare project invalid branch does not create parent dirs" \
   test_bare_project_invalid_branch_does_not_create_parent_dirs
-test_case "taw: normal repo rejects worktree creation" \
-  test_normal_repo_rejects_worktree_creation
-test_case "taw: normal repo rejects existing worktree path" \
-  test_normal_repo_rejects_existing_worktree_path
+test_case "taw: normal repo checks out branch from single positional" \
+  test_normal_repo_checks_out_branch_from_single_positional
+test_case "taw: normal repo rejects two positional operands" \
+  test_normal_repo_rejects_two_positional_operands
 test_case "taw: rejects unrelated git repo at worktree path" \
   test_rejects_unrelated_git_repo_at_worktree_path
 test_case "taw: rejects empty required command values" \
@@ -1411,3 +1590,5 @@ test_case "taw: project picker flag cancel returns without tmux window" \
   test_project_picker_flag_cancel_returns_without_tmux_window
 test_case "taw: project picker flag rejects -p" \
   test_project_picker_flag_rejects_project_arg
+test_case "taw: project picker aliases reject project, branch, and positionals" \
+  test_project_picker_aliases_reject_project_branch_and_positionals

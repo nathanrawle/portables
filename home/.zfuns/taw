@@ -7,7 +7,8 @@ local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_project_picker_requested _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_agent_arg_provided _taw_editor_arg_provided _taw_debug
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
-local _taw_project_dir _taw_git_dir _taw_is_bare
+local _taw_project_dir _taw_git_dir _taw_project_kind _taw_is_bare
+local _taw_selected_worktree_dir
 local _taw_session_name _taw_project_name _taw_project_session_name
 local _taw_default_branch_result _taw_default_base_ref
 local _taw_picker_kind _taw_picker_branch _taw_picker_ref _taw_picker_path
@@ -88,7 +89,9 @@ _taw_debug_dump() {
   print -u2 -r -- "_taw_window_name='$_taw_window_name'"
   print -u2 -r -- "_taw_project_dir=$_taw_project_dir"
   print -u2 -r -- "_taw_git_dir=$_taw_git_dir"
+  print -u2 -r -- "_taw_project_kind=$_taw_project_kind"
   print -u2 -r -- "_taw_is_bare=$_taw_is_bare"
+  print -u2 -r -- "_taw_selected_worktree_dir='$_taw_selected_worktree_dir'"
   print -u2 -r -- "_taw_session_name='$_taw_session_name'"
   print -u2 -r -- "_taw_project_name='$_taw_project_name'"
   print -u2 -r -- "_taw_project_session_name='$_taw_project_session_name'"
@@ -115,6 +118,15 @@ _taw_is_bare_git_dir() {
   [[ "${_taw_git:A}" == "$_taw_candidate" ]]
 }
 
+_taw_set_normal_project() {
+  local _taw_project_root="$1" _taw_git_root="$2"
+
+  _taw_project_dir="${_taw_project_root:A}"
+  _taw_git_dir="${_taw_git_root:A}"
+  _taw_project_kind=normal
+  _taw_is_bare=false
+}
+
 _taw_project_dir_for_bare_git_dir() {
   local _taw_bare_git_dir="${1:A}" _taw_fallback="${2:-}" _taw_name
 
@@ -135,7 +147,17 @@ _taw_set_bare_project() {
 
   _taw_git_dir="${_taw_bare_git_dir:A}"
   _taw_project_dir="$(_taw_project_dir_for_bare_git_dir "$_taw_git_dir" "$_taw_fallback")" || return 1
+  _taw_project_kind=bare
   _taw_is_bare=true
+}
+
+_taw_set_plain_project() {
+  local _taw_project_root="$1"
+
+  _taw_project_dir="${_taw_project_root:A}"
+  _taw_git_dir=
+  _taw_project_kind=plain
+  _taw_is_bare=false
 }
 
 _taw_abs_path() {
@@ -147,28 +169,8 @@ _taw_abs_path() {
   fi
 }
 
-_taw_detect_bare_child() {
-  local _taw_dir="$1" _taw_child
-
-  for _taw_child in "$_taw_dir"/.git "$_taw_dir"/.bare; do
-    if _taw_is_bare_git_dir "$_taw_child"; then
-      _taw_set_bare_project "$_taw_child" "$_taw_dir"
-      return 0
-    fi
-  done
-
-  for _taw_child in "$_taw_dir"/*(N/); do
-    if _taw_is_bare_git_dir "$_taw_child"; then
-      _taw_set_bare_project "$_taw_child" "$_taw_dir"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-_taw_detect_project_here() {
-  local _taw_start="$1" _taw_inside _taw_bare _taw_top _taw_common _taw_git
+_taw_classify_existing_path() {
+  local _taw_start="$1" _taw_inside _taw_top _taw_common _taw_child
 
   [[ -d "$_taw_start" ]] || return 1
   _taw_start="${_taw_start:A}"
@@ -182,47 +184,42 @@ _taw_detect_project_here() {
 
     if _taw_is_bare_git_dir "$_taw_common"; then
       _taw_set_bare_project "$_taw_common" "${_taw_common:h}"
+      _taw_selected_worktree_dir="$_taw_top"
     else
-      _taw_project_dir="$_taw_top"
-      _taw_git_dir="$_taw_common"
-      _taw_is_bare=false
+      _taw_set_normal_project "$_taw_top" "$_taw_common"
     fi
     return 0
   fi
 
-  _taw_bare="$(git -C "$_taw_start" rev-parse --is-bare-repository 2>/dev/null)" || _taw_bare=
-  if [[ "$_taw_bare" == true ]]; then
-    _taw_git="$(git -C "$_taw_start" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
-    _taw_git="${_taw_git:A}"
-    [[ "$_taw_git" == "$_taw_start" || "${_taw_git:h}" == "$_taw_start" ]] || return 1
-    _taw_set_bare_project "$_taw_git" "$_taw_start"
+  if _taw_is_bare_git_dir "$_taw_start"; then
+    _taw_set_bare_project "$_taw_start" "${_taw_start:h}"
     return 0
   fi
 
-  if _taw_detect_bare_child "$_taw_start"; then
-    return 0
-  fi
-
-  return 1
-}
-
-_taw_detect_project() {
-  local _taw_start="$1" _taw_dir _taw_parent
-
-  _taw_detect_project_here "$_taw_start" && return 0
-  [[ -d "$_taw_start" ]] || return 1
-  _taw_start="${_taw_start:A}"
-
-  _taw_dir="$_taw_start"
-  while [[ -n "$_taw_dir" && "$_taw_dir" != "/" ]]; do
-    if _taw_detect_bare_child "$_taw_dir"; then
+  for _taw_child in "$_taw_start"/.git "$_taw_start"/.bare; do
+    if _taw_is_bare_git_dir "$_taw_child"; then
+      _taw_set_bare_project "$_taw_child" "$_taw_start"
       return 0
     fi
-    _taw_parent="${_taw_dir:h}"
-    [[ "$_taw_parent" == "$_taw_dir" ]] && break
-    _taw_dir="$_taw_parent"
   done
 
+  _taw_set_plain_project "$_taw_start"
+  return 0
+}
+
+_taw_detect_current_project() {
+  local _taw_saved_project_dir="$_taw_project_dir" _taw_saved_git_dir="$_taw_git_dir"
+  local _taw_saved_project_kind="$_taw_project_kind" _taw_saved_is_bare="$_taw_is_bare"
+  local _taw_saved_selected_worktree_dir="$_taw_selected_worktree_dir"
+
+  _taw_classify_existing_path "$PWD" || return 1
+  [[ "$_taw_project_kind" != plain ]] && return 0
+
+  _taw_project_dir="$_taw_saved_project_dir"
+  _taw_git_dir="$_taw_saved_git_dir"
+  _taw_project_kind="$_taw_saved_project_kind"
+  _taw_is_bare="$_taw_saved_is_bare"
+  _taw_selected_worktree_dir="$_taw_saved_selected_worktree_dir"
   return 1
 }
 
@@ -272,10 +269,7 @@ _taw_use_project_path() {
     return 1
   }
   _taw_abs="${_taw_path:A}"
-  _taw_detect_project "$_taw_abs" || {
-    _taw_die "not a git project: $_taw_label"
-    return 1
-  }
+  _taw_classify_existing_path "$_taw_abs" || return 1
   [[ -z "$_taw_session_name" ]] || _taw_project_session_name="$_taw_session_name"
 }
 
@@ -394,33 +388,57 @@ _taw_resolve_project() {
   local _taw_input _taw_status
 
   if [[ "$_taw_project_picker_requested" == true ]]; then
+    if [[ -n "$_taw_project_arg" || -n "$_taw_named_branch" || ${#_taw_positionals[@]} -gt 0 ]]; then
+      _taw_die "--pick-project cannot be combined with -p, -b, or positionals"
+      return 1
+    fi
     _taw_resolve_project_from_picker
     return
   fi
 
-  if [[ -n "$_taw_project_arg" ]]; then
-    _taw_resolve_project_arg "$_taw_project_arg"
-    return
+  if [[ -z "$_taw_project_arg" ]]; then
+    if _taw_detect_current_project; then
+      return 0
+    fi
+
+    if [[ -n "$_taw_named_branch" ]]; then
+      _taw_die "-b cannot be used outside a project"
+      return 1
+    fi
+
+    case "${#_taw_positionals[@]}" in
+      0)
+        _taw_input="$(_taw_prompt_project "Project, GitHub URL, or git repository directory: ")"
+        _taw_status=$?
+        case "$_taw_status" in
+          0) ;;
+          130) return 130 ;;
+          *) return 1 ;;
+        esac
+
+        if [[ -z "$_taw_input" ]]; then
+          _taw_resolve_project_from_picker
+          return
+        fi
+
+        _taw_project_arg="$_taw_input"
+        ;;
+      1)
+        _taw_project_arg="${_taw_positionals[1]}"
+        _taw_positionals=()
+        ;;
+      2)
+        _taw_project_arg="${_taw_positionals[1]}"
+        _taw_positionals=( "${_taw_positionals[2]}" )
+        ;;
+      *)
+        _taw_die "expected at most project plus one positional outside a project"
+        return 1
+        ;;
+    esac
   fi
 
-  if _taw_detect_project_here "$PWD"; then
-    return 0
-  fi
-
-  _taw_input="$(_taw_prompt_project "Project, GitHub URL, or git repository directory: ")"
-  _taw_status=$?
-  case "$_taw_status" in
-    0) ;;
-    130) return 130 ;;
-    *) return 1 ;;
-  esac
-
-  if [[ -z "$_taw_input" ]]; then
-    _taw_resolve_project_from_picker
-    return
-  fi
-
-  _taw_resolve_project_arg "$_taw_input"
+  _taw_resolve_project_arg "$_taw_project_arg"
 }
 
 _taw_resolve_project_arg() {
@@ -455,6 +473,68 @@ _taw_resolve_project_arg() {
 
   _taw_die "could not resolve project: $_taw_arg"
   return 1
+}
+
+_taw_classify_operands() {
+  local _taw_positionals_count="${#_taw_positionals[@]}"
+
+  _taw_worktree_arg=
+  _taw_base_ref=
+
+  case "$_taw_project_kind" in
+    plain)
+      if [[ -n "$_taw_named_branch" || $_taw_positionals_count -gt 0 ]]; then
+        _taw_die "plain projects do not accept operands"
+        return 1
+      fi
+      ;;
+    normal)
+      if [[ -n "$_taw_named_branch" ]]; then
+        if (( _taw_positionals_count == 0 )); then
+          _taw_base_ref="$_taw_named_branch"
+        else
+          _taw_die "normal projects do not accept positional operands with -b"
+          return 1
+        fi
+      else
+        case "$_taw_positionals_count" in
+          0) ;;
+          1)
+            _taw_base_ref="${_taw_positionals[1]}"
+            ;;
+          *)
+            _taw_die "normal projects accept at most one positional branch"
+            return 1
+            ;;
+        esac
+      fi
+      ;;
+    bare)
+      if [[ -n "$_taw_named_branch" ]]; then
+        if (( _taw_positionals_count == 0 )); then
+          _taw_base_ref="$_taw_named_branch"
+        else
+          _taw_die "bare projects do not accept positional operands with -b"
+          return 1
+        fi
+      else
+        case "$_taw_positionals_count" in
+          0) ;;
+          1)
+            _taw_worktree_arg="${_taw_positionals[1]}"
+            ;;
+          2)
+            _taw_worktree_arg="${_taw_positionals[1]}"
+            _taw_base_ref="${_taw_positionals[2]}"
+            ;;
+          *)
+            _taw_die "bare projects accept at most two positional operands"
+            return 1
+            ;;
+        esac
+      fi
+      ;;
+  esac
 }
 
 _taw_git() {
@@ -938,14 +1018,6 @@ done
   return 1
 }
 
-if [[ "$_taw_project_picker_requested" == true && -n "$_taw_project_arg" ]]; then
-  _taw_die "--pick-project cannot be combined with -p"
-  return 1
-fi
-
-_taw_worktree_arg="${_taw_positionals[1]:-}"
-_taw_base_ref="${_taw_positionals[2]:-${_taw_named_branch:-}}"
-
 if [[ -z "$_taw_editor_cmd" ]]; then
   if [[ -n "${EDITOR:-}" ]]; then
     _taw_editor_cmd="$EDITOR"
@@ -966,6 +1038,8 @@ case $? in
   *) return 1 ;;
 esac
 
+_taw_classify_operands || return 1
+
 if [[ -n "$_taw_worktree_arg" ]]; then
   if [[ "$_taw_worktree_arg" == /* ]]; then
     _taw_window_dir="${_taw_worktree_arg:A}"
@@ -978,7 +1052,10 @@ elif [[ "$_taw_is_bare" == true ]]; then
   local _taw_branch_worktree _taw_branch_ref _taw_existing_worktree _taw_skip_prepare_worktree
 
   _taw_skip_prepare_worktree=false
-  if [[ -n "$_taw_base_ref" ]]; then
+  if [[ -n "$_taw_selected_worktree_dir" && -z "$_taw_base_ref" ]]; then
+    _taw_window_dir="$_taw_selected_worktree_dir"
+    _taw_skip_prepare_worktree=true
+  elif [[ -n "$_taw_base_ref" ]]; then
     _taw_branch_worktree="$_taw_base_ref"
     _taw_branch_ref="$_taw_base_ref"
   elif command -v fzf >/dev/null 2>&1; then
