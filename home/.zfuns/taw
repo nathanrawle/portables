@@ -10,7 +10,7 @@ local _taw_agent_env_override
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_project_kind _taw_is_bare
 local _taw_selected_worktree_dir
-local _taw_session_name _taw_project_name _taw_project_session_name
+local _taw_session_name _taw_session_target _taw_project_name _taw_project_session_name _taw_project_session_target
 local _taw_default_branch_result _taw_default_base_ref
 local _taw_branch_target_name _taw_branch_target_ref
 local _taw_picker_kind _taw_picker_branch _taw_picker_ref _taw_picker_path
@@ -108,8 +108,10 @@ _taw_debug_dump() {
   print -u2 -r -- "_taw_is_bare=$_taw_is_bare"
   print -u2 -r -- "_taw_selected_worktree_dir='$_taw_selected_worktree_dir'"
   print -u2 -r -- "_taw_session_name='$_taw_session_name'"
+  print -u2 -r -- "_taw_session_target='$_taw_session_target'"
   print -u2 -r -- "_taw_project_name='$_taw_project_name'"
   print -u2 -r -- "_taw_project_session_name='$_taw_project_session_name'"
+  print -u2 -r -- "_taw_project_session_target='$_taw_project_session_target'"
   print -u2 -r -- "_taw_default_branch_result='$_taw_default_branch_result'"
   print -u2 -r -- "_taw_default_base_ref='$_taw_default_base_ref'"
   print -u2 -r -- "_taw_picker_kind='$_taw_picker_kind'"
@@ -383,7 +385,7 @@ _taw_prompt_create_project() {
 }
 
 _taw_use_project_path() {
-  local _taw_path="$1" _taw_label="$2" _taw_session_name="${3:-}" _taw_abs
+  local _taw_path="$1" _taw_label="$2" _taw_session_name="${3:-}" _taw_session_target="${4:-}" _taw_abs
 
   [[ -d "$_taw_path" ]] || {
     _taw_die "could not cd to project: $_taw_label"
@@ -392,6 +394,7 @@ _taw_use_project_path() {
   _taw_abs="${_taw_path:A}"
   _taw_classify_existing_path "$_taw_abs" || return 1
   [[ -z "$_taw_session_name" ]] || _taw_project_session_name="$_taw_session_name"
+  [[ -z "$_taw_session_target" ]] || _taw_project_session_target="$_taw_session_target"
 }
 
 _taw_resolve_project_from_tmux_exact() {
@@ -416,7 +419,7 @@ _taw_resolve_project_from_tmux_exact() {
     if [[ -n "$_taw_expected_path" && "${_taw_path:A}" != "${_taw_expected_path:A}" ]]; then
       return 2
     fi
-    _taw_use_project_path "$_taw_path" "$_taw_path" "$_taw_session" || return 2
+    _taw_use_project_path "$_taw_path" "$_taw_path" "$_taw_session" "${_taw_expected_id:-$_taw_session_id}" || return 2
     return 0
   done
 
@@ -424,7 +427,7 @@ _taw_resolve_project_from_tmux_exact() {
 }
 
 _taw_resolve_project_from_tmux() {
-  local _taw_query="$1" _taw_sessions _taw_line _taw_session _taw_path
+  local _taw_query="$1" _taw_sessions _taw_line _taw_session_id _taw_session _taw_path _taw_rest
   local _taw_tab=$'\t'
 
   _taw_resolve_project_from_tmux_exact "$_taw_query"
@@ -433,14 +436,17 @@ _taw_resolve_project_from_tmux() {
     2) return 2 ;;
   esac
 
-  _taw_sessions="$(tmux list-sessions -F '#{session_name}	#{session_path}' 2>/dev/null)" || return 1
+  _taw_sessions="$(tmux list-sessions -F '#{session_id}	#{session_name}	#{session_path}' 2>/dev/null)" || return 1
 
   for _taw_line in "${(@f)_taw_sessions}"; do
-    _taw_session="${_taw_line%%${_taw_tab}*}"
-    _taw_path="${_taw_line#*${_taw_tab}}"
-    [[ "$_taw_path" == "$_taw_line" ]] && _taw_path=
+    _taw_session_id="${_taw_line%%${_taw_tab}*}"
+    _taw_rest="${_taw_line#*${_taw_tab}}"
+    [[ "$_taw_rest" == "$_taw_line" ]] && _taw_rest=
+    _taw_session="${_taw_rest%%${_taw_tab}*}"
+    _taw_path="${_taw_rest#*${_taw_tab}}"
+    [[ "$_taw_path" == "$_taw_rest" ]] && _taw_path=
     [[ -n "$_taw_path" && "${_taw_path:t}" == "$_taw_query" ]] || continue
-    _taw_use_project_path "$_taw_path" "$_taw_path" "$_taw_session"
+    _taw_use_project_path "$_taw_path" "$_taw_path" "$_taw_session" "$_taw_session_id"
     return
   done
 
@@ -1309,7 +1315,7 @@ _taw_existing_tmux_window_for_dir() {
   local _taw_panes _taw_line _taw_window _taw_pane _taw_pane_path _taw_pane_real _taw_window_match=
   local _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
 
-  _taw_panes="$(tmux list-panes -s -t "$_taw_session_name:" \
+  _taw_panes="$(tmux list-panes -s -t "$_taw_session_target:" \
     -F '#{window_id}	#{pane_id}	#{pane_current_path}' 2>/dev/null)" || return 1
 
   for _taw_line in "${(@f)_taw_panes}"; do
@@ -1336,7 +1342,7 @@ _taw_switch_to_tmux_window() {
   local _taw_window_id="$1" _taw_pane_id="${2:-}"
 
   if [[ -n "${TMUX:-}" ]]; then
-    tmux switch-client -t "$_taw_session_name" || return 1
+    tmux switch-client -t "$_taw_session_target" || return 1
     tmux select-window -t "$_taw_window_id" || return 1
     if [[ -n "$_taw_pane_id" ]]; then
       tmux select-pane -t "$_taw_pane_id" || return 1
@@ -1346,7 +1352,7 @@ _taw_switch_to_tmux_window() {
     if [[ -n "$_taw_pane_id" ]]; then
       tmux select-pane -t "$_taw_pane_id" || return 1
     fi
-    tmux attach-session -t "$_taw_session_name" || return 1
+    tmux attach-session -t "$_taw_session_target" || return 1
   fi
 }
 
@@ -1363,7 +1369,7 @@ _taw_create_tmux_window() {
   local _taw_shell_anchor_pane
   local _taw_existing_window_id _taw_existing_pane_id
 
-  if tmux has-session -t "$_taw_session_name" 2>/dev/null; then
+  if tmux has-session -t "$_taw_session_target" 2>/dev/null; then
     if _taw_can_reuse_existing_window && _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
       _taw_existing_window_id="${_taw_existing_window%%$'\t'*}"
       if [[ "$_taw_existing_window" == *$'\t'* ]]; then
@@ -1376,9 +1382,13 @@ _taw_create_tmux_window() {
     fi
 
     _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
-      -t "$_taw_session_name:" -n "$_taw_window_name" -c "$_taw_window_dir" \
+      -t "$_taw_session_target:" -n "$_taw_window_name" -c "$_taw_window_dir" \
       "$_taw_editor_cmd")" || return 1
   else
+    if [[ -n "$_taw_project_session_target" ]]; then
+      _taw_die "could not resolve tmux session: $_taw_session_name"
+      return 1
+    fi
     _taw_created="$(tmux new-session -d -P -F '#{window_id} #{pane_id}' \
       -s "$_taw_session_name" -n "$_taw_window_name" -c "$_taw_window_dir" \
       "$_taw_editor_cmd")" || return 1
@@ -1682,10 +1692,12 @@ _taw_window_name="${_taw_window_dir:t}"
 _taw_window_name="${_taw_window_name//:/_}"
 if [[ -n "$_taw_project_session_name" ]]; then
   _taw_session_name="$_taw_project_session_name"
+  _taw_session_target="${_taw_project_session_target:-$_taw_session_name}"
 else
   _taw_project_name="${_taw_project_dir:t}"
   _taw_project_name="${_taw_project_name%.git}"
   _taw_session_name="${_taw_project_name//:/_}"
+  _taw_session_target="$_taw_session_name"
 fi
 
 if [[ "$_taw_agent_arg_provided" == true ]]; then

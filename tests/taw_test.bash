@@ -65,6 +65,24 @@ set -euo pipefail
 
 case "${1:-}" in
   has-session)
+    target=""
+    shift
+    while [[ $# -gt 0 ]]; do
+      if [[ "$1" = "-t" && $# -ge 2 ]]; then
+        target="$2"
+        break
+      fi
+      shift
+    done
+    if [[ -n "${TAW_FAKE_TMUX_HAS_SESSION_TARGETS+x}" ]]; then
+      while IFS= read -r candidate || [[ -n "$candidate" ]]; do
+        [[ -n "$candidate" ]] || continue
+        if [[ "$target" = "$candidate" ]]; then
+          exit 0
+        fi
+      done <<<"$TAW_FAKE_TMUX_HAS_SESSION_TARGETS"
+      exit 1
+    fi
     if [[ "${TAW_FAKE_TMUX_HAS_SESSION:-0}" = 1 ]]; then
       exit 0
     fi
@@ -104,12 +122,12 @@ case "${1:-}" in
         line_number=$((line_number + 1))
         [[ -n "$line" ]] || continue
         IFS=$'\t' read -r first second third _ <<<"$line"
-        if [[ "$first" = @* && -n "$third" ]]; then
+        if [[ ( "$first" = @* || "$first" = \$* ) && -n "$third" ]]; then
           session_id="$first"
           session="$second"
           path="$third"
         else
-          session_id="@$line_number"
+          session_id="\$${line_number}"
           session="$first"
           path="$second"
         fi
@@ -912,8 +930,8 @@ test_project_arg_resolves_by_tmux_session_name() {
     run_taw "$TEST_TMPDIR/elsewhere" -p agent
 
   assert_file_contains "$log" $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}'
-  assert_file_contains "$log" $'has-session\t-t\tagent'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tagent:\t-n\tsession-repo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'has-session\t-t\t$1'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\tsession-repo\t-c\t'"$repo_real"$'\tvim'
   assert_file_contains "$log" $'rename-window\t-t\t@1\tsession-repo'
 }
 
@@ -933,8 +951,8 @@ test_project_arg_resolves_by_tmux_session_path_basename() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" -p path-match
 
-  assert_file_contains "$log" $'has-session\t-t\talpha'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\talpha:\t-n\tpath-match\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'has-session\t-t\t$1'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\tpath-match\t-c\t'"$repo_real"$'\tvim'
 }
 
 test_project_arg_exact_tmux_match_failure_does_not_fallback() {
@@ -978,7 +996,7 @@ test_project_arg_unresolved_create_refusal_makes_no_mutation() {
     fail "expected unresolved -p project refusal to fail"
   fi
 
-  assert_file_contains "$log" $'list-sessions\t-F\t#{session_name}\t#{session_path}'
+  assert_file_contains "$log" $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}'
   assert_file_not_contains "$log" $'new-session\t'
   assert_file_not_contains "$log" $'new-window\t'
 }
@@ -2107,7 +2125,7 @@ test_empty_prompt_project_picker_resolves_tmux_session_row() {
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" '[TMUX] agent'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tagent:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
   assert_file_not_contains "$log" $'ignored-agent'
 }
 
@@ -2138,7 +2156,7 @@ test_project_picker_tmux_row_uses_session_identity() {
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" '[TMUX] dupe'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tdupe:\t-n\tsession-repo\t-c\t'"$tmux_real"$'\tvim'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\tsession-repo\t-c\t'"$tmux_real"$'\tvim'
   assert_file_not_contains "$log" $'-c\t'"$collision"
 }
 
@@ -2170,7 +2188,7 @@ test_project_picker_tmux_row_ignores_projects_home_collision() {
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" '[TMUX] dupe'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\tdupe:\t-n\tsession-repo\t-c\t'"$tmux_real"$'\tvim'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\tsession-repo\t-c\t'"$tmux_real"$'\tvim'
   assert_file_not_contains "$log" $'-c\t'"$collision"
 }
 
@@ -2222,8 +2240,8 @@ test_project_picker_tmux_row_rejects_same_name_replacement() {
   printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
   make_git_repo "$selected_repo"
   selected_real="$(cd "$selected_repo" && pwd -P)"
-  sessions=$'@1\tdupe\t'"$selected_real"
-  after_sessions=$'@2\tdupe\t'"$selected_real"
+  sessions=$'$1\tdupe\t'"$selected_real"
+  after_sessions=$'$2\tdupe\t'"$selected_real"
 
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
@@ -2242,6 +2260,42 @@ test_project_picker_tmux_row_rejects_same_name_replacement() {
 
   [[ $rc -ne 0 ]] || fail "expected same-name replacement tmux session to fail"
   assert_file_contains "$fzf_log" '[TMUX] dupe'
+  assert_no_tmux_work_window "$log"
+  assert_file_not_contains "$log" $'-c\t'"$selected_real"
+}
+
+test_project_picker_tmux_row_rejects_replacement_after_revalidation() {
+  local xdg empty_search selected_repo selected_real elsewhere fake_bin log fzf_log sessions no_fzf_path rc
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  selected_repo="$TEST_TMPDIR/selected-repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$selected_repo"
+  selected_real="$(cd "$selected_repo" && pwd -P)"
+  sessions=$'$1\tdupe\t'"$selected_real"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  set +e
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim \
+    TAW_FAKE_TMUX_HAS_SESSION_TARGETS=$'dupe\n' TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_FZF_MATCH='[TMUX] dupe' TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere"
+  rc=$?
+  set -e
+
+  [[ $rc -ne 0 ]] || fail "expected post-revalidation tmux session replacement to fail"
+  assert_file_contains "$fzf_log" '[TMUX] dupe'
+  assert_file_contains "$log" $'has-session\t-t\t$1'
+  assert_file_not_contains "$log" $'has-session\t-t\tdupe'
   assert_no_tmux_work_window "$log"
   assert_file_not_contains "$log" $'-c\t'"$selected_real"
 }
@@ -2755,6 +2809,8 @@ test_case "taw: project picker tmux row fails if session disappears" \
   test_project_picker_tmux_row_fails_if_session_disappears
 test_case "taw: project picker tmux row rejects same-name replacement" \
   test_project_picker_tmux_row_rejects_same_name_replacement
+test_case "taw: project picker tmux row rejects replacement after revalidation" \
+  test_project_picker_tmux_row_rejects_replacement_after_revalidation
 test_case "taw: empty project prompt picker cancel returns without tmux window" \
   test_empty_prompt_project_picker_cancel_returns_without_tmux_window
 test_case "taw: project prompt escape returns without tmux window" \
