@@ -7,6 +7,8 @@ return {
   config = function()
     local TS = require("nvim-treesitter")
 
+    vim.treesitter.language.register("terraform", "tf")
+
     TS.install(vim.g.ts_ensure_installed or {})
 
     local indent_disabled = {
