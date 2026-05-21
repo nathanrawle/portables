@@ -29,6 +29,8 @@ vim.g.ts_ensure_installed = {
   "sql",
   "terraform",
   "toml",
+  "typescript",
+  "tsx",
   "vim",
   "vimdoc",
   "yaml",
