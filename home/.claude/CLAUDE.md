@@ -68,6 +68,11 @@ Common, already-accepted command-line tools may be treated as part of the practi
 - Treat production, billing, infrastructure, and authentication changes as higher risk.
 - Prefer inspection and explanation over mutation when the intent is unclear.
 
+## Superpowers skill overrides
+
+- Do not use the `writing-plans` or `executing-plans` skills from superpowers.
+  Use Claude Code's built-in plan mode (`EnterPlanMode` / `ExitPlanMode`) instead.
+
 ## Language-specific defaults
 
 These are personal, global preferences. Apply them when relevant unless the repository clearly prefers something else.
