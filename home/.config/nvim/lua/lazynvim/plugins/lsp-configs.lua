@@ -210,6 +210,7 @@ return {
       --  When you add blink.cmp, luasnip, etc. Neovim now has *more* capabilities.
       --  So, we create new capabilities with blink.cmp, and then broadcast that to the servers.
       local capabilities = require("blink.cmp").get_lsp_capabilities()
+      vim.lsp.config("*", { capabilities = capabilities })
 
       -- Enable the following language servers
       --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
@@ -235,21 +236,6 @@ return {
         --
 
         lua_ls = {
-          -- cmd = { ... },
-          -- filetypes = { ... },
-          -- capabilities = {},
-          root_dir = function(fname)
-            local util = require("lspconfig.util")
-            local nvim_config = vim.fn.stdpath("config")
-
-            -- If we're editing files inside the Neovim config, treat that as the project root
-            if fname:sub(1, #nvim_config) == nvim_config then
-              return nvim_config
-            end
-
-            -- Otherwise, use the normal LuaLS root detection
-            return util.root_pattern(".luarc.json", ".luarc.jsonc", ".git")(fname) or util.path.dirname(fname)
-          end,
           settings = {
             Lua = {
               completion = {
@@ -261,6 +247,10 @@ return {
           },
         },
 
+        gh_actions_ls = {
+          filetypes = { "yaml", "yaml.ghaction" },
+        },
+
         -- Terraform
         terraformls = {
           -- Redirect terraform-ls logs away from stderr (prevents Neovim lsp.log spam)
@@ -270,12 +260,16 @@ return {
             "-log-file",
             vim.fn.stdpath("state") .. "/terraform-ls.log",
           },
-          settings = {
+          init_options = {
             indexing = {
-              -- Don't index generated/vendor dirs
-              ignoreDirectoryNames = { ".terraform", ".terragrunt-cache" },
+              -- Don't index generated/vendor dirs. terraform-ls rejects ignoring .terraform itself.
+              ignoreDirectoryNames = { ".terragrunt-cache" },
             },
           },
+        },
+
+        yamlls = {
+          filetypes = { "yaml", "yaml.docker-compose", "yaml.gitlab", "yaml.helm-values", "yaml.ghaction" },
         },
       }
 
@@ -292,22 +286,21 @@ return {
       --
       -- You can add other tools here that you want Mason to install
       -- for you, so that they are available from within Neovim.
-      local ensure_installed = vim.tbl_keys(servers or {})
-      vim.list_extend(ensure_installed, vim.g.lsp_ensure_installed)
+      local ensure_installed = {}
+      vim.list_extend(ensure_installed, vim.g.mason_lsp_ensure_installed or {})
+      vim.list_extend(ensure_installed, vim.g.mason_tool_ensure_installed or {})
       require("mason-tool-installer").setup({ ensure_installed = ensure_installed })
+
+      for server_name, server in pairs(servers) do
+        vim.lsp.config(server_name, server)
+      end
 
       require("mason-lspconfig").setup({
         ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
-        automatic_installation = false,
-        handlers = {
-          function(server_name)
-            local server = servers[server_name] or {}
-            -- This handles overriding only values explicitly passed
-            -- by the server configuration above. Useful when disabling
-            -- certain features of an LSP (for example, turning off formatting for ts_ls)
-            server.capabilities = vim.tbl_deep_extend("force", {}, capabilities, server.capabilities or {})
-            require("lspconfig")[server_name].setup(server)
-          end,
+        automatic_enable = {
+          exclude = {
+            "stylua",
+          },
         },
       })
     end,

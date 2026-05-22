@@ -70,7 +70,7 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
   group = my_augroup,
   desc = "Rotate lsp log files when large",
   callback = function()
-    local path = vim.lsp.get_log_path()
+    local path = vim.lsp.log.get_filename()
 
     -- file size via Vimscript function (works everywhere Neovim does)
     local size = vim.fn.getfsize(path)

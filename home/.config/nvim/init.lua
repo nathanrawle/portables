@@ -36,8 +36,26 @@ vim.g.ts_ensure_installed = {
   "yaml",
   "zsh",
 }
-vim.g.lsp_ensure_installed = {
-  "actionlint",
+
+vim.filetype.add({
+  extension = {
+    tf = "terraform",
+    tfvars = "terraform-vars",
+  },
+  filename = {
+    ["compose.yaml"] = "yaml.docker-compose",
+    ["compose.yml"] = "yaml.docker-compose",
+    ["docker-compose.yaml"] = "yaml.docker-compose",
+    ["docker-compose.yml"] = "yaml.docker-compose",
+  },
+  pattern = {
+    [".*/%.forgejo/workflows/.*%.ya?ml"] = "yaml.ghaction",
+    [".*/%.gitea/workflows/.*%.ya?ml"] = "yaml.ghaction",
+    [".*/%.github/workflows/.*%.ya?ml"] = "yaml.ghaction",
+  },
+})
+
+vim.g.mason_lsp_ensure_installed = {
   "bash-language-server",
   "docker-compose-language-service",
   "docker-language-server",
@@ -45,13 +63,16 @@ vim.g.lsp_ensure_installed = {
   "gopls",
   "lua-language-server",
   "ruff",
-  "sqlfluff",
-  "stylua", -- Used to format Lua code
   "taplo",
-  "terraform",
   "terraform-ls",
   "typescript-language-server",
   "yaml-language-server",
+}
+vim.g.mason_tool_ensure_installed = {
+  "actionlint",
+  "sqlfluff",
+  "stylua", -- Used to format Lua code
+  "terraform",
 }
 vim.g.never_show = {
   ".DS_Store",
