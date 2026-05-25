@@ -93,12 +93,13 @@ Picker return behavior:
 | --- | --- |
 | zero operands, no `-b` | if there are no non-bare worktrees, open the default worktree; otherwise use the picker when available, falling back to the default worktree when it is not |
 | zero operands, `-b` | create or open a branch worktree under the project root |
-| one positional, no `-b` | treat it as a worktree path under the project root; the branch name is the path basename |
+| one positional, no `-b` | treat it as a worktree path under the project root; the branch name is the same relative path |
 | two positionals, no `-b` | treat them as worktree path plus base ref |
 | any positional with `-b` | reject |
 | explicit bare worktree path with `-b` | resolve the project root from the path and open the branch worktree under the root |
 
 If a bare project is already resolved from an existing worktree path, `taw` opens that worktree directly when no branch target is requested.
+Bare worktree path operands reject `.` and `..` segments; absolute path operands must resolve under the project root.
 
 ### `plain`
 

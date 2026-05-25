@@ -1201,17 +1201,34 @@ test_creates_bare_worktree_from_positional_base_ref() {
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$TEST_TMPDIR" -p "$project" feature-x develop
+    run_taw "$TEST_TMPDIR" -p "$project" fix/broken-feature develop
 
-  branch="$(git -C "$project/feature-x" branch --show-current)"
+  branch="$(git -C "$project/fix/broken-feature" branch --show-current)"
   expected="$(git -C "$project" rev-parse develop)"
-  actual="$(git -C "$project/feature-x" rev-parse HEAD)"
-  worktree_real="$(cd "$project/feature-x" && pwd -P)"
-  assert_eq "feature-x" "$branch" "expected worktree branch named after worktree"
+  actual="$(git -C "$project/fix/broken-feature" rev-parse HEAD)"
+  worktree_real="$(cd "$project/fix/broken-feature" && pwd -P)"
+  assert_eq "fix/broken-feature" "$branch" "expected worktree branch named after worktree path"
   assert_eq "$expected" "$actual" "expected worktree branch to start from positional base ref"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
-  assert_file_contains "$log" $'rename-window\t-t\t@1\tfeature-x'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tbroken-feature'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\tbroken-feature'
   assert_file_contains "$log" $'-c\t'"$worktree_real"
+}
+
+test_creates_bare_worktree_from_positional_path_branch() {
+  local project fake_bin log branch worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" fix/broken-feature
+
+  branch="$(git -C "$project/fix/broken-feature" branch --show-current)"
+  worktree_real="$(cd "$project/fix/broken-feature" && pwd -P)"
+  assert_eq "fix/broken-feature" "$branch" "expected positional path to become the branch name"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tbroken-feature'
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
 test_bare_positional_worktree_supports_shell_equals_command() {
@@ -1766,15 +1783,15 @@ test_bare_project_local_slash_base_ref_stays_local() {
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$TEST_TMPDIR" -p "$project" new-wt "feature/base"
+    run_taw "$TEST_TMPDIR" -p "$project" fix/broken-feature "feature/base"
 
-  branch="$(git -C "$project/new-wt" branch --show-current)"
+  branch="$(git -C "$project/fix/broken-feature" branch --show-current)"
   expected="$(git --git-dir "$project/.git" rev-parse feature/base)"
-  actual="$(git -C "$project/new-wt" rev-parse HEAD)"
-  worktree_real="$(cd "$project/new-wt" && pwd -P)"
-  assert_eq "new-wt" "$branch" "expected local slash base to create the requested branch"
+  actual="$(git -C "$project/fix/broken-feature" rev-parse HEAD)"
+  worktree_real="$(cd "$project/fix/broken-feature" && pwd -P)"
+  assert_eq "fix/broken-feature" "$branch" "expected local slash base to create the requested path branch"
   assert_eq "$expected" "$actual" "expected local slash base to be used as the start point"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tnew-wt'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tbroken-feature'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1806,6 +1823,51 @@ test_bare_project_relative_worktree_escape_is_rejected() {
   fi
   assert_not_exists "$TEST_TMPDIR/outside"
   [[ ! -f "$log" ]] || fail "expected tmux not to run after escaping bare worktree path"
+}
+
+test_bare_project_absolute_worktree_path_must_stay_under_wrapper() {
+  local project fake_bin log branch absolute_under outside_target worktree_real
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  absolute_under="$project/fix/broken-feature"
+  outside_target="$TEST_TMPDIR/project-other/fix/broken-feature"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" "$absolute_under"
+  branch="$(git -C "$absolute_under" branch --show-current)"
+  worktree_real="$(cd "$absolute_under" && pwd -P)"
+  assert_eq "fix/broken-feature" "$branch" "expected absolute path under wrapper to derive relative branch"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+
+  rm -f "$log"
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" -p "$project" "$outside_target"; then
+    fail "expected absolute bare worktree path outside wrapper to fail"
+  fi
+  assert_not_exists "$outside_target"
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after absolute worktree path outside wrapper"
+}
+
+test_bare_project_dot_segment_worktree_paths_are_rejected() {
+  local project fake_bin log input log_name
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+
+  for input in "../outside/foo" "fix/../broken-feature" "fix/./broken-feature"; do
+    log_name="${input//[^[:alnum:]]/_}"
+    log="$TEST_TMPDIR/tmux-$log_name.log"
+    if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$TEST_TMPDIR" -p "$project" "$input"; then
+      fail "expected bare worktree path with dot segment to fail: $input"
+    fi
+    assert_not_exists "$project/broken-feature"
+    assert_not_exists "$project/fix"
+    assert_not_exists "$TEST_TMPDIR/outside"
+    [[ ! -f "$log" ]] || fail "expected tmux not to run after dot-segment worktree path: $input"
+  done
 }
 
 test_normal_repo_checks_out_branch_from_single_positional() {
@@ -2553,6 +2615,31 @@ test_bare_creation_rejects_escape_and_absolute_worktree_inputs_before_mkdir() {
   assert_not_exists "$absolute_target"
 }
 
+test_bare_creation_pending_worktree_path_becomes_branch() {
+  local fake_bin log positional_target branch_target branch worktree_real
+
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  positional_target="$TEST_TMPDIR/elsewhere/bare-positional"
+  branch_target="$TEST_TMPDIR/elsewhere/bare-branch"
+
+  printf 'y\nbare\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -p "$positional_target" fix/broken-feature
+  branch="$(git -C "$positional_target/fix/broken-feature" branch --show-current)"
+  worktree_real="$(cd "$positional_target/fix/broken-feature" && pwd -P)"
+  assert_eq "fix/broken-feature" "$branch" "expected pending positional bare worktree path to become branch"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+
+  rm -f "$log"
+  printf 'y\nbare\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -p "$branch_target" -b fix/broken-feature
+  branch="$(git -C "$branch_target/fix/broken-feature" branch --show-current)"
+  worktree_real="$(cd "$branch_target/fix/broken-feature" && pwd -P)"
+  assert_eq "fix/broken-feature" "$branch" "expected pending -b bare worktree path to become branch"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
 test_project_picker_aliases_reject_project_branch_and_positionals() {
   local repo fake_bin alias log
 
@@ -2695,6 +2782,8 @@ test_case "taw: unresolved creation rejects two pending operands before mkdir" \
   test_unresolved_project_creation_rejects_two_pending_operands_before_mkdir
 test_case "taw: bare creation rejects escape and absolute worktree inputs before mkdir" \
   test_bare_creation_rejects_escape_and_absolute_worktree_inputs_before_mkdir
+test_case "taw: bare creation pending worktree path becomes branch" \
+  test_bare_creation_pending_worktree_path_becomes_branch
 test_case "taw: URL clone failure does not prompt create" \
   test_url_clone_failure_does_not_prompt_create
 test_case "taw: existing file and broken symlink fail without create prompt" \
@@ -2709,6 +2798,8 @@ test_case "taw: outside promotion rejects -b outside a project" \
   test_outside_promotion_rejects_branch_flag
 test_case "taw: creates bare worktree from positional base ref" \
   test_creates_bare_worktree_from_positional_base_ref
+test_case "taw: creates bare worktree from positional path branch" \
+  test_creates_bare_worktree_from_positional_path_branch
 test_case "taw: bare positional worktree supports -sh= command" \
   test_bare_positional_worktree_supports_shell_equals_command
 test_case "taw: shell option skips existing window reuse" \
@@ -2769,6 +2860,10 @@ test_case "taw: bare project invalid branch does not create parent dirs" \
   test_bare_project_invalid_branch_does_not_create_parent_dirs
 test_case "taw: bare project relative worktree escape is rejected" \
   test_bare_project_relative_worktree_escape_is_rejected
+test_case "taw: bare project absolute worktree path must stay under wrapper" \
+  test_bare_project_absolute_worktree_path_must_stay_under_wrapper
+test_case "taw: bare project dot-segment worktree paths are rejected" \
+  test_bare_project_dot_segment_worktree_paths_are_rejected
 test_case "taw: normal repo checks out branch from single positional" \
   test_normal_repo_checks_out_branch_from_single_positional
 test_case "taw: normal repo rejects two positional operands" \
