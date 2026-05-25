@@ -3,6 +3,7 @@ personality = "pragmatic"
 model_reasoning_effort = "xhigh"
 plan_mode_reasoning_effort = "xhigh"
 model = "gpt-5.5"
+service_tier = "default"
 
 [agents]
 max_threads = 8
