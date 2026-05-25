@@ -189,6 +189,33 @@ _taw_abs_path() {
   fi
 }
 
+_taw_bare_worktree_input_has_dot_segment() {
+  local _taw_input="$1" _taw_segment
+  local -a _taw_segments
+
+  _taw_segments=( "${(@s:/:)_taw_input}" )
+  for _taw_segment in "${_taw_segments[@]}"; do
+    case "$_taw_segment" in
+      .|..) return 0 ;;
+    esac
+  done
+
+  return 1
+}
+
+_taw_validate_relative_bare_worktree_input() {
+  local _taw_input="$1"
+
+  [[ -n "$_taw_input" ]] || {
+    _taw_die "invalid bare worktree path: $_taw_input"
+    return 1
+  }
+  if [[ "$_taw_input" == /* ]] || _taw_bare_worktree_input_has_dot_segment "$_taw_input"; then
+    _taw_die "invalid bare worktree path: $_taw_input"
+    return 1
+  fi
+}
+
 _taw_classify_existing_path() {
   local _taw_start="$1" _taw_inside _taw_top _taw_common _taw_child
 
@@ -343,14 +370,9 @@ _taw_prompt_create_project() {
         _taw_worktree_input="${_taw_positionals[1]}"
       fi
       if [[ -n "$_taw_worktree_input" ]]; then
-        case "$_taw_worktree_input" in
-          /*|..|../*|*'/../'*|*'/..')
-            _taw_die "invalid bare worktree path: $_taw_worktree_input"
-            return 1
-            ;;
-        esac
+        _taw_validate_relative_bare_worktree_input "$_taw_worktree_input" || return 1
         _taw_worktree_path="${_taw_target_path:A}/$_taw_worktree_input"
-        _taw_worktree_branch="${_taw_worktree_input:t}"
+        _taw_worktree_branch="$_taw_worktree_input"
       fi
       if [[ -n "$_taw_worktree_branch" ]]; then
         git check-ref-format --branch "$_taw_worktree_branch" >/dev/null 2>&1 || {
@@ -1254,21 +1276,37 @@ _taw_prepare_worktree() {
 }
 
 _taw_resolve_bare_worktree_arg() {
-  local _taw_arg="$1" _taw_project_root _taw_path
+  local _taw_arg="$1" _taw_project_root _taw_path _taw_branch _taw_branch_start
 
+  [[ -n "$_taw_arg" ]] || {
+    _taw_die "invalid bare worktree path: $_taw_arg"
+    return 1
+  }
+  if _taw_bare_worktree_input_has_dot_segment "$_taw_arg"; then
+    _taw_die "invalid bare worktree path: $_taw_arg"
+    return 1
+  fi
   _taw_project_root="${_taw_project_dir:A}"
   if [[ "$_taw_arg" == /* ]]; then
     _taw_path="${_taw_arg:A}"
   else
     _taw_path="${_taw_project_root}/$_taw_arg"
     _taw_path="${_taw_path:A}"
-    if [[ "$_taw_path" != "$_taw_project_root"/* ]]; then
-      _taw_die "worktree path must stay under project root: $_taw_arg"
-      return 1
-    fi
   fi
 
-  print -r -- "$_taw_path"
+  if [[ "$_taw_path" != "$_taw_project_root"/* ]]; then
+    _taw_die "worktree path must stay under project root: $_taw_arg"
+    return 1
+  fi
+
+  _taw_branch_start=$(( ${#_taw_project_root} + 2 ))
+  _taw_branch="${_taw_path[$_taw_branch_start,-1]}"
+  [[ -n "$_taw_branch" ]] || {
+    _taw_die "invalid bare worktree path: $_taw_arg"
+    return 1
+  }
+
+  print -r -- "$_taw_path"$'\t'"$_taw_branch"
 }
 
 _taw_prepare_orphan_worktree() {
@@ -1302,7 +1340,7 @@ _taw_prepare_orphan_worktree() {
   fi
 
   mkdir -p -- "${_taw_path:h}" || return 1
-  _taw_git worktree add --orphan "$_taw_path" || return 1
+  _taw_git worktree add --orphan -b "$_taw_branch" "$_taw_path" || return 1
 }
 
 _taw_parse_created_window() {
@@ -1590,13 +1628,17 @@ if [[ "$_taw_project_kind" == normal ]]; then
     esac
   fi
 elif [[ -n "$_taw_worktree_arg" ]]; then
-  _taw_window_dir="$(_taw_resolve_bare_worktree_arg "$_taw_worktree_arg")" || return 1
+  local _taw_worktree_target _taw_worktree_branch
+
+  _taw_worktree_target="$(_taw_resolve_bare_worktree_arg "$_taw_worktree_arg")" || return 1
+  _taw_window_dir="${_taw_worktree_target%%$'\t'*}"
+  _taw_worktree_branch="${_taw_worktree_target#*$'\t'}"
   _taw_window_name="${_taw_window_dir:t}"
   if [[ -n "$_taw_base_ref" ]]; then
     _taw_resolve_branch_target "$_taw_base_ref" || return 1
-    _taw_prepare_worktree "$_taw_window_dir" "$_taw_window_name" "$_taw_branch_target_ref" || return 1
+    _taw_prepare_worktree "$_taw_window_dir" "$_taw_worktree_branch" "$_taw_branch_target_ref" || return 1
   else
-    _taw_prepare_worktree "$_taw_window_dir" "$_taw_window_name" "" || return 1
+    _taw_prepare_worktree "$_taw_window_dir" "$_taw_worktree_branch" "" || return 1
   fi
 elif [[ "$_taw_is_bare" == true ]]; then
   local _taw_branch_worktree _taw_branch_ref _taw_existing_worktree _taw_skip_prepare_worktree _taw_nonbare_worktree_count
