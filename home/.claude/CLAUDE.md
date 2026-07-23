@@ -46,6 +46,7 @@ Common, already-accepted command-line tools may be treated as part of the practi
 
 - Preserve existing style unless the repository specifies otherwise.
 - Keep names, comments, and docs concrete rather than clever.
+- Use code comments only to answer "why?", and keep them under roughly 100 characters.
 - Prefer explicitness over hidden magic.
 - Minimise irreversible or destructive actions.
 
