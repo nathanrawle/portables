@@ -3066,8 +3066,268 @@ test_peer_links_resolved_bare_worktree() {
     "expected the invoking project branch to remain unchanged"
 }
 
+make_convert_failing_git() {
+  local root="$1"
+  local bin="$root/bin"
+  local real_git
+
+  real_git="$(command -v git)"
+  mkdir -p "$bin"
+  cat >"$bin/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = worktree \
+  && "\${1:-}" = --git-dir && "\${3:-}" = worktree && "\${4:-}" = add \
+  && "\${5:-}" = --no-checkout ]]; then
+  exit 91
+fi
+if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = head \
+  && "\${1:-}" = --git-dir && "\${3:-}" = symbolic-ref && "\${4:-}" = HEAD ]]; then
+  exit 92
+fi
+
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$bin/git"
+  printf '%s\n' "$bin"
+}
+
+test_convert_same_branch_preserves_dirty_state() {
+  local repo fake_bin log before after worktree_count
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  printf '*.ignored\n' >"$repo/.gitignore"
+  git -C "$repo" add .gitignore
+  git -C "$repo" commit -qm "add ignore"
+  printf 'staged\n' >"$repo/staged.txt"
+  git -C "$repo" add staged.txt
+  printf 'dirty\n' >>"$repo/README.md"
+  printf 'untracked\n' >"$repo/untracked.txt"
+  printf 'ignored\n' >"$repo/cache.ignored"
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  after="$(git -C "$repo/main" status --porcelain=v2 --branch --untracked-files=all)"
+  worktree_count="$(git --git-dir "$repo/.git" worktree list --porcelain | grep -c '^worktree ')"
+  assert_eq "$before" "$after" "expected conversion to preserve index and working tree status"
+  assert_eq "true" "$(git --git-dir "$repo/.git" rev-parse --is-bare-repository)" \
+    "expected converted .git directory to be bare"
+  assert_eq "main" "$(git --git-dir "$repo/.git" symbolic-ref --quiet --short HEAD)" \
+    "expected bare HEAD to name the default branch"
+  assert_eq "2" "$worktree_count" "expected bare entry plus one branch worktree"
+  assert_exists "$repo/main/cache.ignored"
+  assert_no_tmux_work_window "$log"
+}
+
+test_convert_non_default_branch_creates_two_worktrees() {
+  local repo fake_bin log before after default_status
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  git -C "$repo" checkout -q develop
+  printf 'staged\n' >"$repo/staged.txt"
+  git -C "$repo" add staged.txt
+  printf 'dirty\n' >>"$repo/develop.txt"
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  after="$(git -C "$repo/develop" status --porcelain=v2 --branch --untracked-files=all)"
+  default_status="$(git -C "$repo/main" status --porcelain --untracked-files=all)"
+  assert_eq "$before" "$after" "expected dirty state on the former current branch"
+  assert_eq "" "$default_status" "expected the default worktree to be clean"
+  assert_eq "develop" "$(git -C "$repo/develop" branch --show-current)" \
+    "expected a current-branch worktree"
+  assert_eq "main" "$(git -C "$repo/main" branch --show-current)" \
+    "expected a default-branch worktree"
+  assert_eq "main" "$(git --git-dir "$repo/.git" symbolic-ref --quiet --short HEAD)" \
+    "expected bare HEAD to name main"
+  assert_no_tmux_work_window "$log"
+}
+
+test_convert_prefers_origin_head_for_default_branch() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  git -C "$repo" config remote.origin.url "$TEST_TMPDIR/origin.git"
+  git -C "$repo" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+  git -C "$repo" update-ref refs/remotes/origin/trunk refs/heads/main
+  git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  git -C "$repo" checkout -q develop
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  assert_exists "$repo/trunk"
+  assert_exists "$repo/develop"
+  assert_eq "trunk" "$(git --git-dir "$repo/.git" symbolic-ref --quiet --short HEAD)" \
+    "expected origin HEAD to take precedence over main"
+  assert_eq "origin/trunk" "$(git -C "$repo/trunk" rev-parse --abbrev-ref '@{upstream}')" \
+    "expected remote-only default branch to track origin"
+  assert_no_tmux_work_window "$log"
+}
+
+test_convert_unborn_repository_preserves_index() {
+  local repo fake_bin log before after
+
+  repo="$TEST_TMPDIR/project"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b topic
+  printf 'staged\n' >"$repo/staged.txt"
+  git -C "$repo" add staged.txt
+  printf 'untracked\n' >"$repo/untracked.txt"
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  after="$(git -C "$repo/topic" status --porcelain=v2 --branch --untracked-files=all)"
+  assert_eq "$before" "$after" "expected an unborn repository's index to be preserved"
+  assert_eq "topic" "$(git -C "$repo/topic" branch --show-current)" \
+    "expected an orphan worktree on the unborn branch"
+  assert_no_tmux_work_window "$log"
+}
+
+test_convert_from_inside_project_follows_current_worktree() {
+  local repo output after
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  mkdir -p "$repo/nested"
+
+  output="$(
+    cd "$repo/nested" || exit 1
+    TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" zsh -fc \
+      'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw --convert "$1" || exit; pwd -P' \
+      taw "$repo"
+  )"
+  after="${output##*$'\n'}"
+
+  assert_eq "$(cd "$repo/main/nested" && pwd -P)" "$after" \
+    "expected the invoking shell to follow the current worktree"
+}
+
+test_convert_rejects_linked_worktrees_before_mutation() {
+  local repo linked fake_bin log before
+
+  repo="$TEST_TMPDIR/project"
+  linked="$TEST_TMPDIR/linked"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add -q "$linked" develop
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" --convert "$repo"; then
+    fail "expected conversion with linked worktrees to fail"
+  fi
+
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected the original repository to remain normal"
+  assert_eq "$before" "$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected rejection before mutation"
+  assert_no_tmux_work_window "$log"
+}
+
+test_convert_worktree_failure_rolls_back() {
+  local repo fake_bin before backups
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  git -C "$repo" checkout -q develop
+  printf 'dirty\n' >>"$repo/develop.txt"
+  printf 'untracked\n' >"$repo/untracked.txt"
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/failing")"
+
+  if TAW_RUN_PATH="$fake_bin:$PATH" run_taw "$TEST_TMPDIR" --convert "$repo"; then
+    fail "expected injected worktree failure"
+  fi
+
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected rollback to restore a normal repository"
+  assert_eq "$before" "$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected rollback to restore dirty state"
+  assert_exists "$repo/develop.txt"
+  assert_exists "$repo/untracked.txt"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected successful rollback to remove its backup"
+}
+
+test_convert_late_failure_restores_original_index() {
+  local repo fake_bin before
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  printf 'staged\n' >"$repo/staged.txt"
+  git -C "$repo" add staged.txt
+  printf 'dirty\n' >>"$repo/README.md"
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/failing")"
+
+  if TAW_CONVERT_FAIL_STAGE=head TAW_RUN_PATH="$fake_bin:$PATH" \
+    run_taw "$TEST_TMPDIR" --convert "$repo"; then
+    fail "expected injected late conversion failure"
+  fi
+
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected late rollback to restore a normal repository"
+  assert_eq "$before" "$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected late rollback to restore staged and unstaged state"
+  assert_exists "$repo/staged.txt"
+}
+
+test_convert_rejects_incompatible_options() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" --convert "$repo" -agent codex; then
+    fail "expected --convert with layout options to fail"
+  fi
+
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected invalid conversion invocation not to mutate the repository"
+  assert_no_tmux_work_window "$log"
+}
+
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
+test_case "taw: convert same branch preserves dirty state" \
+  test_convert_same_branch_preserves_dirty_state
+test_case "taw: convert non-default branch creates two worktrees" \
+  test_convert_non_default_branch_creates_two_worktrees
+test_case "taw: convert prefers origin HEAD for default branch" \
+  test_convert_prefers_origin_head_for_default_branch
+test_case "taw: convert unborn repository preserves index" \
+  test_convert_unborn_repository_preserves_index
+test_case "taw: convert from inside follows current worktree" \
+  test_convert_from_inside_project_follows_current_worktree
+test_case "taw: convert rejects linked worktrees before mutation" \
+  test_convert_rejects_linked_worktrees_before_mutation
+test_case "taw: convert worktree failure rolls back" \
+  test_convert_worktree_failure_rolls_back
+test_case "taw: convert late failure restores original index" \
+  test_convert_late_failure_restores_original_index
+test_case "taw: convert rejects incompatible options" \
+  test_convert_rejects_incompatible_options
 test_case "taw: peer creates in current session" \
   test_peer_creates_window_in_current_session
 test_case "taw: removed peer names are rejected" \
