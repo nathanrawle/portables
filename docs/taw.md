@@ -17,8 +17,8 @@ Relevant options:
 - `-agent`
 - `-ed`, `-editor`
 - `-sh`, `-shell`
-- `--periscope`, `--ps`, `--peri`
-- `--force` (periscope only)
+- `--peer`
+- `--force` (peer only)
 - project picker aliases: `-ts`, `--ts`, `-picker`, `--picker`, `-pick-project`, `--pick-project`
 
 ## Project Kinds
@@ -49,9 +49,9 @@ If no project is supplied and `taw` is not already inside a project:
 
 ## Context-Sensitive Shorthand
 
-- In periscope mode, the first positional always identifies the project; a
+- In peer mode, the first positional always identifies the project; a
   second positional is that project's worktree or branch.
-- Periscope with no positionals still detects the current project.
+- Peer with no positionals still detects the current project.
 - Inside a `normal` project, one positional and no `-b` acts like `-b <branch>`.
 - Outside a project, one positional acts like `-p <project>`.
 - Outside a project, two positionals mean `project` plus one operand.
@@ -179,12 +179,11 @@ Layout on a new window:
 - with an agent and shells: the first shell goes below the agent, later shells split to the right
 - without an agent and with shells: the first shell goes to the right of the editor, later shells split to the right
 
-## Periscope Mode
+## Peer Mode
 
-`--periscope`, `--ps`, and `--peri` preserve normal project, branch, and
-worktree resolution, but put the result in the invoking tmux session instead
-of switching or attaching to the project's session. Periscope must be invoked
-from an active tmux client.
+`--peer` preserves normal project, branch, and worktree resolution, but puts
+the result in the invoking tmux session instead of switching or attaching to
+the project's session. Peer must be invoked from an active tmux client.
 
 Existing windows are searched in this order:
 
@@ -200,7 +199,7 @@ the invoking session.
 
 An existing match conflicts with an explicit `-agent`, `-ed`, or `-sh`, or
 with a non-empty `TAW_AGENT`. Use `--force` to skip all reuse and create a
-fresh layout. `--force` is rejected without periscope mode.
+fresh layout. `--force` is rejected without peer mode.
 
 A linked tmux window shares its panes, processes, name, and lifetime between
 sessions. `unlink-window` removes it from one session; `kill-window` removes
@@ -212,7 +211,7 @@ it from every session to which it is linked.
 taw -p ~/src/repo
 taw -p ~/src/repo feature/foo
 taw -p ~/src/bare feature/foo develop
-taw --periscope sheffield-live hallamshire-hotel-all-day
-taw --periscope --force -p ~/src/repo -agent "claude --resume"
+taw --peer sheffield-live hallamshire-hotel-all-day
+taw --peer --force -p ~/src/repo -agent "claude --resume"
 taw --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
 ```

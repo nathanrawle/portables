@@ -6,7 +6,7 @@ setopt pipefail
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_project_picker_requested _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_agent_arg_provided _taw_editor_arg_provided _taw_agent_enabled _taw_created_repo_branch_applied _taw_debug
-local _taw_agent_env_override _taw_periscope _taw_force _taw_current_session_id
+local _taw_agent_env_override _taw_peer _taw_force _taw_current_session_id
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_project_kind _taw_is_bare
 local _taw_selected_worktree_dir
@@ -28,7 +28,7 @@ _taw_agent_enabled=true
 _taw_created_repo_branch_applied=false
 _taw_debug=false
 _taw_agent_env_override=false
-_taw_periscope=false
+_taw_peer=false
 _taw_force=false
 _taw_current_session_id=
 
@@ -101,7 +101,7 @@ _taw_debug_dump() {
   print -u2 -r -- "_taw_agent_arg_provided=$_taw_agent_arg_provided"
   print -u2 -r -- "_taw_editor_arg_provided=$_taw_editor_arg_provided"
   print -u2 -r -- "_taw_created_repo_branch_applied=$_taw_created_repo_branch_applied"
-  print -u2 -r -- "_taw_periscope=$_taw_periscope"
+  print -u2 -r -- "_taw_peer=$_taw_peer"
   print -u2 -r -- "_taw_force=$_taw_force"
   print -u2 -r -- "_taw_current_session_id='$_taw_current_session_id'"
   print -u2 -r -- "_taw_worktree_arg='$_taw_worktree_arg'"
@@ -616,7 +616,7 @@ _taw_resolve_project() {
     return
   fi
 
-  if [[ "$_taw_periscope" == true && -z "$_taw_project_arg" \
+  if [[ "$_taw_peer" == true && -z "$_taw_project_arg" \
     && ${#_taw_positionals[@]} -gt 0 ]]; then
     _taw_project_arg="${_taw_positionals[1]}"
     if (( ${#_taw_positionals[@]} == 2 )); then
@@ -1392,7 +1392,7 @@ _taw_existing_tmux_window_for_dir() {
   return 0
 }
 
-_taw_periscope_tmux_window_for_dir() {
+_taw_peer_tmux_window_for_dir() {
   local _taw_panes _taw_line _taw_session_id _taw_session _taw_window _taw_pane _taw_pane_path
   local _taw_pane_real _taw_rest _taw_rank _taw_best_rank=99 _taw_best_session_id
   local _taw_best_window _taw_best_pane _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
@@ -1449,7 +1449,7 @@ _taw_periscope_tmux_window_for_dir() {
 _taw_switch_to_tmux_window() {
   local _taw_window_id="$1" _taw_pane_id="${2:-}"
 
-  if [[ "$_taw_periscope" == true ]]; then
+  if [[ "$_taw_peer" == true ]]; then
     tmux select-window -t "$_taw_window_id" || return 1
     if [[ -n "$_taw_pane_id" ]]; then
       tmux select-pane -t "$_taw_pane_id" || return 1
@@ -1482,9 +1482,9 @@ _taw_create_tmux_window() {
   local _taw_shell_anchor_pane
   local _taw_existing_session_id _taw_existing_window_id _taw_existing_pane_id _taw_existing_rest
 
-  if [[ "$_taw_periscope" == true ]]; then
+  if [[ "$_taw_peer" == true ]]; then
     if [[ "$_taw_force" != true ]]; then
-      _taw_existing_window="$(_taw_periscope_tmux_window_for_dir)" \
+      _taw_existing_window="$(_taw_peer_tmux_window_for_dir)" \
         || _taw_existing_window=
     fi
     if [[ -n "$_taw_existing_window" ]]; then
@@ -1598,8 +1598,8 @@ while (( $# > 0 )); do
       _taw_debug=true
       shift
       ;;
-    --periscope|--ps|--peri)
-      _taw_periscope=true
+    --peer)
+      _taw_peer=true
       shift
       ;;
     --force)
@@ -1687,14 +1687,14 @@ done
   return 1
 }
 
-if [[ "$_taw_force" == true && "$_taw_periscope" != true ]]; then
-  _taw_die "--force requires --periscope"
+if [[ "$_taw_force" == true && "$_taw_peer" != true ]]; then
+  _taw_die "--force requires --peer"
   return 1
 fi
 
-if [[ "$_taw_periscope" == true ]]; then
+if [[ "$_taw_peer" == true ]]; then
   [[ -n "${TMUX:-}" ]] || {
-    _taw_die "--periscope requires an active tmux client"
+    _taw_die "--peer requires an active tmux client"
     return 1
   }
   _taw_current_session_id="$(tmux display-message -p '#{session_id}' 2>/dev/null)" || {

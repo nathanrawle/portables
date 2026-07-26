@@ -2732,8 +2732,8 @@ test_project_picker_aliases_allow_agent_editor_and_shells() {
   done
 }
 
-test_periscope_aliases_create_window_in_current_session() {
-  local repo repo_real fake_bin no_fzf_path log alias
+test_peer_creates_window_in_current_session() {
+  local repo repo_real fake_bin no_fzf_path log
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
@@ -2742,22 +2742,39 @@ test_periscope_aliases_create_window_in_current_session() {
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
-  for alias in --periscope --ps --peri; do
-    : >"$log"
-    EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$7' \
-      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-      run_taw "$repo" "$alias" -p "$repo"
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$7' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --peer -p "$repo"
 
-    assert_file_contains "$log" $'display-message\t-p\t#{session_id}'
-    assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$7:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
-    assert_file_contains "$log" $'select-window\t-t\t@1'
-    assert_file_not_contains "$log" $'new-session\t'
-    assert_file_not_contains "$log" $'attach-session\t'
-    assert_file_not_contains "$log" $'switch-client\t'
+  assert_file_contains "$log" $'display-message\t-p\t#{session_id}'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$7:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'select-window\t-t\t@1'
+  assert_file_not_contains "$log" $'new-session\t'
+  assert_file_not_contains "$log" $'attach-session\t'
+  assert_file_not_contains "$log" $'switch-client\t'
+}
+
+test_removed_peer_names_are_rejected() {
+  local repo fake_bin log option output
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+
+  for option in --periscope --ps --peri; do
+    log="$TEST_TMPDIR/tmux-${option#--}.log"
+    if output="$(
+      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+        run_taw "$repo" "$option" -p "$repo" 2>&1
+    )"; then
+      fail "expected removed peer option to fail: $option"
+    fi
+    assert_string_contains "$output" "unknown option: $option"
+    assert_no_tmux_work_window "$log"
   done
 }
 
-test_periscope_requires_current_tmux_before_resolution() {
+test_peer_requires_current_tmux_before_resolution() {
   local repo fake_bin log output branch
 
   repo="$TEST_TMPDIR/repo"
@@ -2768,18 +2785,18 @@ test_periscope_requires_current_tmux_before_resolution() {
 
   if output="$(
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-      run_taw "$repo" --periscope -p "$repo" develop 2>&1
+      run_taw "$repo" --peer -p "$repo" develop 2>&1
   )"; then
-    fail "expected periscope outside tmux to fail"
+    fail "expected peer outside tmux to fail"
   fi
 
   assert_eq "$branch" "$(git -C "$repo" branch --show-current)" \
-    "expected periscope to fail before checkout"
-  assert_string_contains "$output" "--periscope requires an active tmux client"
+    "expected peer to fail before checkout"
+  assert_string_contains "$output" "--peer requires an active tmux client"
   assert_no_tmux_work_window "$log"
 }
 
-test_force_requires_periscope() {
+test_force_requires_peer() {
   local repo fake_bin log output
 
   repo="$TEST_TMPDIR/repo"
@@ -2794,11 +2811,11 @@ test_force_requires_periscope() {
     fail "expected standalone --force to fail"
   fi
 
-  assert_string_contains "$output" "--force requires --periscope"
+  assert_string_contains "$output" "--force requires --peer"
   assert_no_tmux_work_window "$log"
 }
 
-test_periscope_prefers_current_session_descendant_match() {
+test_peer_prefers_current_session_descendant_match() {
   local repo repo_real fake_bin no_fzf_path log panes
 
   repo="$TEST_TMPDIR/repo"
@@ -2815,7 +2832,7 @@ test_periscope_prefers_current_session_descendant_match() {
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$repo" --periscope -p "$repo"
+    run_taw "$repo" --peer -p "$repo"
 
   assert_file_contains "$log" $'select-window\t-t\t@10'
   assert_file_not_contains "$log" $'select-pane\t-t\t%10'
@@ -2823,7 +2840,7 @@ test_periscope_prefers_current_session_descendant_match() {
   assert_file_not_contains "$log" $'new-window\t'
 }
 
-test_periscope_links_project_session_match() {
+test_peer_links_project_session_match() {
   local repo repo_real fake_bin no_fzf_path log panes
 
   repo="$TEST_TMPDIR/repo"
@@ -2838,7 +2855,7 @@ test_periscope_links_project_session_match() {
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$repo" --periscope -p "$repo"
+    run_taw "$repo" --peer -p "$repo"
 
   assert_file_contains "$log" $'link-window\t-d\t-s\t@20\t-t\t$1:'
   assert_file_contains "$log" $'select-window\t-t\t@20'
@@ -2846,7 +2863,7 @@ test_periscope_links_project_session_match() {
   assert_file_not_contains "$log" $'new-window\t'
 }
 
-test_periscope_links_other_session_match() {
+test_peer_links_other_session_match() {
   local repo repo_real fake_bin no_fzf_path log panes
 
   repo="$TEST_TMPDIR/repo"
@@ -2860,14 +2877,14 @@ test_periscope_links_other_session_match() {
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$repo" --periscope -p "$repo"
+    run_taw "$repo" --peer -p "$repo"
 
   assert_file_contains "$log" $'link-window\t-d\t-s\t@30\t-t\t$1:'
   assert_file_contains "$log" $'select-pane\t-t\t%30'
   assert_file_not_contains "$log" $'new-window\t'
 }
 
-test_periscope_layout_conflict_requires_force() {
+test_peer_layout_conflict_requires_force() {
   local repo repo_real fake_bin no_fzf_path log panes output
 
   repo="$TEST_TMPDIR/repo"
@@ -2882,9 +2899,9 @@ test_periscope_layout_conflict_requires_force() {
     EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
       TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
       TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-      run_taw "$repo" --periscope -p "$repo" -ed "nvim ." 2>&1
+      run_taw "$repo" --peer -p "$repo" -ed "nvim ." 2>&1
   )"; then
-    fail "expected periscope layout conflict to fail"
+    fail "expected peer layout conflict to fail"
   fi
 
   assert_string_contains "$output" "use --force to create a fresh layout"
@@ -2895,14 +2912,14 @@ test_periscope_layout_conflict_requires_force() {
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$repo" --periscope --force -p "$repo" -ed "nvim ."
+    run_taw "$repo" --peer --force -p "$repo" -ed "nvim ."
 
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\trepo\t-c\t'"$repo_real"$'\tnvim .'
   assert_file_not_contains "$log" $'list-panes\t-a'
   assert_file_not_contains "$log" $'link-window\t'
 }
 
-test_periscope_taw_agent_conflict_requires_force() {
+test_peer_taw_agent_conflict_requires_force() {
   local repo repo_real fake_bin no_fzf_path log panes output
 
   repo="$TEST_TMPDIR/repo"
@@ -2917,9 +2934,9 @@ test_periscope_taw_agent_conflict_requires_force() {
     TAW_AGENT=claude EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
       TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_ALL_PANES="$panes" \
       TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-      run_taw "$repo" --periscope -p "$repo" 2>&1
+      run_taw "$repo" --peer -p "$repo" 2>&1
   )"; then
-    fail "expected periscope TAW_AGENT conflict to fail"
+    fail "expected peer TAW_AGENT conflict to fail"
   fi
 
   assert_string_contains "$output" "use --force to create a fresh layout"
@@ -2927,7 +2944,7 @@ test_periscope_taw_agent_conflict_requires_force() {
   assert_file_not_contains "$log" $'new-window\t'
 }
 
-test_periscope_normal_branch_resolution_is_unchanged() {
+test_peer_normal_branch_resolution_is_unchanged() {
   local current_repo repo fake_bin no_fzf_path log
 
   current_repo="$TEST_TMPDIR/current"
@@ -2940,17 +2957,17 @@ test_periscope_normal_branch_resolution_is_unchanged() {
 
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$current_repo" --periscope "$repo" develop
+    run_taw "$current_repo" --peer "$repo" develop
 
   assert_eq "develop" "$(git -C "$repo" branch --show-current)" \
-    "expected periscope to preserve normal branch resolution"
+    "expected peer to preserve normal branch resolution"
   assert_eq "main" "$(git -C "$current_repo" branch --show-current)" \
-    "expected periscope not to treat target arguments as current-project branches"
+    "expected peer not to treat target arguments as current-project branches"
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:'
   assert_file_not_contains "$log" $'new-session\t'
 }
 
-test_periscope_single_positional_targets_project_inside_repo() {
+test_peer_single_positional_targets_project_inside_repo() {
   local current_repo target target_real fake_bin no_fzf_path log
 
   current_repo="$TEST_TMPDIR/current"
@@ -2964,12 +2981,12 @@ test_periscope_single_positional_targets_project_inside_repo() {
 
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$current_repo" --periscope "$target"
+    run_taw "$current_repo" --peer "$target"
 
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\ttarget\t-c\t'"$target_real"$'\tvim'
 }
 
-test_periscope_positional_project_accepts_branch_flag() {
+test_peer_positional_project_accepts_branch_flag() {
   local current_repo target fake_bin no_fzf_path log
 
   current_repo="$TEST_TMPDIR/current"
@@ -2982,15 +2999,15 @@ test_periscope_positional_project_accepts_branch_flag() {
 
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$current_repo" --periscope "$target" -b develop
+    run_taw "$current_repo" --peer "$target" -b develop
 
   assert_eq "develop" "$(git -C "$target" branch --show-current)" \
-    "expected -b to apply to the positional periscope project"
+    "expected -b to apply to the positional peer project"
   assert_eq "main" "$(git -C "$current_repo" branch --show-current)" \
     "expected the invoking project branch to remain unchanged"
 }
 
-test_periscope_without_positionals_uses_current_project() {
+test_peer_without_positionals_uses_current_project() {
   local repo repo_real fake_bin no_fzf_path log
 
   repo="$TEST_TMPDIR/repo"
@@ -3002,12 +3019,12 @@ test_periscope_without_positionals_uses_current_project() {
 
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$repo" --periscope
+    run_taw "$repo" --peer
 
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
 }
 
-test_non_periscope_positional_keeps_current_project_branch_shorthand() {
+test_non_peer_positional_keeps_current_project_branch_shorthand() {
   local repo fake_bin log
 
   repo="$TEST_TMPDIR/repo"
@@ -3022,7 +3039,7 @@ test_non_periscope_positional_keeps_current_project_branch_shorthand() {
     "expected ordinary taw positional branch shorthand to remain unchanged"
 }
 
-test_periscope_links_resolved_bare_worktree() {
+test_peer_links_resolved_bare_worktree() {
   local current_repo project worktree worktree_real fake_bin no_fzf_path log panes
 
   current_repo="$TEST_TMPDIR/current"
@@ -3040,7 +3057,7 @@ test_periscope_links_resolved_bare_worktree() {
   PROJECTS_HOME="$TEST_TMPDIR/bare" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
     TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_ALL_PANES="$panes" \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$current_repo" --periscope project hallamshire-hotel-all-day
+    run_taw "$current_repo" --peer project hallamshire-hotel-all-day
 
   assert_file_contains "$log" $'link-window\t-d\t-s\t@20\t-t\t$1:'
   assert_file_contains "$log" $'select-pane\t-t\t%20'
@@ -3051,34 +3068,36 @@ test_periscope_links_resolved_bare_worktree() {
 
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
-test_case "taw: periscope aliases create in current session" \
-  test_periscope_aliases_create_window_in_current_session
-test_case "taw: periscope requires current tmux before resolution" \
-  test_periscope_requires_current_tmux_before_resolution
-test_case "taw: force requires periscope" \
-  test_force_requires_periscope
-test_case "taw: periscope prefers current session descendant match" \
-  test_periscope_prefers_current_session_descendant_match
-test_case "taw: periscope links project session match" \
-  test_periscope_links_project_session_match
-test_case "taw: periscope links other session match" \
-  test_periscope_links_other_session_match
-test_case "taw: periscope layout conflict requires force" \
-  test_periscope_layout_conflict_requires_force
-test_case "taw: periscope TAW_AGENT conflict requires force" \
-  test_periscope_taw_agent_conflict_requires_force
-test_case "taw: periscope preserves normal branch resolution" \
-  test_periscope_normal_branch_resolution_is_unchanged
-test_case "taw: periscope single positional targets project inside repo" \
-  test_periscope_single_positional_targets_project_inside_repo
-test_case "taw: periscope positional project accepts branch flag" \
-  test_periscope_positional_project_accepts_branch_flag
-test_case "taw: periscope without positionals uses current project" \
-  test_periscope_without_positionals_uses_current_project
+test_case "taw: peer creates in current session" \
+  test_peer_creates_window_in_current_session
+test_case "taw: removed peer names are rejected" \
+  test_removed_peer_names_are_rejected
+test_case "taw: peer requires current tmux before resolution" \
+  test_peer_requires_current_tmux_before_resolution
+test_case "taw: force requires peer" \
+  test_force_requires_peer
+test_case "taw: peer prefers current session descendant match" \
+  test_peer_prefers_current_session_descendant_match
+test_case "taw: peer links project session match" \
+  test_peer_links_project_session_match
+test_case "taw: peer links other session match" \
+  test_peer_links_other_session_match
+test_case "taw: peer layout conflict requires force" \
+  test_peer_layout_conflict_requires_force
+test_case "taw: peer TAW_AGENT conflict requires force" \
+  test_peer_taw_agent_conflict_requires_force
+test_case "taw: peer preserves normal branch resolution" \
+  test_peer_normal_branch_resolution_is_unchanged
+test_case "taw: peer single positional targets project inside repo" \
+  test_peer_single_positional_targets_project_inside_repo
+test_case "taw: peer positional project accepts branch flag" \
+  test_peer_positional_project_accepts_branch_flag
+test_case "taw: peer without positionals uses current project" \
+  test_peer_without_positionals_uses_current_project
 test_case "taw: ordinary positional keeps current project branch shorthand" \
-  test_non_periscope_positional_keeps_current_project_branch_shorthand
-test_case "taw: periscope links resolved bare worktree" \
-  test_periscope_links_resolved_bare_worktree
+  test_non_peer_positional_keeps_current_project_branch_shorthand
+test_case "taw: peer links resolved bare worktree" \
+  test_peer_links_resolved_bare_worktree
 test_case "taw: TAW_AGENT whitespace defaults to codex" \
   test_taw_agent_whitespace_only_defaults_to_codex
 test_case "taw: TAW_AGENT env override trims whitespace" \
