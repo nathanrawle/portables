@@ -3204,6 +3204,36 @@ test_convert_unborn_repository_preserves_index() {
   assert_no_tmux_work_window "$log"
 }
 
+test_convert_rejects_unborn_remote_default_collision() {
+  local source repo fake_bin log before
+
+  source="$TEST_TMPDIR/source"
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$source"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  git -C "$repo" remote add origin "$source"
+  git -C "$repo" fetch -q origin main
+  git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  printf 'staged\n' >"$repo/staged.txt"
+  git -C "$repo" add staged.txt
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" --convert "$repo"; then
+    fail "expected unborn current branch and remote default collision to fail"
+  fi
+
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected collision rejection to leave a normal repository"
+  assert_eq "$before" "$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected collision rejection before mutation"
+  assert_not_exists "$repo/main"
+  assert_no_tmux_work_window "$log"
+}
+
 test_convert_from_inside_project_follows_current_worktree() {
   local repo output after
 
@@ -3221,6 +3251,28 @@ test_convert_from_inside_project_follows_current_worktree() {
 
   assert_eq "$(cd "$repo/main/nested" && pwd -P)" "$after" \
     "expected the invoking shell to follow the current worktree"
+}
+
+test_convert_from_git_dir_stays_in_bare_git_dir() {
+  local repo git_cwd output after
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  git_cwd="$(cd "$repo/.git/objects" && pwd -P)"
+
+  output="$(
+    cd "$git_cwd" || exit 1
+    TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" zsh -fc \
+      'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw --convert "$1" || exit; pwd -P' \
+      taw "$repo"
+  )"
+  after="${output##*$'\n'}"
+
+  assert_eq "$git_cwd" "$after" \
+    "expected a caller under .git to remain in the retained bare git directory"
+  assert_eq "true" "$(git --git-dir "$repo/.git" rev-parse --is-bare-repository)" \
+    "expected conversion from .git to succeed"
+  assert_exists "$repo/main"
 }
 
 test_convert_rejects_linked_worktrees_before_mutation() {
@@ -3358,8 +3410,12 @@ test_case "taw: convert prefers origin HEAD for default branch" \
   test_convert_prefers_origin_head_for_default_branch
 test_case "taw: convert unborn repository preserves index" \
   test_convert_unborn_repository_preserves_index
+test_case "taw: convert rejects unborn remote default collision" \
+  test_convert_rejects_unborn_remote_default_collision
 test_case "taw: convert from inside follows current worktree" \
   test_convert_from_inside_project_follows_current_worktree
+test_case "taw: convert from .git stays in bare git directory" \
+  test_convert_from_git_dir_stays_in_bare_git_dir
 test_case "taw: convert rejects linked worktrees before mutation" \
   test_convert_rejects_linked_worktrees_before_mutation
 test_case "taw: convert worktree failure rolls back" \
