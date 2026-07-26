@@ -6,7 +6,7 @@ setopt pipefail
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_project_picker_requested _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_agent_arg_provided _taw_editor_arg_provided _taw_agent_enabled _taw_created_repo_branch_applied _taw_debug
-local _taw_agent_env_override
+local _taw_agent_env_override _taw_peer _taw_force _taw_current_session_id
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_project_kind _taw_is_bare
 local _taw_selected_worktree_dir
@@ -28,6 +28,9 @@ _taw_agent_enabled=true
 _taw_created_repo_branch_applied=false
 _taw_debug=false
 _taw_agent_env_override=false
+_taw_peer=false
+_taw_force=false
+_taw_current_session_id=
 
 _taw_die() {
   print -u2 -- "taw: $*"
@@ -98,6 +101,9 @@ _taw_debug_dump() {
   print -u2 -r -- "_taw_agent_arg_provided=$_taw_agent_arg_provided"
   print -u2 -r -- "_taw_editor_arg_provided=$_taw_editor_arg_provided"
   print -u2 -r -- "_taw_created_repo_branch_applied=$_taw_created_repo_branch_applied"
+  print -u2 -r -- "_taw_peer=$_taw_peer"
+  print -u2 -r -- "_taw_force=$_taw_force"
+  print -u2 -r -- "_taw_current_session_id='$_taw_current_session_id'"
   print -u2 -r -- "_taw_worktree_arg='$_taw_worktree_arg'"
   print -u2 -r -- "_taw_base_ref='$_taw_base_ref'"
   print -u2 -r -- "_taw_window_dir='$_taw_window_dir'"
@@ -608,6 +614,16 @@ _taw_resolve_project() {
     fi
     _taw_resolve_project_from_picker
     return
+  fi
+
+  if [[ "$_taw_peer" == true && -z "$_taw_project_arg" \
+    && ${#_taw_positionals[@]} -gt 0 ]]; then
+    _taw_project_arg="${_taw_positionals[1]}"
+    if (( ${#_taw_positionals[@]} == 2 )); then
+      _taw_positionals=( "${_taw_positionals[2]}" )
+    else
+      _taw_positionals=()
+    fi
   fi
 
   if [[ -z "$_taw_project_arg" ]]; then
@@ -1376,10 +1392,69 @@ _taw_existing_tmux_window_for_dir() {
   return 0
 }
 
+_taw_peer_tmux_window_for_dir() {
+  local _taw_panes _taw_line _taw_session_id _taw_session _taw_window _taw_pane _taw_pane_path
+  local _taw_pane_real _taw_rest _taw_rank _taw_best_rank=99 _taw_best_session_id
+  local _taw_best_window _taw_best_pane _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
+
+  _taw_panes="$(tmux list-panes -a \
+    -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}	#{pane_current_path}' \
+    2>/dev/null)" || return 1
+
+  for _taw_line in "${(@f)_taw_panes}"; do
+    _taw_session_id="${_taw_line%%${_taw_tab}*}"
+    _taw_rest="${_taw_line#*${_taw_tab}}"
+    _taw_session="${_taw_rest%%${_taw_tab}*}"
+    _taw_rest="${_taw_rest#*${_taw_tab}}"
+    _taw_window="${_taw_rest%%${_taw_tab}*}"
+    _taw_rest="${_taw_rest#*${_taw_tab}}"
+    _taw_pane="${_taw_rest%%${_taw_tab}*}"
+    _taw_pane_path="${_taw_rest#*${_taw_tab}}"
+    [[ -n "$_taw_session_id" && -n "$_taw_session" && -n "$_taw_window" \
+      && -n "$_taw_pane" && -d "$_taw_pane_path" ]] || continue
+
+    _taw_pane_real="${_taw_pane_path:A}"
+    if [[ "$_taw_session_id" == "$_taw_current_session_id" ]]; then
+      _taw_rank=0
+    elif [[ "$_taw_session_id" == "$_taw_session_target" \
+      || "$_taw_session" == "$_taw_session_target" ]]; then
+      _taw_rank=2
+    else
+      _taw_rank=4
+    fi
+
+    if [[ "$_taw_pane_real" == "$_taw_target_dir" ]]; then
+      :
+    elif [[ "$_taw_pane_real" == "$_taw_target_dir"/* ]]; then
+      _taw_rank=$((_taw_rank + 1))
+    else
+      continue
+    fi
+
+    (( _taw_rank < _taw_best_rank )) || continue
+    _taw_best_rank="$_taw_rank"
+    _taw_best_session_id="$_taw_session_id"
+    _taw_best_window="$_taw_window"
+    if (( _taw_rank % 2 == 0 )); then
+      _taw_best_pane="$_taw_pane"
+    else
+      _taw_best_pane=
+    fi
+  done
+
+  [[ -n "$_taw_best_window" ]] || return 1
+  print -r -- "$_taw_best_session_id	$_taw_best_window	$_taw_best_pane"
+}
+
 _taw_switch_to_tmux_window() {
   local _taw_window_id="$1" _taw_pane_id="${2:-}"
 
-  if [[ -n "${TMUX:-}" ]]; then
+  if [[ "$_taw_peer" == true ]]; then
+    tmux select-window -t "$_taw_window_id" || return 1
+    if [[ -n "$_taw_pane_id" ]]; then
+      tmux select-pane -t "$_taw_pane_id" || return 1
+    fi
+  elif [[ -n "${TMUX:-}" ]]; then
     tmux switch-client -t "$_taw_session_target" || return 1
     tmux select-window -t "$_taw_window_id" || return 1
     if [[ -n "$_taw_pane_id" ]]; then
@@ -1405,9 +1480,37 @@ _taw_create_tmux_window() {
   local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_editor_pane
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
   local _taw_shell_anchor_pane
-  local _taw_existing_window_id _taw_existing_pane_id
+  local _taw_existing_session_id _taw_existing_window_id _taw_existing_pane_id _taw_existing_rest
 
-  if tmux has-session -t "$_taw_session_target" 2>/dev/null; then
+  if [[ "$_taw_peer" == true ]]; then
+    if [[ "$_taw_force" != true ]]; then
+      _taw_existing_window="$(_taw_peer_tmux_window_for_dir)" \
+        || _taw_existing_window=
+    fi
+    if [[ -n "$_taw_existing_window" ]]; then
+      _taw_existing_session_id="${_taw_existing_window%%$'\t'*}"
+      _taw_existing_rest="${_taw_existing_window#*$'\t'}"
+      _taw_existing_window_id="${_taw_existing_rest%%$'\t'*}"
+      _taw_existing_pane_id="${_taw_existing_rest#*$'\t'}"
+      [[ "$_taw_existing_pane_id" == "$_taw_existing_rest" ]] && _taw_existing_pane_id=
+
+      if ! _taw_can_reuse_existing_window; then
+        _taw_die "matching tmux window already exists; use --force to create a fresh layout"
+        return 1
+      fi
+
+      if [[ "$_taw_existing_session_id" != "$_taw_current_session_id" ]]; then
+        tmux link-window -d -s "$_taw_existing_window_id" \
+          -t "$_taw_current_session_id:" || return 1
+      fi
+      _taw_switch_to_tmux_window "$_taw_existing_window_id" "$_taw_existing_pane_id"
+      return
+    fi
+
+    _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
+      -t "$_taw_current_session_id:" -n "$_taw_window_name" -c "$_taw_window_dir" \
+      "$_taw_editor_cmd")" || return 1
+  elif tmux has-session -t "$_taw_session_target" 2>/dev/null; then
     if _taw_can_reuse_existing_window && _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
       _taw_existing_window_id="${_taw_existing_window%%$'\t'*}"
       if [[ "$_taw_existing_window" == *$'\t'* ]]; then
@@ -1495,6 +1598,14 @@ while (( $# > 0 )); do
       _taw_debug=true
       shift
       ;;
+    --peer)
+      _taw_peer=true
+      shift
+      ;;
+    --force)
+      _taw_force=true
+      shift
+      ;;
     -ts|--ts|-picker|--picker|-pick-project|--pick-project)
       _taw_project_picker_requested=true
       shift
@@ -1575,6 +1686,26 @@ done
   _taw_die "expected at most worktree and branch positional arguments"
   return 1
 }
+
+if [[ "$_taw_force" == true && "$_taw_peer" != true ]]; then
+  _taw_die "--force requires --peer"
+  return 1
+fi
+
+if [[ "$_taw_peer" == true ]]; then
+  [[ -n "${TMUX:-}" ]] || {
+    _taw_die "--peer requires an active tmux client"
+    return 1
+  }
+  _taw_current_session_id="$(tmux display-message -p '#{session_id}' 2>/dev/null)" || {
+    _taw_die "could not resolve current tmux session"
+    return 1
+  }
+  [[ -n "$_taw_current_session_id" ]] || {
+    _taw_die "could not resolve current tmux session"
+    return 1
+  }
+fi
 
 if [[ -z "$_taw_editor_cmd" ]]; then
   if [[ -n "${EDITOR:-}" ]]; then
