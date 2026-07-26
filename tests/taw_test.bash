@@ -3086,6 +3086,12 @@ if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = head \
   && "\${1:-}" = --git-dir && "\${3:-}" = symbolic-ref && "\${4:-}" = HEAD ]]; then
   exit 92
 fi
+if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = concurrent \
+  && "\${1:-}" = --git-dir && "\${3:-}" = symbolic-ref && "\${4:-}" = HEAD ]]; then
+  "$real_git" "\$@"
+  printf 'concurrent\n' >"\${TAW_CONCURRENT_FILE:?}"
+  exit 0
+fi
 
 exec "$real_git" "\$@"
 EOF
@@ -3308,6 +3314,22 @@ test_convert_ignores_stale_rebase_head() {
   assert_no_tmux_work_window "$log"
 }
 
+test_convert_preserves_concurrent_new_change() {
+  local repo fake_bin
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/concurrent")"
+
+  TAW_CONVERT_FAIL_STAGE=concurrent TAW_CONCURRENT_FILE="$repo/main/concurrent.txt" \
+    TAW_RUN_PATH="$fake_bin:$PATH" run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  assert_exists "$repo/main/concurrent.txt"
+  assert_eq "? concurrent.txt" \
+    "$(git -C "$repo/main" status --porcelain=v2 --untracked-files=all)" \
+    "expected a concurrent new change to survive conversion"
+}
+
 test_convert_rejects_incompatible_options() {
   local repo fake_bin log
 
@@ -3346,6 +3368,8 @@ test_case "taw: convert late failure restores original index" \
   test_convert_late_failure_restores_original_index
 test_case "taw: convert ignores stale REBASE_HEAD" \
   test_convert_ignores_stale_rebase_head
+test_case "taw: convert preserves concurrent new change" \
+  test_convert_preserves_concurrent_new_change
 test_case "taw: convert rejects incompatible options" \
   test_convert_rejects_incompatible_options
 test_case "taw: peer creates in current session" \

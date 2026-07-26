@@ -1119,6 +1119,20 @@ _taw_conversion_default_branch() {
   _taw_default_base_ref="$_taw_current_branch"
 }
 
+_taw_status_records_preserved() {
+  local _taw_before="$1" _taw_after="$2" _taw_record
+  local -A _taw_after_records
+
+  for _taw_record in "${(@f)_taw_after}"; do
+    [[ -n "$_taw_record" ]] || continue
+    _taw_after_records[$_taw_record]=1
+  done
+  for _taw_record in "${(@f)_taw_before}"; do
+    [[ -n "$_taw_record" ]] || continue
+    [[ -n "${_taw_after_records[$_taw_record]-}" ]] || return 1
+  done
+}
+
 _taw_move_worktree_entries() {
   local _taw_source="$1" _taw_dest="$2" _taw_entry
   local -a _taw_entries
@@ -1408,8 +1422,14 @@ _taw_convert_project() {
   if [[ -z "$_taw_failure" ]]; then
     _taw_after_status="$(git -C "$_taw_current_path" status --porcelain=v2 --untracked-files=all)" \
       || _taw_failure="could not verify the current worktree"
-    [[ -n "$_taw_failure" || "$_taw_after_status" == "$_taw_before_status" ]] \
-      || _taw_failure="current worktree status changed during conversion"
+    if [[ -z "$_taw_failure" ]] \
+      && ! _taw_status_records_preserved "$_taw_before_status" "$_taw_after_status"; then
+      print -u2 -r -- "taw: status before conversion:"
+      print -u2 -r -- "$_taw_before_status"
+      print -u2 -r -- "taw: status after conversion:"
+      print -u2 -r -- "$_taw_after_status"
+      _taw_failure="current worktree status changed during conversion"
+    fi
   fi
   if [[ -z "$_taw_failure" ]]; then
     _taw_current_branch_after="$(git -C "$_taw_current_path" \
