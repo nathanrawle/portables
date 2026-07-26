@@ -1208,7 +1208,7 @@ _taw_convert_project() {
   local _taw_operation_path _taw_lock_file _taw_backup _taw_current_git_dir
   local _taw_saved_pwd _taw_caller_relative _taw_default_created=false
   local _taw_default_added=false _taw_current_added=false
-  local _taw_failure= _taw_head_after
+  local _taw_failure= _taw_head_after _taw_current_branch_after
   local -a _taw_operation_names _taw_modules
 
   [[ "$_taw_project_kind" == normal ]] || {
@@ -1305,7 +1305,7 @@ _taw_convert_project() {
 
   _taw_current_commit="$(git -C "$_taw_project_root" rev-parse --verify --quiet HEAD^{commit} 2>/dev/null)" \
     || _taw_current_commit=
-  _taw_before_status="$(git -C "$_taw_project_root" status --porcelain=v2 --branch --untracked-files=all)" \
+  _taw_before_status="$(git -C "$_taw_project_root" status --porcelain=v2 --untracked-files=all)" \
     || return 1
   _taw_saved_pwd="$(pwd -P)" || return 1
   if [[ "$_taw_saved_pwd" == "$_taw_project_root" ]]; then
@@ -1406,10 +1406,17 @@ _taw_convert_project() {
       || _taw_failure="converted repository is not bare"
   fi
   if [[ -z "$_taw_failure" ]]; then
-    _taw_after_status="$(git -C "$_taw_current_path" status --porcelain=v2 --branch --untracked-files=all)" \
+    _taw_after_status="$(git -C "$_taw_current_path" status --porcelain=v2 --untracked-files=all)" \
       || _taw_failure="could not verify the current worktree"
     [[ -n "$_taw_failure" || "$_taw_after_status" == "$_taw_before_status" ]] \
       || _taw_failure="current worktree status changed during conversion"
+  fi
+  if [[ -z "$_taw_failure" ]]; then
+    _taw_current_branch_after="$(git -C "$_taw_current_path" \
+      symbolic-ref --quiet --short HEAD 2>/dev/null)" \
+      || _taw_failure="could not verify the current worktree branch"
+    [[ -n "$_taw_failure" || "$_taw_current_branch_after" == "$_taw_current_branch" ]] \
+      || _taw_failure="current worktree branch changed during conversion"
   fi
   if [[ -z "$_taw_failure" && "$_taw_default_path" != "$_taw_current_path" ]]; then
     _taw_default_status="$(git -C "$_taw_default_path" status --porcelain --untracked-files=all)" \
