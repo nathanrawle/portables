@@ -49,6 +49,9 @@ If no project is supplied and `taw` is not already inside a project:
 
 ## Context-Sensitive Shorthand
 
+- In periscope mode, the first positional always identifies the project; a
+  second positional is that project's worktree or branch.
+- Periscope with no positionals still detects the current project.
 - Inside a `normal` project, one positional and no `-b` acts like `-b <branch>`.
 - Outside a project, one positional acts like `-p <project>`.
 - Outside a project, two positionals mean `project` plus one operand.

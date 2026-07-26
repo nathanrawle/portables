@@ -616,6 +616,16 @@ _taw_resolve_project() {
     return
   fi
 
+  if [[ "$_taw_periscope" == true && -z "$_taw_project_arg" \
+    && ${#_taw_positionals[@]} -gt 0 ]]; then
+    _taw_project_arg="${_taw_positionals[1]}"
+    if (( ${#_taw_positionals[@]} == 2 )); then
+      _taw_positionals=( "${_taw_positionals[2]}" )
+    else
+      _taw_positionals=()
+    fi
+  fi
+
   if [[ -z "$_taw_project_arg" ]]; then
     if _taw_detect_current_project; then
       return 0

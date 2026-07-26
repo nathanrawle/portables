@@ -2928,28 +2928,105 @@ test_periscope_taw_agent_conflict_requires_force() {
 }
 
 test_periscope_normal_branch_resolution_is_unchanged() {
-  local repo fake_bin no_fzf_path log
+  local current_repo repo fake_bin no_fzf_path log
 
+  current_repo="$TEST_TMPDIR/current"
   repo="$TEST_TMPDIR/repo"
+  make_git_repo "$current_repo"
   make_git_repo "$repo"
-  mkdir -p "$TEST_TMPDIR/elsewhere"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$TEST_TMPDIR/elsewhere" --periscope "$repo" develop
+    run_taw "$current_repo" --periscope "$repo" develop
 
   assert_eq "develop" "$(git -C "$repo" branch --show-current)" \
     "expected periscope to preserve normal branch resolution"
+  assert_eq "main" "$(git -C "$current_repo" branch --show-current)" \
+    "expected periscope not to treat target arguments as current-project branches"
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:'
   assert_file_not_contains "$log" $'new-session\t'
 }
 
-test_periscope_links_resolved_bare_worktree() {
-  local project worktree worktree_real fake_bin no_fzf_path log panes
+test_periscope_single_positional_targets_project_inside_repo() {
+  local current_repo target target_real fake_bin no_fzf_path log
 
+  current_repo="$TEST_TMPDIR/current"
+  target="$TEST_TMPDIR/target"
+  make_git_repo "$current_repo"
+  make_git_repo "$target"
+  target_real="$(cd "$target" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$current_repo" --periscope "$target"
+
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\ttarget\t-c\t'"$target_real"$'\tvim'
+}
+
+test_periscope_positional_project_accepts_branch_flag() {
+  local current_repo target fake_bin no_fzf_path log
+
+  current_repo="$TEST_TMPDIR/current"
+  target="$TEST_TMPDIR/target"
+  make_git_repo "$current_repo"
+  make_git_repo "$target"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$current_repo" --periscope "$target" -b develop
+
+  assert_eq "develop" "$(git -C "$target" branch --show-current)" \
+    "expected -b to apply to the positional periscope project"
+  assert_eq "main" "$(git -C "$current_repo" branch --show-current)" \
+    "expected the invoking project branch to remain unchanged"
+}
+
+test_periscope_without_positionals_uses_current_project() {
+  local repo repo_real fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --periscope
+
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+}
+
+test_non_periscope_positional_keeps_current_project_branch_shorthand() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" develop
+
+  assert_eq "develop" "$(git -C "$repo" branch --show-current)" \
+    "expected ordinary taw positional branch shorthand to remain unchanged"
+}
+
+test_periscope_links_resolved_bare_worktree() {
+  local current_repo project worktree worktree_real fake_bin no_fzf_path log panes
+
+  current_repo="$TEST_TMPDIR/current"
+  make_git_repo "$current_repo"
   project="$(make_bare_wrapper "$TEST_TMPDIR/bare")"
   git --git-dir "$project/.git" worktree add -b hallamshire-hotel-all-day \
     "$project/hallamshire-hotel-all-day" develop >/dev/null 2>&1
@@ -2960,14 +3037,16 @@ test_periscope_links_resolved_bare_worktree() {
   log="$TEST_TMPDIR/tmux.log"
   panes=$'$2\tproject\t@20\t%20\t'"$worktree_real"$'\n'
 
-  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
-    TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
-    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$TEST_TMPDIR" --periscope "$project" hallamshire-hotel-all-day
+  PROJECTS_HOME="$TEST_TMPDIR/bare" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
+    TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_ALL_PANES="$panes" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$current_repo" --periscope project hallamshire-hotel-all-day
 
   assert_file_contains "$log" $'link-window\t-d\t-s\t@20\t-t\t$1:'
   assert_file_contains "$log" $'select-pane\t-t\t%20'
   assert_file_not_contains "$log" $'new-window\t'
+  assert_eq "main" "$(git -C "$current_repo" branch --show-current)" \
+    "expected the invoking project branch to remain unchanged"
 }
 
 test_case "taw: creates tmux layout with overrides and shell panes" \
@@ -2990,6 +3069,14 @@ test_case "taw: periscope TAW_AGENT conflict requires force" \
   test_periscope_taw_agent_conflict_requires_force
 test_case "taw: periscope preserves normal branch resolution" \
   test_periscope_normal_branch_resolution_is_unchanged
+test_case "taw: periscope single positional targets project inside repo" \
+  test_periscope_single_positional_targets_project_inside_repo
+test_case "taw: periscope positional project accepts branch flag" \
+  test_periscope_positional_project_accepts_branch_flag
+test_case "taw: periscope without positionals uses current project" \
+  test_periscope_without_positionals_uses_current_project
+test_case "taw: ordinary positional keeps current project branch shorthand" \
+  test_non_periscope_positional_keeps_current_project_branch_shorthand
 test_case "taw: periscope links resolved bare worktree" \
   test_periscope_links_resolved_bare_worktree
 test_case "taw: TAW_AGENT whitespace defaults to codex" \
