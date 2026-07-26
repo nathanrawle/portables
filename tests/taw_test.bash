@@ -29,12 +29,23 @@ assert_string_not_contains() {
   esac
 }
 
+assert_string_contains() {
+  local value="$1"
+  local expected="$2"
+
+  case "$value" in
+    *"$expected"*) ;;
+    *) fail "expected string to contain: $expected" ;;
+  esac
+}
+
 assert_no_tmux_work_window() {
   local path="$1"
 
   [[ -f "$path" ]] || return 0
   assert_file_not_contains "$path" $'new-session\t'
   assert_file_not_contains "$path" $'new-window\t'
+  assert_file_not_contains "$path" $'link-window\t'
   assert_file_not_contains "$path" $'attach-session\t'
   assert_file_not_contains "$path" $'switch-client\t'
 }
@@ -89,9 +100,13 @@ case "${1:-}" in
     exit 1
     ;;
   list-panes)
-    [[ -n "${TAW_FAKE_TMUX_PANES+x}" ]] || exit 1
-    printf '%b' "$TAW_FAKE_TMUX_PANES"
-    [[ "$TAW_FAKE_TMUX_PANES" = *$'\n' ]] || printf '\n'
+    panes="${TAW_FAKE_TMUX_PANES-}"
+    if [[ " $* " = *" -a "* ]]; then
+      panes="${TAW_FAKE_TMUX_ALL_PANES-}"
+    fi
+    [[ -n "$panes" ]] || exit 1
+    printf '%b' "$panes"
+    [[ "$panes" = *$'\n' ]] || printf '\n'
     ;;
   list-sessions)
     [[ -n "${TAW_FAKE_TMUX_SESSIONS+x}" ]] || exit 1
@@ -163,6 +178,13 @@ case "${1:-}" in
     count=$((count + 1))
     printf '%s\n' "$count" >"$count_file"
     printf '%%%d\n' "$count"
+    ;;
+  display-message)
+    if [[ "$*" = *'#{session_id}'* ]]; then
+      printf '%s\n' "${TAW_FAKE_TMUX_CURRENT_SESSION_ID:-\$1}"
+    elif [[ "$*" = *'#S'* ]]; then
+      printf '%s\n' "${TAW_FAKE_TMUX_CURRENT_SESSION_NAME:-current}"
+    fi
     ;;
 esac
 EOF
@@ -330,7 +352,7 @@ run_taw() {
     cd "$cwd" || exit 1
     TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" \
       PATH="$taw_path" \
-      TMUX= \
+      TMUX="${TAW_TEST_TMUX:-}" \
       zsh -fc 'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw "$@"' taw "$@"
   )
 }
@@ -2710,8 +2732,266 @@ test_project_picker_aliases_allow_agent_editor_and_shells() {
   done
 }
 
+test_periscope_aliases_create_window_in_current_session() {
+  local repo repo_real fake_bin no_fzf_path log alias
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  for alias in --periscope --ps --peri; do
+    : >"$log"
+    EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$7' \
+      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$repo" "$alias" -p "$repo"
+
+    assert_file_contains "$log" $'display-message\t-p\t#{session_id}'
+    assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$7:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+    assert_file_contains "$log" $'select-window\t-t\t@1'
+    assert_file_not_contains "$log" $'new-session\t'
+    assert_file_not_contains "$log" $'attach-session\t'
+    assert_file_not_contains "$log" $'switch-client\t'
+  done
+}
+
+test_periscope_requires_current_tmux_before_resolution() {
+  local repo fake_bin log output branch
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  branch="$(git -C "$repo" branch --show-current)"
+
+  if output="$(
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$repo" --periscope -p "$repo" develop 2>&1
+  )"; then
+    fail "expected periscope outside tmux to fail"
+  fi
+
+  assert_eq "$branch" "$(git -C "$repo" branch --show-current)" \
+    "expected periscope to fail before checkout"
+  assert_string_contains "$output" "--periscope requires an active tmux client"
+  assert_no_tmux_work_window "$log"
+}
+
+test_force_requires_periscope() {
+  local repo fake_bin log output
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if output="$(
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$repo" --force -p "$repo" 2>&1
+  )"; then
+    fail "expected standalone --force to fail"
+  fi
+
+  assert_string_contains "$output" "--force requires --periscope"
+  assert_no_tmux_work_window "$log"
+}
+
+test_periscope_prefers_current_session_descendant_match() {
+  local repo repo_real fake_bin no_fzf_path log panes
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  mkdir -p "$repo/src"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'$3\tother\t@30\t%30\t'"$repo_real"$'\n'
+  panes+=$'$2\trepo\t@20\t%20\t'"$repo_real"$'\n'
+  panes+=$'$1\tcurrent\t@10\t%10\t'"$repo_real"$'/src\n'
+
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --periscope -p "$repo"
+
+  assert_file_contains "$log" $'select-window\t-t\t@10'
+  assert_file_not_contains "$log" $'select-pane\t-t\t%10'
+  assert_file_not_contains "$log" $'link-window\t'
+  assert_file_not_contains "$log" $'new-window\t'
+}
+
+test_periscope_links_project_session_match() {
+  local repo repo_real fake_bin no_fzf_path log panes
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'$3\tother\t@30\t%30\t'"$repo_real"$'\n'
+  panes+=$'$2\trepo\t@20\t%20\t'"$repo_real"$'\n'
+
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --periscope -p "$repo"
+
+  assert_file_contains "$log" $'link-window\t-d\t-s\t@20\t-t\t$1:'
+  assert_file_contains "$log" $'select-window\t-t\t@20'
+  assert_file_contains "$log" $'select-pane\t-t\t%20'
+  assert_file_not_contains "$log" $'new-window\t'
+}
+
+test_periscope_links_other_session_match() {
+  local repo repo_real fake_bin no_fzf_path log panes
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'$3\tunrelated\t@30\t%30\t'"$repo_real"$'\n'
+
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --periscope -p "$repo"
+
+  assert_file_contains "$log" $'link-window\t-d\t-s\t@30\t-t\t$1:'
+  assert_file_contains "$log" $'select-pane\t-t\t%30'
+  assert_file_not_contains "$log" $'new-window\t'
+}
+
+test_periscope_layout_conflict_requires_force() {
+  local repo repo_real fake_bin no_fzf_path log panes output
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'$2\trepo\t@20\t%20\t'"$repo_real"$'\n'
+
+  if output="$(
+    EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+      TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+      TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$repo" --periscope -p "$repo" -ed "nvim ." 2>&1
+  )"; then
+    fail "expected periscope layout conflict to fail"
+  fi
+
+  assert_string_contains "$output" "use --force to create a fresh layout"
+  assert_file_not_contains "$log" $'link-window\t'
+  assert_file_not_contains "$log" $'new-window\t'
+
+  : >"$log"
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --periscope --force -p "$repo" -ed "nvim ."
+
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\trepo\t-c\t'"$repo_real"$'\tnvim .'
+  assert_file_not_contains "$log" $'list-panes\t-a'
+  assert_file_not_contains "$log" $'link-window\t'
+}
+
+test_periscope_taw_agent_conflict_requires_force() {
+  local repo repo_real fake_bin no_fzf_path log panes output
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'$2\trepo\t@20\t%20\t'"$repo_real"$'\n'
+
+  if output="$(
+    TAW_AGENT=claude EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
+      TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_ALL_PANES="$panes" \
+      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$repo" --periscope -p "$repo" 2>&1
+  )"; then
+    fail "expected periscope TAW_AGENT conflict to fail"
+  fi
+
+  assert_string_contains "$output" "use --force to create a fresh layout"
+  assert_file_not_contains "$log" $'link-window\t'
+  assert_file_not_contains "$log" $'new-window\t'
+}
+
+test_periscope_normal_branch_resolution_is_unchanged() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$TEST_TMPDIR/elsewhere" --periscope "$repo" develop
+
+  assert_eq "develop" "$(git -C "$repo" branch --show-current)" \
+    "expected periscope to preserve normal branch resolution"
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:'
+  assert_file_not_contains "$log" $'new-session\t'
+}
+
+test_periscope_links_resolved_bare_worktree() {
+  local project worktree worktree_real fake_bin no_fzf_path log panes
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR/bare")"
+  git --git-dir "$project/.git" worktree add -b hallamshire-hotel-all-day \
+    "$project/hallamshire-hotel-all-day" develop >/dev/null 2>&1
+  worktree="$project/hallamshire-hotel-all-day"
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  panes=$'$2\tproject\t@20\t%20\t'"$worktree_real"$'\n'
+
+  EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+    TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$TEST_TMPDIR" --periscope "$project" hallamshire-hotel-all-day
+
+  assert_file_contains "$log" $'link-window\t-d\t-s\t@20\t-t\t$1:'
+  assert_file_contains "$log" $'select-pane\t-t\t%20'
+  assert_file_not_contains "$log" $'new-window\t'
+}
+
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
+test_case "taw: periscope aliases create in current session" \
+  test_periscope_aliases_create_window_in_current_session
+test_case "taw: periscope requires current tmux before resolution" \
+  test_periscope_requires_current_tmux_before_resolution
+test_case "taw: force requires periscope" \
+  test_force_requires_periscope
+test_case "taw: periscope prefers current session descendant match" \
+  test_periscope_prefers_current_session_descendant_match
+test_case "taw: periscope links project session match" \
+  test_periscope_links_project_session_match
+test_case "taw: periscope links other session match" \
+  test_periscope_links_other_session_match
+test_case "taw: periscope layout conflict requires force" \
+  test_periscope_layout_conflict_requires_force
+test_case "taw: periscope TAW_AGENT conflict requires force" \
+  test_periscope_taw_agent_conflict_requires_force
+test_case "taw: periscope preserves normal branch resolution" \
+  test_periscope_normal_branch_resolution_is_unchanged
+test_case "taw: periscope links resolved bare worktree" \
+  test_periscope_links_resolved_bare_worktree
 test_case "taw: TAW_AGENT whitespace defaults to codex" \
   test_taw_agent_whitespace_only_defaults_to_codex
 test_case "taw: TAW_AGENT env override trims whitespace" \

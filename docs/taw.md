@@ -17,6 +17,8 @@ Relevant options:
 - `-agent`
 - `-ed`, `-editor`
 - `-sh`, `-shell`
+- `--periscope`, `--ps`, `--peri`
+- `--force` (periscope only)
 - project picker aliases: `-ts`, `--ts`, `-picker`, `--picker`, `-pick-project`, `--pick-project`
 
 ## Project Kinds
@@ -174,11 +176,40 @@ Layout on a new window:
 - with an agent and shells: the first shell goes below the agent, later shells split to the right
 - without an agent and with shells: the first shell goes to the right of the editor, later shells split to the right
 
+## Periscope Mode
+
+`--periscope`, `--ps`, and `--peri` preserve normal project, branch, and
+worktree resolution, but put the result in the invoking tmux session instead
+of switching or attaching to the project's session. Periscope must be invoked
+from an active tmux client.
+
+Existing windows are searched in this order:
+
+1. the invoking session
+2. the project's normal target session
+3. other sessions in the tmux server
+
+Within each group, an exact target-directory pane is preferred over a pane in
+a descendant directory. A match in the invoking session is selected directly.
+A match in another session is added to the invoking session with
+`link-window`. If there is no match, taw creates its normal layout directly in
+the invoking session.
+
+An existing match conflicts with an explicit `-agent`, `-ed`, or `-sh`, or
+with a non-empty `TAW_AGENT`. Use `--force` to skip all reuse and create a
+fresh layout. `--force` is rejected without periscope mode.
+
+A linked tmux window shares its panes, processes, name, and lifetime between
+sessions. `unlink-window` removes it from one session; `kill-window` removes
+it from every session to which it is linked.
+
 ## Examples
 
 ```bash
 taw -p ~/src/repo
 taw -p ~/src/repo feature/foo
 taw -p ~/src/bare feature/foo develop
+taw --periscope sheffield-live hallamshire-hotel-all-day
+taw --periscope --force -p ~/src/repo -agent "claude --resume"
 taw --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
 ```
