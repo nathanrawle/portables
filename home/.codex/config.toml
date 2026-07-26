@@ -1,7 +1,7 @@
 sandbox_mode = "workspace-write"
 personality = "pragmatic"
 model_reasoning_effort = "low"
-plan_mode_reasoning_effort = "xhigh"
+plan_mode_reasoning_effort = "high"
 model = "gpt-5.6-sol"
 service_tier = "default"
 
@@ -177,7 +177,7 @@ session_picker_view = "comfortable"
 
 [tui.model_availability_nux]
 "gpt-5.5" = 4
-"gpt-5.6-sol" = 2
+"gpt-5.6-sol" = 4
 
 [marketplaces.openai-bundled]
 last_updated = "2026-07-22T11:24:35Z"
