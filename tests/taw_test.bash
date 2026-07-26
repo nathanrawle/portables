@@ -3290,6 +3290,24 @@ test_convert_late_failure_restores_original_index() {
   assert_exists "$repo/staged.txt"
 }
 
+test_convert_ignores_stale_rebase_head() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  git -C "$repo" rev-parse HEAD >"$repo/.git/REBASE_HEAD"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  assert_eq "true" "$(git --git-dir "$repo/.git" rev-parse --is-bare-repository)" \
+    "expected stale REBASE_HEAD not to block conversion"
+  assert_exists "$repo/main"
+  assert_no_tmux_work_window "$log"
+}
+
 test_convert_rejects_incompatible_options() {
   local repo fake_bin log
 
@@ -3326,6 +3344,8 @@ test_case "taw: convert worktree failure rolls back" \
   test_convert_worktree_failure_rolls_back
 test_case "taw: convert late failure restores original index" \
   test_convert_late_failure_restores_original_index
+test_case "taw: convert ignores stale REBASE_HEAD" \
+  test_convert_ignores_stale_rebase_head
 test_case "taw: convert rejects incompatible options" \
   test_convert_rejects_incompatible_options
 test_case "taw: peer creates in current session" \
