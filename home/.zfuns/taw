@@ -1134,14 +1134,17 @@ _taw_status_records_preserved() {
 }
 
 _taw_move_worktree_entries() {
-  local _taw_source="$1" _taw_dest="$2" _taw_entry
+  local _taw_source="$1" _taw_dest="$2" _taw_entry _taw_target
   local -a _taw_entries
 
   mkdir -p -- "$_taw_dest" || return 1
   _taw_entries=( "$_taw_source"/*(N) "$_taw_source"/.[!.]*(N) "$_taw_source"/..?*(N) )
   for _taw_entry in "${_taw_entries[@]}"; do
     [[ "${_taw_entry:t}" == .git ]] && continue
-    mv -- "$_taw_entry" "$_taw_dest/" || return 1
+    _taw_target="$_taw_dest/${_taw_entry:t}"
+    [[ ! -e "$_taw_target" && ! -L "$_taw_target" ]] || return 1
+    mv -n -- "$_taw_entry" "$_taw_target" || return 1
+    [[ ! -e "$_taw_entry" && ! -L "$_taw_entry" ]] || return 1
   done
 }
 
@@ -1152,6 +1155,33 @@ _taw_remove_empty_worktree_parents() {
     rmdir -- "$_taw_path" 2>/dev/null || return 0
     _taw_path="${_taw_path:h}"
   done
+}
+
+_taw_merge_concurrent_entry() {
+  local _taw_source="$1" _taw_target="$2" _taw_entry
+  local -a _taw_entries
+
+  if [[ ! -e "$_taw_target" && ! -L "$_taw_target" ]]; then
+    mkdir -p -- "${_taw_target:h}" || return 1
+    mv -n -- "$_taw_source" "$_taw_target" || return 1
+    [[ ! -e "$_taw_source" && ! -L "$_taw_source" ]]
+    return
+  fi
+
+  if [[ -d "$_taw_source" && ! -L "$_taw_source" \
+    && -d "$_taw_target" && ! -L "$_taw_target" ]]; then
+    _taw_entries=( "$_taw_source"/*(ND) )
+    for _taw_entry in "${_taw_entries[@]}"; do
+      _taw_merge_concurrent_entry "$_taw_entry" "$_taw_target/${_taw_entry:t}" \
+        || return 1
+    done
+    rmdir -- "$_taw_source"
+    return
+  fi
+
+  [[ ( ! -d "$_taw_source" || -L "$_taw_source" ) \
+    && ( ! -d "$_taw_target" || -L "$_taw_target" ) ]] || return 1
+  mv -f -- "$_taw_source" "$_taw_target"
 }
 
 _taw_capture_wrapper_entries() {
@@ -1177,9 +1207,7 @@ _taw_capture_wrapper_entries() {
 
     _taw_relative="${_taw_entry#$_taw_root/}"
     _taw_target="$_taw_dest/$_taw_relative"
-    [[ ! -e "$_taw_target" && ! -L "$_taw_target" ]] || return 1
-    mkdir -p -- "${_taw_target:h}" || return 1
-    mv -- "$_taw_entry" "$_taw_target" || return 1
+    _taw_merge_concurrent_entry "$_taw_entry" "$_taw_target" || return 1
   done
 }
 

@@ -3480,6 +3480,24 @@ test_convert_captures_root_change_after_git_verification() {
     "expected the final capture to preserve a late root change"
 }
 
+test_convert_preserves_colliding_wrapper_rewrite() {
+  local repo fake_bin
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/colliding-concurrent")"
+
+  TAW_CONVERT_FAIL_STAGE=late-concurrent TAW_CONCURRENT_FILE="$repo/README.md" \
+    TAW_RUN_PATH="$fake_bin:$PATH" run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  assert_not_exists "$repo/README.md"
+  assert_eq "late concurrent" "$(<"$repo/main/README.md")" \
+    "expected the concurrent rewrite to replace the older worktree copy"
+  assert_eq "1 .M N... 100644 100644 100644" \
+    "$(git -C "$repo/main" status --porcelain=v2 --untracked-files=all | cut -d' ' -f1-6)" \
+    "expected the concurrent rewrite to remain an unstaged change"
+}
+
 test_convert_rejects_incompatible_options() {
   local repo fake_bin log
 
@@ -3532,6 +3550,8 @@ test_case "taw: convert captures concurrent change at wrapper root" \
   test_convert_captures_concurrent_change_at_wrapper_root
 test_case "taw: convert captures root change after git verification" \
   test_convert_captures_root_change_after_git_verification
+test_case "taw: convert preserves colliding wrapper rewrite" \
+  test_convert_preserves_colliding_wrapper_rewrite
 test_case "taw: convert rejects incompatible options" \
   test_convert_rejects_incompatible_options
 test_case "taw: peer creates in current session" \
