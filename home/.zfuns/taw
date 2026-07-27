@@ -1404,13 +1404,18 @@ _taw_convert_project() {
         _taw_failure="could not create the default worktree"
       fi
     else
-      _taw_default_created=true
-      if git --git-dir "$_taw_project_root/.git" worktree add --track \
-        -b "$_taw_default_branch" "$_taw_default_path" "$_taw_default_ref"; then
-        _taw_default_added=true
+      if git --git-dir "$_taw_project_root/.git" branch --track \
+        "$_taw_default_branch" "$_taw_default_ref"; then
+        _taw_default_created=true
+        if git --git-dir "$_taw_project_root/.git" worktree add \
+          "$_taw_default_path" "$_taw_default_branch"; then
+          _taw_default_added=true
+        else
+          [[ -e "$_taw_default_path/.git" ]] && _taw_default_added=true
+          _taw_failure="could not create the default tracking worktree"
+        fi
       else
-        [[ -e "$_taw_default_path/.git" ]] && _taw_default_added=true
-        _taw_failure="could not create the default tracking worktree"
+        _taw_failure="could not create the default tracking branch"
       fi
     fi
   fi
@@ -1452,12 +1457,6 @@ _taw_convert_project() {
       || _taw_failure="could not set the bare repository default branch"
   fi
   if [[ -z "$_taw_failure" ]]; then
-    _taw_capture_wrapper_entries "$_taw_project_root" "$_taw_current_path" \
-      "$_taw_default_path" "$_taw_current_path" \
-      || _taw_failure="could not capture changes created during conversion"
-  fi
-
-  if [[ -z "$_taw_failure" ]]; then
     [[ "$(git --git-dir "$_taw_project_root/.git" rev-parse --is-bare-repository 2>/dev/null)" == true ]] \
       || _taw_failure="converted repository is not bare"
   fi
@@ -1491,6 +1490,16 @@ _taw_convert_project() {
       || _taw_failure="could not verify the bare repository HEAD"
     [[ -n "$_taw_failure" || "$_taw_head_after" == "$_taw_default_branch" ]] \
       || _taw_failure="bare repository HEAD does not name the default branch"
+  fi
+  if [[ -z "$_taw_failure" ]]; then
+    _taw_capture_wrapper_entries "$_taw_project_root" "$_taw_current_path" \
+      "$_taw_default_path" "$_taw_current_path" \
+      || _taw_failure="could not capture changes created during conversion"
+  fi
+  if [[ -z "$_taw_failure" ]]; then
+    _taw_capture_wrapper_entries "$_taw_project_root" "$_taw_current_path" \
+      "$_taw_default_path" "$_taw_current_path" \
+      || _taw_failure="project root changed during final conversion check"
   fi
 
   if [[ -n "$_taw_failure" ]]; then

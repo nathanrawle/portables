@@ -3092,6 +3092,18 @@ if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = concurrent \
   printf 'concurrent\n' >"\${TAW_CONCURRENT_FILE:?}"
   exit 0
 fi
+if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = late-concurrent \
+  && "\${1:-}" = --git-dir && "\${3:-}" = symbolic-ref \
+  && "\${4:-}" = --quiet && "\${5:-}" = --short && "\${6:-}" = HEAD ]]; then
+  "$real_git" "\$@"
+  printf 'late concurrent\n' >"\${TAW_CONCURRENT_FILE:?}"
+  exit 0
+fi
+if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = default-branch-race \
+  && "\${1:-}" = --git-dir && "\${3:-}" = branch && "\${4:-}" = --track ]]; then
+  "$real_git" --git-dir "\$2" update-ref "refs/heads/\$5" "\$6"
+  exit 93
+fi
 
 exec "$real_git" "\$@"
 EOF
@@ -3180,6 +3192,33 @@ test_convert_prefers_origin_head_for_default_branch() {
   assert_eq "origin/trunk" "$(git -C "$repo/trunk" rev-parse --abbrev-ref '@{upstream}')" \
     "expected remote-only default branch to track origin"
   assert_no_tmux_work_window "$log"
+}
+
+test_convert_does_not_delete_concurrently_created_default_branch() {
+  local repo fake_bin before
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  git -C "$repo" config remote.origin.url "$TEST_TMPDIR/origin.git"
+  git -C "$repo" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+  git -C "$repo" update-ref refs/remotes/origin/trunk refs/heads/main
+  git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  git -C "$repo" checkout -q develop
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/branch-race")"
+
+  if TAW_CONVERT_FAIL_STAGE=default-branch-race TAW_RUN_PATH="$fake_bin:$PATH" \
+    run_taw "$TEST_TMPDIR" --convert "$repo"; then
+    fail "expected concurrent default branch creation to abort conversion"
+  fi
+
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected branch race rollback to restore a normal repository"
+  assert_eq "$before" "$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected branch race rollback to preserve the working tree"
+  assert_eq "$(git -C "$repo" rev-parse refs/remotes/origin/trunk)" \
+    "$(git -C "$repo" rev-parse refs/heads/trunk)" \
+    "expected rollback to retain the concurrently created branch"
 }
 
 test_convert_unborn_repository_preserves_index() {
@@ -3424,6 +3463,23 @@ test_convert_captures_concurrent_change_at_wrapper_root() {
     "expected a concurrent root change to move into the current worktree"
 }
 
+test_convert_captures_root_change_after_git_verification() {
+  local repo fake_bin
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/late-concurrent")"
+
+  TAW_CONVERT_FAIL_STAGE=late-concurrent TAW_CONCURRENT_FILE="$repo/late.txt" \
+    TAW_RUN_PATH="$fake_bin:$PATH" run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  assert_not_exists "$repo/late.txt"
+  assert_exists "$repo/main/late.txt"
+  assert_eq "? late.txt" \
+    "$(git -C "$repo/main" status --porcelain=v2 --untracked-files=all)" \
+    "expected the final capture to preserve a late root change"
+}
+
 test_convert_rejects_incompatible_options() {
   local repo fake_bin log
 
@@ -3450,6 +3506,8 @@ test_case "taw: convert non-default branch creates two worktrees" \
   test_convert_non_default_branch_creates_two_worktrees
 test_case "taw: convert prefers origin HEAD for default branch" \
   test_convert_prefers_origin_head_for_default_branch
+test_case "taw: convert retains concurrently created default branch" \
+  test_convert_does_not_delete_concurrently_created_default_branch
 test_case "taw: convert unborn repository preserves index" \
   test_convert_unborn_repository_preserves_index
 test_case "taw: convert rejects unborn remote default collision" \
@@ -3472,6 +3530,8 @@ test_case "taw: convert preserves concurrent new change" \
   test_convert_preserves_concurrent_new_change
 test_case "taw: convert captures concurrent change at wrapper root" \
   test_convert_captures_concurrent_change_at_wrapper_root
+test_case "taw: convert captures root change after git verification" \
+  test_convert_captures_root_change_after_git_verification
 test_case "taw: convert rejects incompatible options" \
   test_convert_rejects_incompatible_options
 test_case "taw: peer creates in current session" \
