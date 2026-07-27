@@ -1226,11 +1226,11 @@ _taw_conversion_rollback() {
   if [[ -d "$_taw_project_root/.git" ]]; then
     if [[ "$_taw_current_added" == true ]]; then
       git --git-dir "$_taw_project_root/.git" worktree remove --force "$_taw_current_path" \
-        >/dev/null 2>&1 || true
+        >/dev/null 2>&1 || _taw_rollback_ok=false
     fi
     if [[ "$_taw_default_added" == true ]]; then
       git --git-dir "$_taw_project_root/.git" worktree remove --force "$_taw_default_path" \
-        >/dev/null 2>&1 || true
+        >/dev/null 2>&1 || _taw_rollback_ok=false
     fi
     if [[ "$_taw_default_created" == true ]]; then
       git --git-dir "$_taw_project_root/.git" update-ref -d "refs/heads/$_taw_default_branch" \
@@ -1274,7 +1274,8 @@ _taw_conversion_rollback() {
 _taw_convert_project() {
   local _taw_project_root="${_taw_project_dir:A}" _taw_current_branch
   local _taw_default_branch _taw_default_ref _taw_default_path _taw_current_path
-  local _taw_current_commit _taw_before_status _taw_after_status _taw_default_status
+  local _taw_current_commit _taw_default_commit _taw_before_status _taw_after_status
+  local _taw_default_status
   local _taw_common_dir _taw_actual_git_dir _taw_worktree_count _taw_shared_index
   local _taw_operation_path _taw_lock_file _taw_backup _taw_current_git_dir
   local _taw_saved_pwd _taw_caller_relative _taw_default_created=false
@@ -1432,9 +1433,23 @@ _taw_convert_project() {
         _taw_failure="could not create the default worktree"
       fi
     else
-      if git --git-dir "$_taw_project_root/.git" branch --track \
-        "$_taw_default_branch" "$_taw_default_ref"; then
+      _taw_default_commit="$(git --git-dir "$_taw_project_root/.git" rev-parse \
+        --verify "$_taw_default_ref^{commit}" 2>/dev/null)" \
+        || _taw_failure="could not resolve the remote default branch"
+      if [[ -z "$_taw_failure" ]] && git --git-dir "$_taw_project_root/.git" update-ref \
+        "refs/heads/$_taw_default_branch" "$_taw_default_commit" ""; then
         _taw_default_created=true
+      elif [[ -z "$_taw_failure" ]]; then
+        _taw_failure="could not create the default tracking branch"
+      fi
+      if [[ -z "$_taw_failure" ]]; then
+        git --git-dir "$_taw_project_root/.git" config \
+          "branch.$_taw_default_branch.remote" origin \
+          && git --git-dir "$_taw_project_root/.git" config \
+            "branch.$_taw_default_branch.merge" "refs/heads/$_taw_default_branch" \
+          || _taw_failure="could not configure the default tracking branch"
+      fi
+      if [[ -z "$_taw_failure" ]]; then
         if git --git-dir "$_taw_project_root/.git" worktree add \
           "$_taw_default_path" "$_taw_default_branch"; then
           _taw_default_added=true
@@ -1442,8 +1457,6 @@ _taw_convert_project() {
           [[ -e "$_taw_default_path/.git" ]] && _taw_default_added=true
           _taw_failure="could not create the default tracking worktree"
         fi
-      else
-        _taw_failure="could not create the default tracking branch"
       fi
     fi
   fi

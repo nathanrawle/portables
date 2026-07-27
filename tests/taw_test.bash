@@ -3100,9 +3100,23 @@ if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = late-concurrent \
   exit 0
 fi
 if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = default-branch-race \
-  && "\${1:-}" = --git-dir && "\${3:-}" = branch && "\${4:-}" = --track ]]; then
-  "$real_git" --git-dir "\$2" update-ref "refs/heads/\$5" "\$6"
+  && "\${1:-}" = --git-dir && "\${3:-}" = update-ref \
+  && "\${4:-}" = refs/heads/trunk ]]; then
+  "$real_git" "\$@"
   exit 93
+fi
+if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = default-config-failure \
+  && "\${1:-}" = --git-dir && "\${3:-}" = config \
+  && "\${4:-}" = branch.trunk.remote ]]; then
+  exit 94
+fi
+if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = remove \
+  && "\${1:-}" = --git-dir && "\${3:-}" = symbolic-ref && "\${4:-}" = HEAD ]]; then
+  exit 95
+fi
+if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = remove \
+  && "\${1:-}" = --git-dir && "\${3:-}" = worktree && "\${4:-}" = remove ]]; then
+  exit 96
 fi
 
 exec "$real_git" "\$@"
@@ -3219,6 +3233,30 @@ test_convert_does_not_delete_concurrently_created_default_branch() {
   assert_eq "$(git -C "$repo" rev-parse refs/remotes/origin/trunk)" \
     "$(git -C "$repo" rev-parse refs/heads/trunk)" \
     "expected rollback to retain the concurrently created branch"
+}
+
+test_convert_removes_owned_default_branch_after_config_failure() {
+  local repo fake_bin
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  git -C "$repo" config remote.origin.url "$TEST_TMPDIR/origin.git"
+  git -C "$repo" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+  git -C "$repo" update-ref refs/remotes/origin/trunk refs/heads/main
+  git -C "$repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  git -C "$repo" checkout -q develop
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/config-failure")"
+
+  if TAW_CONVERT_FAIL_STAGE=default-config-failure TAW_RUN_PATH="$fake_bin:$PATH" \
+    run_taw "$TEST_TMPDIR" --convert "$repo"; then
+    fail "expected injected default tracking config failure"
+  fi
+
+  if git -C "$repo" show-ref --verify --quiet refs/heads/trunk; then
+    fail "expected rollback to remove the conversion-owned default branch"
+  fi
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected config failure rollback to restore a normal repository"
 }
 
 test_convert_unborn_repository_preserves_index() {
@@ -3412,6 +3450,26 @@ test_convert_late_failure_restores_original_index() {
   assert_exists "$repo/staged.txt"
 }
 
+test_convert_retains_recovery_when_worktree_removal_fails() {
+  local repo fake_bin backups
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/remove-failure")"
+
+  if TAW_CONVERT_FAIL_STAGE=remove TAW_RUN_PATH="$fake_bin:$PATH" \
+    run_taw "$TEST_TMPDIR" --convert "$repo"; then
+    fail "expected injected worktree removal failure"
+  fi
+
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "1" "${#backups[@]}" \
+    "expected incomplete rollback to retain its recovery directory"
+  assert_exists "${backups[0]}/meta/config"
+}
+
 test_convert_ignores_stale_rebase_head() {
   local repo fake_bin log
 
@@ -3526,6 +3584,8 @@ test_case "taw: convert prefers origin HEAD for default branch" \
   test_convert_prefers_origin_head_for_default_branch
 test_case "taw: convert retains concurrently created default branch" \
   test_convert_does_not_delete_concurrently_created_default_branch
+test_case "taw: convert removes owned default branch after config failure" \
+  test_convert_removes_owned_default_branch_after_config_failure
 test_case "taw: convert unborn repository preserves index" \
   test_convert_unborn_repository_preserves_index
 test_case "taw: convert rejects unborn remote default collision" \
@@ -3542,6 +3602,8 @@ test_case "taw: convert worktree failure rolls back" \
   test_convert_worktree_failure_rolls_back
 test_case "taw: convert late failure restores original index" \
   test_convert_late_failure_restores_original_index
+test_case "taw: convert retains recovery after worktree removal failure" \
+  test_convert_retains_recovery_when_worktree_removal_fails
 test_case "taw: convert ignores stale REBASE_HEAD" \
   test_convert_ignores_stale_rebase_head
 test_case "taw: convert preserves concurrent new change" \
