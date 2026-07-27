@@ -3298,6 +3298,31 @@ test_convert_rejects_linked_worktrees_before_mutation() {
   assert_no_tmux_work_window "$log"
 }
 
+test_convert_rejects_dot_named_initialized_submodule() {
+  local source repo fake_bin log before
+
+  source="$TEST_TMPDIR/source"
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$source"
+  make_git_repo "$repo"
+  git -c protocol.file.allow=always -C "$repo" submodule add -q "$source" .hidden
+  before="$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR" --convert "$repo"; then
+    fail "expected conversion with a dot-named initialized submodule to fail"
+  fi
+
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected submodule rejection to leave a normal repository"
+  assert_eq "$before" "$(git -C "$repo" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected submodule rejection before mutation"
+  assert_exists "$repo/.git/modules/.hidden"
+  assert_no_tmux_work_window "$log"
+}
+
 test_convert_worktree_failure_rolls_back() {
   local repo fake_bin before backups
 
@@ -3382,6 +3407,23 @@ test_convert_preserves_concurrent_new_change() {
     "expected a concurrent new change to survive conversion"
 }
 
+test_convert_captures_concurrent_change_at_wrapper_root() {
+  local repo fake_bin
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/concurrent")"
+
+  TAW_CONVERT_FAIL_STAGE=concurrent TAW_CONCURRENT_FILE="$repo/concurrent.txt" \
+    TAW_RUN_PATH="$fake_bin:$PATH" run_taw "$TEST_TMPDIR" --convert "$repo"
+
+  assert_not_exists "$repo/concurrent.txt"
+  assert_exists "$repo/main/concurrent.txt"
+  assert_eq "? concurrent.txt" \
+    "$(git -C "$repo/main" status --porcelain=v2 --untracked-files=all)" \
+    "expected a concurrent root change to move into the current worktree"
+}
+
 test_convert_rejects_incompatible_options() {
   local repo fake_bin log
 
@@ -3418,6 +3460,8 @@ test_case "taw: convert from .git stays in bare git directory" \
   test_convert_from_git_dir_stays_in_bare_git_dir
 test_case "taw: convert rejects linked worktrees before mutation" \
   test_convert_rejects_linked_worktrees_before_mutation
+test_case "taw: convert rejects dot-named initialized submodule" \
+  test_convert_rejects_dot_named_initialized_submodule
 test_case "taw: convert worktree failure rolls back" \
   test_convert_worktree_failure_rolls_back
 test_case "taw: convert late failure restores original index" \
@@ -3426,6 +3470,8 @@ test_case "taw: convert ignores stale REBASE_HEAD" \
   test_convert_ignores_stale_rebase_head
 test_case "taw: convert preserves concurrent new change" \
   test_convert_preserves_concurrent_new_change
+test_case "taw: convert captures concurrent change at wrapper root" \
+  test_convert_captures_concurrent_change_at_wrapper_root
 test_case "taw: convert rejects incompatible options" \
   test_convert_rejects_incompatible_options
 test_case "taw: peer creates in current session" \
