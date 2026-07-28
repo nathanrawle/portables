@@ -71,14 +71,14 @@ symbol = " "
 tag_symbol = '  '
 
 [git_status]
-ahead = '${count}⇡'
-behind = '${count}⇣'
-diverged = '⇕${ahead_count}⇡${behind_count}⇣'
+ahead = '${count}↑'
+behind = '${count}↓'
+diverged = '↓${behind_count}↑${ahead_count}'
 format = '([$all_status$ahead_behind]($style) )'
-modified = '${count}~'
-staged = '${count}+'
-stashed = '${count}*'
-untracked = '${count}?'
+modified = '~${count}'
+staged = '+${count}'
+stashed = '*${count}'
+untracked = '?${count}'
 
 [golang]
 symbol = " "
