@@ -1,4 +1,5 @@
 *.swp
 *_PLAN.md
+/home/.codex/config.toml
 /home/.zfuns/zcp
 /home/.zfuns/zln

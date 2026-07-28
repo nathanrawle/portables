@@ -114,6 +114,28 @@ EOF
   assert_file_contains "$repo/home/.codex/config.toml" '[agents.se-review]'
 }
 
+test_missing_codex_config_is_not_recreated() {
+  local repo
+
+  repo="$(make_sync_agents_fixture "$TEST_TMPDIR")"
+  rm "$repo/home/.codex/config.toml"
+  cat >"$repo/home/.claude/agents/researcher.md" <<'EOF'
+---
+name: 'Researcher'
+description: 'Reads source files'
+model: sonnet
+tools: ['Read', 'Glob', 'Grep']
+---
+
+Read the repository.
+EOF
+
+  run_sync_agents "$repo" >/dev/null
+
+  assert_exists "$repo/home/.codex/agents/researcher.toml"
+  assert_not_exists "$repo/home/.codex/config.toml"
+}
+
 test_existing_counterpart_is_not_overwritten() {
   local repo
 
@@ -350,6 +372,8 @@ test_case "sync-agents: Codex-only converts to Claude" \
   test_codex_only_converts_to_claude
 test_case "sync-agents: .agent.md suffix normalization matches existing counterpart" \
   test_agent_suffix_normalization_matches_existing_counterpart
+test_case "sync-agents: missing Codex config is not recreated" \
+  test_missing_codex_config_is_not_recreated
 test_case "sync-agents: existing counterpart is not overwritten" \
   test_existing_counterpart_is_not_overwritten
 test_case "sync-agents: dry-run prints without writing" \

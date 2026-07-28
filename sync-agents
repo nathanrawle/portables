@@ -430,9 +430,11 @@ def plan_actions(root: Path) -> tuple[list[CreateAction], list[str]]:
                 )
                 break
 
-    registered = load_registered_codex_agents(config_path)
     codex_ids_after_sync = sorted(set(agents["codex"]) | {a.id for a in creates if a.target == "codex"})
-    registrations = [agent_id for agent_id in codex_ids_after_sync if agent_id not in registered]
+    registrations: list[str] = []
+    if config_path.is_file():
+        registered = load_registered_codex_agents(config_path)
+        registrations = [agent_id for agent_id in codex_ids_after_sync if agent_id not in registered]
     return creates, registrations
 
 
