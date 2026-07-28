@@ -33,7 +33,7 @@ function nvm() {
 
 # opencode
 export PATH=/Users/nathan/.opencode/bin:$PATH
-command -v opencode >/dev/null 2>&1 && . $PORTABLES/home/.opencode-completions.zsh
+command -v opencode >/dev/null 2>&1 && . $HOME/.opencode-completions.zsh
 
 # ~/.local
 localbin=~/.local/bin
