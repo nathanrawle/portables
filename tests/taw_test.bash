@@ -2209,8 +2209,45 @@ test_empty_prompt_project_picker_resolves_tmux_session_row() {
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" '[TMUX] agent'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'attach-session\t-t\t$1'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'select-window\t'
   assert_file_not_contains "$log" $'ignored-agent'
+}
+
+test_project_picker_tmux_row_preserves_active_window_inside_tmux() {
+  local xdg empty_search session_path elsewhere fake_bin log fzf_log sessions no_fzf_path
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  session_path="$TEST_TMPDIR/session-path"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$session_path" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$9\ttarget\t'"$session_path"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
+    TAW_FAKE_TMUX_CURRENT_SESSION_NAME=current TAW_FAKE_TMUX_HAS_SESSION_TARGETS='$9' \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_MATCH='[TMUX] target' \
+    TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" -ts -agent "claude --resume" -ed "nvim ." -sh "npm test"
+
+  assert_file_contains "$fzf_log" '[TMUX] target'
+  assert_file_contains "$log" $'switch-client\t-t\t$9'
+  assert_file_not_contains "$log" $'attach-session\t'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'select-window\t'
+  assert_file_not_contains "$log" $'select-pane\t'
+  assert_file_not_contains "$log" $'claude --resume'
+  assert_file_not_contains "$log" $'nvim .'
+  assert_file_not_contains "$log" $'npm test'
 }
 
 test_project_picker_tmux_row_uses_session_identity() {
@@ -2240,7 +2277,9 @@ test_project_picker_tmux_row_uses_session_identity() {
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" '[TMUX] dupe'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\tsession-repo\t-c\t'"$tmux_real"$'\tvim'
+  assert_file_contains "$log" $'attach-session\t-t\t$1'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'select-window\t'
   assert_file_not_contains "$log" $'-c\t'"$collision"
 }
 
@@ -2272,7 +2311,9 @@ test_project_picker_tmux_row_ignores_projects_home_collision() {
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" '[TMUX] dupe'
-  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\tsession-repo\t-c\t'"$tmux_real"$'\tvim'
+  assert_file_contains "$log" $'attach-session\t-t\t$1'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'select-window\t'
   assert_file_not_contains "$log" $'-c\t'"$collision"
 }
 
@@ -3830,6 +3871,8 @@ test_case "taw: empty project prompt mentions fzf" \
   test_empty_project_prompt_mentions_fzf
 test_case "taw: empty project prompt picker resolves tmux session rows" \
   test_empty_prompt_project_picker_resolves_tmux_session_row
+test_case "taw: project picker tmux row preserves active window inside tmux" \
+  test_project_picker_tmux_row_preserves_active_window_inside_tmux
 test_case "taw: project picker tmux row uses session identity" \
   test_project_picker_tmux_row_uses_session_identity
 test_case "taw: project picker tmux row ignores PROJECTS_HOME collision" \

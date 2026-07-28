@@ -70,7 +70,8 @@ Project picker aliases:
 
 Picker result handling:
 
-- `[TMUX]` rows resolve by tmux session identity, not by generic project-name lookup
+- `[TMUX]` rows switch or attach directly by tmux session identity, preserving the session's active window
+- layout options apply to project rows; `[TMUX]` rows do not create or select windows
 - `normal` and `plain` projects open directly
 - `bare` projects open their default worktree directly
 
