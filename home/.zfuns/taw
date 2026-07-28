@@ -11,6 +11,8 @@ local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_project_kind _taw_is_bare
 local _taw_selected_worktree_dir
 local _taw_session_name _taw_session_target _taw_project_name _taw_project_session_name _taw_project_session_target
+local _taw_resolved_tmux_session_id _taw_resolved_tmux_session_name _taw_resolved_tmux_session_path
+local _taw_selected_tmux_session_name _taw_selected_tmux_session_target
 local _taw_default_branch_result _taw_default_base_ref
 local _taw_branch_target_name _taw_branch_target_ref
 local _taw_picker_kind _taw_picker_branch _taw_picker_ref _taw_picker_path
@@ -119,6 +121,8 @@ _taw_debug_dump() {
   print -u2 -r -- "_taw_project_name='$_taw_project_name'"
   print -u2 -r -- "_taw_project_session_name='$_taw_project_session_name'"
   print -u2 -r -- "_taw_project_session_target='$_taw_project_session_target'"
+  print -u2 -r -- "_taw_selected_tmux_session_name='$_taw_selected_tmux_session_name'"
+  print -u2 -r -- "_taw_selected_tmux_session_target='$_taw_selected_tmux_session_target'"
   print -u2 -r -- "_taw_default_branch_result='$_taw_default_branch_result'"
   print -u2 -r -- "_taw_default_base_ref='$_taw_default_base_ref'"
   print -u2 -r -- "_taw_picker_kind='$_taw_picker_kind'"
@@ -426,7 +430,7 @@ _taw_use_project_path() {
   [[ -z "$_taw_session_target" ]] || _taw_project_session_target="$_taw_session_target"
 }
 
-_taw_resolve_project_from_tmux_exact() {
+_taw_resolve_tmux_session_exact() {
   local _taw_query="$1" _taw_expected_path="${2:-}" _taw_expected_id="${3:-}"
   local _taw_sessions _taw_line _taw_session_id _taw_session _taw_path _taw_rest
   local _taw_tab=$'\t'
@@ -448,11 +452,20 @@ _taw_resolve_project_from_tmux_exact() {
     if [[ -n "$_taw_expected_path" && "${_taw_path:A}" != "${_taw_expected_path:A}" ]]; then
       return 2
     fi
-    _taw_use_project_path "$_taw_path" "$_taw_path" "$_taw_session" "${_taw_expected_id:-$_taw_session_id}" || return 2
+    _taw_resolved_tmux_session_id="$_taw_session_id"
+    _taw_resolved_tmux_session_name="$_taw_session"
+    _taw_resolved_tmux_session_path="$_taw_path"
     return 0
   done
 
   return 1
+}
+
+_taw_resolve_project_from_tmux_exact() {
+  _taw_resolve_tmux_session_exact "$@" || return
+  _taw_use_project_path "$_taw_resolved_tmux_session_path" \
+    "$_taw_resolved_tmux_session_path" "$_taw_resolved_tmux_session_name" \
+    "$_taw_resolved_tmux_session_id" || return 2
 }
 
 _taw_resolve_project_from_tmux() {
@@ -583,10 +596,12 @@ _taw_resolve_project_from_picker() {
           _taw_tmux_session="${_taw_tmux_rest%%$'\t'*}"
           _taw_tmux_path="${_taw_tmux_rest#*$'\t'}"
           [[ "$_taw_tmux_path" == "$_taw_tmux_rest" ]] && _taw_tmux_path=
-          _taw_resolve_project_from_tmux_exact "$_taw_tmux_session" "$_taw_tmux_path" "$_taw_tmux_id" || {
+          _taw_resolve_tmux_session_exact "$_taw_tmux_session" "$_taw_tmux_path" "$_taw_tmux_id" || {
             _taw_die "could not resolve tmux session: $_taw_tmux_session"
             return 1
           }
+          _taw_selected_tmux_session_name="$_taw_resolved_tmux_session_name"
+          _taw_selected_tmux_session_target="$_taw_resolved_tmux_session_id"
           ;;
         *)
           _taw_die "project picker returned an invalid row"
@@ -1983,6 +1998,53 @@ _taw_switch_to_tmux_window() {
   fi
 }
 
+_taw_switch_to_selected_tmux_session() {
+  local _taw_selected_window_id _taw_current_window_ids _taw_window_id
+  local _taw_selected_window_is_linked=false
+
+  tmux has-session -t "$_taw_selected_tmux_session_target" 2>/dev/null || {
+    _taw_die "could not resolve tmux session: $_taw_selected_tmux_session_name"
+    return 1
+  }
+
+  if [[ "$_taw_peer" == true ]]; then
+    _taw_selected_window_id="$(
+      tmux display-message -p -t "$_taw_selected_tmux_session_target:" \
+        '#{window_id}' 2>/dev/null
+    )" || {
+      _taw_die "could not resolve active window for tmux session: $_taw_selected_tmux_session_name"
+      return 1
+    }
+    [[ -n "$_taw_selected_window_id" ]] || {
+      _taw_die "could not resolve active window for tmux session: $_taw_selected_tmux_session_name"
+      return 1
+    }
+
+    _taw_current_window_ids="$(
+      tmux list-windows -t "$_taw_current_session_id" -F '#{window_id}' 2>/dev/null
+    )" || {
+      _taw_die "could not resolve current tmux session"
+      return 1
+    }
+    for _taw_window_id in "${(@f)_taw_current_window_ids}"; do
+      if [[ "$_taw_window_id" == "$_taw_selected_window_id" ]]; then
+        _taw_selected_window_is_linked=true
+        break
+      fi
+    done
+
+    if [[ "$_taw_selected_window_is_linked" != true ]]; then
+      tmux link-window -d -s "$_taw_selected_window_id" \
+        -t "$_taw_current_session_id:" || return 1
+    fi
+    tmux select-window -t "$_taw_selected_window_id"
+  elif [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "$_taw_selected_tmux_session_target"
+  else
+    tmux attach-session -t "$_taw_selected_tmux_session_target"
+  fi
+}
+
 _taw_can_reuse_existing_window() {
   [[ "$_taw_agent_arg_provided" != true \
     && "$_taw_editor_arg_provided" != true \
@@ -2262,6 +2324,11 @@ case $? in
   130) return 0 ;;
   *) return 1 ;;
 esac
+
+if [[ -n "$_taw_selected_tmux_session_target" ]]; then
+  _taw_switch_to_selected_tmux_session
+  return
+fi
 
 _taw_classify_operands || return 1
 

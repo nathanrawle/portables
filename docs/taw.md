@@ -70,7 +70,9 @@ Project picker aliases:
 
 Picker result handling:
 
-- `[TMUX]` rows resolve by tmux session identity, not by generic project-name lookup
+- `[TMUX]` rows switch or attach directly by tmux session identity, preserving the session's active window
+- with `--peer`, a `[TMUX]` row links that active window into the invoking session and selects it there
+- layout options apply to project rows; `[TMUX]` rows do not create layouts
 - `normal` and `plain` projects open directly
 - `bare` projects open their default worktree directly
 
@@ -243,6 +245,9 @@ a descendant directory. A match in the invoking session is selected directly.
 A match in another session is added to the invoking session with
 `link-window`. If there is no match, taw creates its normal layout directly in
 the invoking session.
+
+When a `[TMUX]` project-picker row is selected, peer mode links that session's
+active window into the invoking session and selects it there.
 
 An existing match conflicts with an explicit `-agent`, `-ed`, or `-sh`, or
 with a non-empty `TAW_AGENT`. Use `--force` to skip all reuse and create a
