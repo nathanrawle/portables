@@ -1999,12 +1999,46 @@ _taw_switch_to_tmux_window() {
 }
 
 _taw_switch_to_selected_tmux_session() {
+  local _taw_selected_window_id _taw_current_window_ids _taw_window_id
+  local _taw_selected_window_is_linked=false
+
   tmux has-session -t "$_taw_selected_tmux_session_target" 2>/dev/null || {
     _taw_die "could not resolve tmux session: $_taw_selected_tmux_session_name"
     return 1
   }
 
-  if [[ -n "${TMUX:-}" ]]; then
+  if [[ "$_taw_peer" == true ]]; then
+    _taw_selected_window_id="$(
+      tmux display-message -p -t "$_taw_selected_tmux_session_target:" \
+        '#{window_id}' 2>/dev/null
+    )" || {
+      _taw_die "could not resolve active window for tmux session: $_taw_selected_tmux_session_name"
+      return 1
+    }
+    [[ -n "$_taw_selected_window_id" ]] || {
+      _taw_die "could not resolve active window for tmux session: $_taw_selected_tmux_session_name"
+      return 1
+    }
+
+    _taw_current_window_ids="$(
+      tmux list-windows -t "$_taw_current_session_id" -F '#{window_id}' 2>/dev/null
+    )" || {
+      _taw_die "could not resolve current tmux session"
+      return 1
+    }
+    for _taw_window_id in "${(@f)_taw_current_window_ids}"; do
+      if [[ "$_taw_window_id" == "$_taw_selected_window_id" ]]; then
+        _taw_selected_window_is_linked=true
+        break
+      fi
+    done
+
+    if [[ "$_taw_selected_window_is_linked" != true ]]; then
+      tmux link-window -d -s "$_taw_selected_window_id" \
+        -t "$_taw_current_session_id:" || return 1
+    fi
+    tmux select-window -t "$_taw_selected_window_id"
+  elif [[ -n "${TMUX:-}" ]]; then
     tmux switch-client -t "$_taw_selected_tmux_session_target"
   else
     tmux attach-session -t "$_taw_selected_tmux_session_target"

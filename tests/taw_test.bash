@@ -108,6 +108,12 @@ case "${1:-}" in
     printf '%b' "$panes"
     [[ "$panes" = *$'\n' ]] || printf '\n'
     ;;
+  list-windows)
+    windows="${TAW_FAKE_TMUX_CURRENT_SESSION_WINDOWS-}"
+    [[ -n "$windows" ]] || exit 1
+    printf '%b' "$windows"
+    [[ "$windows" = *$'\n' ]] || printf '\n'
+    ;;
   list-sessions)
     [[ -n "${TAW_FAKE_TMUX_SESSIONS+x}" ]] || exit 1
     sessions="$TAW_FAKE_TMUX_SESSIONS"
@@ -180,7 +186,9 @@ case "${1:-}" in
     printf '%%%d\n' "$count"
     ;;
   display-message)
-    if [[ "$*" = *'#{session_id}'* ]]; then
+    if [[ "$*" = *'#{window_id}'* ]]; then
+      printf '%s\n' "${TAW_FAKE_TMUX_CURRENT_WINDOW_ID:-@1}"
+    elif [[ "$*" = *'#{session_id}'* ]]; then
       printf '%s\n' "${TAW_FAKE_TMUX_CURRENT_SESSION_ID:-\$1}"
     elif [[ "$*" = *'#S'* ]]; then
       printf '%s\n' "${TAW_FAKE_TMUX_CURRENT_SESSION_NAME:-current}"
@@ -2250,6 +2258,77 @@ test_project_picker_tmux_row_preserves_active_window_inside_tmux() {
   assert_file_not_contains "$log" $'npm test'
 }
 
+test_project_picker_tmux_row_links_active_window_with_peer() {
+  local xdg empty_search session_path elsewhere fake_bin log fzf_log sessions no_fzf_path
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  session_path="$TEST_TMPDIR/session-path"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$session_path" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$9\ttarget\t'"$session_path"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
+    TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_HAS_SESSION_TARGETS='$9' \
+    TAW_FAKE_TMUX_CURRENT_WINDOW_ID='@9' \
+    TAW_FAKE_TMUX_CURRENT_SESSION_WINDOWS=$'@1\n@2' TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_FZF_MATCH='[TMUX] target' TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" -ts --peer
+
+  assert_file_contains "$fzf_log" '[TMUX] target'
+  assert_file_contains "$log" $'display-message\t-p\t-t\t$9:\t#{window_id}'
+  assert_file_contains "$log" $'list-windows\t-t\t$1\t-F\t#{window_id}'
+  assert_file_contains "$log" $'link-window\t-d\t-s\t@9\t-t\t$1:'
+  assert_file_contains "$log" $'select-window\t-t\t@9'
+  assert_file_not_contains "$log" $'switch-client\t'
+  assert_file_not_contains "$log" $'attach-session\t'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'new-session\t'
+  assert_file_not_contains "$log" $'select-pane\t'
+}
+
+test_project_picker_tmux_row_reuses_linked_active_window_with_peer() {
+  local xdg empty_search session_path elsewhere fake_bin log fzf_log sessions no_fzf_path
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  session_path="$TEST_TMPDIR/session-path"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$session_path" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$9\ttarget\t'"$session_path"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
+    TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_HAS_SESSION_TARGETS='$9' \
+    TAW_FAKE_TMUX_CURRENT_WINDOW_ID='@9' \
+    TAW_FAKE_TMUX_CURRENT_SESSION_WINDOWS=$'@1\n@9' TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_FZF_MATCH='[TMUX] target' TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" -ts --peer
+
+  assert_file_contains "$fzf_log" '[TMUX] target'
+  assert_file_contains "$log" $'select-window\t-t\t@9'
+  assert_file_not_contains "$log" $'link-window\t'
+  assert_file_not_contains "$log" $'switch-client\t'
+  assert_file_not_contains "$log" $'attach-session\t'
+}
+
 test_project_picker_tmux_row_uses_session_identity() {
   local xdg empty_search tmux_repo tmux_real collision elsewhere fake_bin log fzf_log sessions no_fzf_path
 
@@ -3873,6 +3952,10 @@ test_case "taw: empty project prompt picker resolves tmux session rows" \
   test_empty_prompt_project_picker_resolves_tmux_session_row
 test_case "taw: project picker tmux row preserves active window inside tmux" \
   test_project_picker_tmux_row_preserves_active_window_inside_tmux
+test_case "taw: project picker tmux row links active window with peer" \
+  test_project_picker_tmux_row_links_active_window_with_peer
+test_case "taw: project picker tmux row reuses linked active window with peer" \
+  test_project_picker_tmux_row_reuses_linked_active_window_with_peer
 test_case "taw: project picker tmux row uses session identity" \
   test_project_picker_tmux_row_uses_session_identity
 test_case "taw: project picker tmux row ignores PROJECTS_HOME collision" \
