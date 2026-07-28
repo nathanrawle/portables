@@ -50,6 +50,12 @@ Common, already-accepted command-line tools may be treated as part of the practi
 - Prefer explicitness over hidden magic.
 - Minimise irreversible or destructive actions.
 
+### Code comments
+- Must be formulated to answer the "why?" of a piece of code, **not** the what or the how
+- Each should occupy at most a single line and be less than ~100 characters long
+- up to a maximum of three lines may be used if absolutely essential to convey the "why"
+- Answers for the "what" and the "how" of the code, and longer answers to the "why" are candidates for more formal documentation
+
 ## Validation
 
 - After making changes, run the smallest relevant checks first.
