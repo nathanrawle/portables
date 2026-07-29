@@ -18,6 +18,8 @@ venv/
 
 .act/
 
+.worktrees/
+
 .terraform
 *tfplan*
 *planfile*

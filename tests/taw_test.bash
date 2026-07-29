@@ -409,7 +409,7 @@ run_taw() {
   local cwd="$1"
   local taw_path
   shift
-  taw_path="${TAW_RUN_PATH:-$TAW_FAKE_TMUX_BIN:$PATH}"
+  taw_path="${TAW_RUN_PATH:-${TAW_FAKE_TMUX_BIN:+$TAW_FAKE_TMUX_BIN:}$PATH}"
 
   (
     cd "$cwd" || exit 1
@@ -555,33 +555,34 @@ test_taw_agent_env_disables_existing_window_reuse() {
 }
 
 test_named_branch_checks_out_normal_repo() {
-  local repo repo_real fake_bin log branch
+  local repo worktree_real fake_bin log branch
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
-  repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR="vim -u NONE" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo" -b develop
 
-  branch="$(git -C "$repo" branch --show-current)"
-  assert_eq "develop" "$branch" "expected named branch checkout"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim -u NONE'
-  assert_file_contains "$log" $'rename-window\t-t\t@1\trepo'
-  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tcodex'
+  worktree_real="$(cd "$repo/.worktrees/develop" && pwd -P)"
+  branch="$(git -C "$worktree_real" branch --show-current)"
+  assert_eq "develop" "$branch" "expected named branch worktree"
+  assert_eq "main" "$(git -C "$repo" branch --show-current)" \
+    "expected the primary worktree branch to remain unchanged"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tdevelop\t-c\t'"$worktree_real"$'\tvim -u NONE'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\tdevelop'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex'
   assert_file_not_contains "$log" $'send-keys\t'
 }
 
 test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch() {
-  local repo repo_real fake_bin log branch upstream_ref
+  local repo worktree_real fake_bin log branch upstream_ref
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
   git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
   git -C "$repo" update-ref refs/remotes/origin/feature/foo refs/heads/develop
-  repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
@@ -590,11 +591,14 @@ test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo"
 
-  branch="$(git -C "$repo" branch --show-current)"
-  upstream_ref="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
-  assert_eq "feature/foo" "$branch" "expected picker branch checkout"
+  worktree_real="$(cd "$repo/.worktrees/feature/foo" && pwd -P)"
+  branch="$(git -C "$worktree_real" branch --show-current)"
+  upstream_ref="$(git -C "$worktree_real" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq "feature/foo" "$branch" "expected picker branch worktree"
   assert_eq "origin/feature/foo" "$upstream_ref" "expected remote branch tracking"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_eq "main" "$(git -C "$repo" branch --show-current)" \
+    "expected the primary worktree branch to remain unchanged"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tfoo\t-c\t'"$worktree_real"$'\tvim'
   assert_file_not_contains "$log" $'send-keys\t'
 }
 
@@ -617,9 +621,9 @@ test_normal_repo_picker_lists_deduped_branches() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo"
 
-  main_count="$(grep -F $'main\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
+  main_count="$(grep -F $'main [worktree]\tworktree' "$fzf_log" | wc -l | tr -d ' ')"
   remote_count="$(grep -F $'remote-only\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
-  assert_eq "1" "$main_count" "expected local main to suppress remote main"
+  assert_eq "1" "$main_count" "expected root main worktree to suppress branch duplicates"
   assert_eq "1" "$remote_count" "expected duplicate remote branches to dedupe to one picker row"
   assert_file_contains "$fzf_log" $'remote-only\tbranch\tremote-only\torigin/remote-only\t'
   assert_file_not_contains "$fzf_log" $'origin/main'
@@ -643,6 +647,25 @@ test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged() {
   assert_eq "main" "$branch" "expected repo to remain on current branch"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
   assert_file_not_contains "$log" $'checkout\t'
+}
+
+test_normal_linked_worktree_resolves_primary_project() {
+  local repo worktree worktree_real fake_bin log no_fzf_path
+
+  repo="$TEST_TMPDIR/repo"
+  worktree="$repo/.worktrees/develop"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add -q "$worktree" develop
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" run_taw "$TEST_TMPDIR" -p "$worktree"
+
+  assert_file_contains "$log" \
+    $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tdevelop\t-c\t'"$worktree_real"$'\tvim'
 }
 
 test_normal_repo_picker_cancel_returns_success_without_tmux() {
@@ -690,9 +713,11 @@ test_explicit_normal_origin_topic_local_branch_wins_over_remote() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo" -b origin/topic
 
-  branch="$(git -C "$repo" branch --show-current)"
+  branch="$(git -C "$repo/.worktrees/origin/topic" branch --show-current)"
   assert_eq "origin/topic" "$branch" "expected exact local branch to win"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo'
+  assert_eq "main" "$(git -C "$repo" branch --show-current)" \
+    "expected the primary worktree branch to remain unchanged"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\ttopic'
 }
 
 test_explicit_normal_longest_remote_prefix_resolves_to_nested_remote_branch() {
@@ -711,8 +736,8 @@ test_explicit_normal_longest_remote_prefix_resolves_to_nested_remote_branch() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo" -b foo/bar/topic
 
-  branch="$(git -C "$repo" branch --show-current)"
-  upstream_ref="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  branch="$(git -C "$repo/.worktrees/topic" branch --show-current)"
+  upstream_ref="$(git -C "$repo/.worktrees/topic" rev-parse --abbrev-ref --symbolic-full-name @{u})"
   assert_eq "topic" "$branch" "expected longest remote prefix to resolve nested remote branch"
   assert_eq "foo/bar/topic" "$upstream_ref" "expected nested remote branch tracking"
 }
@@ -730,8 +755,8 @@ test_explicit_normal_branch_resolves_remote_only_by_branch_name() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo" -b feature/foo
 
-  branch="$(git -C "$repo" branch --show-current)"
-  upstream_ref="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  branch="$(git -C "$repo/.worktrees/feature/foo" branch --show-current)"
+  upstream_ref="$(git -C "$repo/.worktrees/feature/foo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
   assert_eq "feature/foo" "$branch" "expected remote-only branch to create local branch"
   assert_eq "origin/feature/foo" "$upstream_ref" "expected remote-only branch tracking"
 }
@@ -750,8 +775,8 @@ test_explicit_normal_branch_ignores_stale_unconfigured_remote_ref() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo" -b feature/foo
 
-  branch="$(git -C "$repo" branch --show-current)"
-  upstream_ref="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  branch="$(git -C "$repo/.worktrees/feature/foo" branch --show-current)"
+  upstream_ref="$(git -C "$repo/.worktrees/feature/foo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
   assert_eq "feature/foo" "$branch" "expected stale unconfigured remote ref to stay on the branch name"
   assert_eq "origin/feature/foo" "$upstream_ref" "expected configured remote to win over stale remote ref"
 }
@@ -927,8 +952,8 @@ test_outside_promotion_uses_project_and_operand_positionals() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR/elsewhere" "$project" feature-x
 
-  branch="$(git -C "$project/feature-x" branch --show-current)"
-  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/feature-x" && pwd -P)"
   assert_eq "feature-x" "$branch" "expected promoted positional project to keep remaining operand"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -990,12 +1015,36 @@ test_project_arg_github_url_clones_and_opens_project() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR" -p "$url"
 
-  branch="$(git -C "$dest/main" branch --show-current)"
-  worktree_real="$(cd "$dest/main" && pwd -P)"
-  assert_eq "main" "$branch" "expected -p URL to clone and open default branch worktree"
+  branch="$(git -C "$dest" branch --show-current)"
+  worktree_real="$(cd "$dest" && pwd -P)"
+  assert_eq "main" "$branch" "expected -p URL to clone and open a normal repository"
   assert_exists "$dest/.git"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tcloned\t-n\tmain'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tcloned\t-n\tcloned'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_project_arg_url_allows_explicit_bare_clone() {
+  local src dest fake_bin no_fzf_path log url branch
+
+  src="$TEST_TMPDIR/src"
+  dest="$TEST_TMPDIR/cloned"
+  url="https://example.invalid/repo.git"
+  make_git_repo "$src"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  make_fake_git_url_clone "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf '%s\nbare\n' "$dest" | EDITOR=vim \
+    TAW_FAKE_GIT_CLONE_SOURCE="$src" TAW_FAKE_GIT_CLONE_URL="$url" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$TEST_TMPDIR" -p "$url"
+
+  branch="$(git --git-dir "$dest/.git" symbolic-ref --quiet --short HEAD)"
+  assert_eq "true" "$(git --git-dir "$dest/.git" rev-parse --is-bare-repository)" \
+    "expected explicit bare clone selection to remain available"
+  assert_eq "$branch" "$(git -C "$dest/.worktrees/$branch" branch --show-current)" \
+    "expected explicit bare clone worktree under .worktrees"
 }
 
 test_project_arg_resolves_by_tmux_session_name() {
@@ -1131,10 +1180,10 @@ test_unresolved_project_flag_creates_plain_repo_and_bare_projects() {
     run_taw "$TEST_TMPDIR/elsewhere" -p bare-missing
   bare_target="$projects_home/bare-missing"
   branch="$(git --git-dir "$bare_target/.git" symbolic-ref --quiet --short HEAD)"
-  worktree_real="$(cd "$bare_target/$branch" && pwd -P)"
+  worktree_real="$(cd "$bare_target/.worktrees/$branch" && pwd -P)"
   assert_exists "$bare_target/.git"
-  assert_exists "$bare_target/$branch"
-  assert_eq "$branch" "$(git -C "$bare_target/$branch" branch --show-current)" "expected bare creation to open orphan worktree"
+  assert_exists "$bare_target/.worktrees/$branch"
+  assert_eq "$branch" "$(git -C "$bare_target/.worktrees/$branch" branch --show-current)" "expected bare creation to open orphan worktree"
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1170,6 +1219,23 @@ test_outside_positional_unresolved_creates_repo_project() {
   assert_exists "$repo_real/.git"
   repo_real="$(cd "$repo_real" && pwd -P)"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tmissing\t-n\tmissing\t-c\t'"$repo_real"$'\tvim'
+}
+
+test_unresolved_repo_branch_target_creates_worktree() {
+  local repo fake_bin log worktree_real
+
+  repo="$TEST_TMPDIR/repo"
+  mkdir -p "$TEST_TMPDIR/elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  printf 'y\nrepo\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$TEST_TMPDIR/elsewhere" -p "$repo" -b feature/topic
+
+  worktree_real="$(cd "$repo/.worktrees/feature/topic" && pwd -P)"
+  assert_eq "feature/topic" "$(git -C "$worktree_real" branch --show-current)" \
+    "expected the requested branch in a managed worktree"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
 test_unresolved_project_creation_rejects_invalid_repo_and_bare_names_before_mkdir() {
@@ -1288,10 +1354,10 @@ test_creates_bare_worktree_from_positional_base_ref() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" fix/broken-feature develop
 
-  branch="$(git -C "$project/fix/broken-feature" branch --show-current)"
+  branch="$(git -C "$project/.worktrees/fix/broken-feature" branch --show-current)"
   expected="$(git -C "$project" rev-parse develop)"
-  actual="$(git -C "$project/fix/broken-feature" rev-parse HEAD)"
-  worktree_real="$(cd "$project/fix/broken-feature" && pwd -P)"
+  actual="$(git -C "$project/.worktrees/fix/broken-feature" rev-parse HEAD)"
+  worktree_real="$(cd "$project/.worktrees/fix/broken-feature" && pwd -P)"
   assert_eq "fix/broken-feature" "$branch" "expected worktree branch named after worktree path"
   assert_eq "$expected" "$actual" "expected worktree branch to start from positional base ref"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tbroken-feature'
@@ -1309,8 +1375,8 @@ test_creates_bare_worktree_from_positional_path_branch() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" fix/broken-feature
 
-  branch="$(git -C "$project/fix/broken-feature" branch --show-current)"
-  worktree_real="$(cd "$project/fix/broken-feature" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/fix/broken-feature" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/fix/broken-feature" && pwd -P)"
   assert_eq "fix/broken-feature" "$branch" "expected positional path to become the branch name"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tbroken-feature'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -1327,7 +1393,7 @@ test_bare_positional_worktree_supports_shell_equals_command() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" -sh='ADDR=:8081 go run ./cmd/web' -- provisional-venues
 
-  worktree_real="$(cd "$project/provisional-venues" && pwd -P)"
+  worktree_real="$(cd "$project/.worktrees/provisional-venues" && pwd -P)"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tprovisional-venues'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$worktree_real"$'\tADDR=:8081 go run ./cmd/web'
@@ -1338,8 +1404,8 @@ test_shell_option_skips_existing_window_reuse() {
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   git --git-dir "$project/.git" branch provisional-venues main
-  git --git-dir "$project/.git" worktree add "$project/provisional-venues" provisional-venues >/dev/null 2>&1
-  worktree_real="$(cd "$project/provisional-venues" && pwd -P)"
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/provisional-venues" provisional-venues >/dev/null 2>&1
+  worktree_real="$(cd "$project/.worktrees/provisional-venues" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
   panes=$'@8\t'"$worktree_real"$'\n'
@@ -1379,7 +1445,7 @@ test_supports_bare_child_not_named_git() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" feature-x develop
 
-  branch="$(git -C "$project/feature-x" branch --show-current)"
+  branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
   assert_eq "feature-x" "$branch" "expected worktree branch from .bare repo"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
 }
@@ -1395,10 +1461,10 @@ test_conventional_bare_clone_places_worktrees_outside_git_dir() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$bare" feature-x develop
 
-  branch="$(git -C "$project/feature-x" branch --show-current)"
+  branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
   expected="$(git --git-dir "$bare" rev-parse develop)"
-  actual="$(git -C "$project/feature-x" rev-parse HEAD)"
-  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  actual="$(git -C "$project/.worktrees/feature-x" rev-parse HEAD)"
+  worktree_real="$(cd "$project/.worktrees/feature-x" && pwd -P)"
   assert_eq "feature-x" "$branch" "expected conventional bare clone worktree branch"
   assert_eq "$expected" "$actual" "expected worktree branch to start from positional base ref"
   assert_not_exists "$bare/feature-x"
@@ -1411,15 +1477,15 @@ test_conventional_bare_worktree_detection_keeps_project_root() {
 
   bare="$(make_conventional_bare_clone "$TEST_TMPDIR" "project")"
   project="${bare%.git}"
-  git --git-dir "$bare" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$bare" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$project/main" feature-x develop
+    run_taw "$project/.worktrees/main" feature-x develop
 
-  branch="$(git -C "$project/feature-x" branch --show-current)"
-  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/feature-x" && pwd -P)"
   assert_eq "feature-x" "$branch" "expected detected conventional bare project root"
   assert_not_exists "$TEST_TMPDIR/feature-x"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
@@ -1437,8 +1503,8 @@ test_bare_project_without_worktree_opens_default_branch_worktree() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
-  branch="$(git -C "$project/main" branch --show-current)"
-  worktree_real="$(cd "$project/main" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/main" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_eq "main" "$branch" "expected bare project default branch worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
   assert_file_contains "$log" $'set-window-option\t-t\t@1\tallow-rename\toff'
@@ -1450,8 +1516,8 @@ test_bare_default_worktree_window_is_reused() {
   local project fake_bin log fzf_log branch worktree_real panes display
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
-  worktree_real="$(cd "$project/main" && pwd -P)"
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
+  worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
@@ -1466,7 +1532,7 @@ test_bare_default_worktree_window_is_reused() {
 
   display="$(grep -F $'main [worktree]\tworktree' "$fzf_log" | cut -f1)"
   assert_eq "main [worktree]" "$display" "expected fzf worktree display to omit path"
-  branch="$(git -C "$project/main" branch --show-current)"
+  branch="$(git -C "$project/.worktrees/main" branch --show-current)"
   assert_eq "main" "$branch" "expected bare project default branch worktree"
   assert_file_contains "$log" $'has-session\t-t\tproject'
   assert_file_contains "$log" $'list-panes\t-s\t-t\tproject:\t-F\t#{window_id}\t#{pane_id}\t#{pane_current_path}'
@@ -1491,8 +1557,8 @@ test_bare_project_without_default_falls_back_to_master() {
     TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
-  branch="$(git -C "$project/master" branch --show-current)"
-  worktree_real="$(cd "$project/master" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/master" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/master" && pwd -P)"
   assert_eq "master" "$branch" "expected bare project to fall back to master"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmaster'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -1513,8 +1579,8 @@ test_bare_project_origin_head_only_creates_local_default_worktree() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
-  branch="$(git -C "$project/main" branch --show-current)"
-  worktree_real="$(cd "$project/main" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/main" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_eq "main" "$branch" "expected origin/HEAD-only repo to create local main worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -1524,7 +1590,7 @@ test_bare_picker_lists_deduped_branches() {
   local project fake_bin log fzf_log main_count remote_count
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" update-ref refs/remotes/origin/main refs/heads/develop
   git --git-dir "$project/.git" update-ref refs/remotes/upstream/remote-only refs/heads/main
   git --git-dir "$project/.git" update-ref refs/remotes/origin/remote-only refs/heads/develop
@@ -1550,7 +1616,7 @@ test_bare_picker_remote_branch_creates_local_worktree() {
   local project fake_bin log branch worktree_real expected actual
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" update-ref refs/remotes/origin/feature/remote refs/heads/develop
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
@@ -1560,10 +1626,10 @@ test_bare_picker_remote_branch_creates_local_worktree() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
-  branch="$(git -C "$project/feature/remote" branch --show-current)"
-  worktree_real="$(cd "$project/feature/remote" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/feature/remote" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/feature/remote" && pwd -P)"
   expected="$(git --git-dir "$project/.git" rev-parse refs/remotes/origin/feature/remote)"
-  actual="$(git -C "$project/feature/remote" rev-parse HEAD)"
+  actual="$(git -C "$project/.worktrees/feature/remote" rev-parse HEAD)"
   assert_eq "feature/remote" "$branch" "expected remote picker branch to create local branch"
   assert_eq "$expected" "$actual" "expected remote picker branch to start from remote ref"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tremote'
@@ -1574,7 +1640,7 @@ test_bare_picker_prefers_origin_for_duplicate_remotes() {
   local project fake_bin log expected actual
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" update-ref refs/remotes/upstream/remote-choice refs/heads/main
   git --git-dir "$project/.git" update-ref refs/remotes/origin/remote-choice refs/heads/develop
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
@@ -1586,7 +1652,7 @@ test_bare_picker_prefers_origin_for_duplicate_remotes() {
     run_taw "$TEST_TMPDIR" -p "$project"
 
   expected="$(git --git-dir "$project/.git" rev-parse refs/remotes/origin/remote-choice)"
-  actual="$(git -C "$project/remote-choice" rev-parse HEAD)"
+  actual="$(git -C "$project/.worktrees/remote-choice" rev-parse HEAD)"
   assert_eq "$expected" "$actual" "expected duplicate remote branch to prefer origin"
 }
 
@@ -1594,7 +1660,7 @@ test_bare_picker_strips_slash_remote_names() {
   local project fake_bin log expected actual branch worktree_real
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" remote add "foo/bar" "$TEST_TMPDIR/remote.git"
   git --git-dir "$project/.git" update-ref refs/remotes/foo/bar/topic refs/heads/develop
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
@@ -1605,10 +1671,10 @@ test_bare_picker_strips_slash_remote_names() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
-  branch="$(git -C "$project/topic" branch --show-current)"
-  worktree_real="$(cd "$project/topic" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/topic" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/topic" && pwd -P)"
   expected="$(git --git-dir "$project/.git" rev-parse refs/remotes/foo/bar/topic)"
-  actual="$(git -C "$project/topic" rev-parse HEAD)"
+  actual="$(git -C "$project/.worktrees/topic" rev-parse HEAD)"
   assert_eq "topic" "$branch" "expected slash remote name to be stripped from branch"
   assert_eq "$expected" "$actual" "expected slash remote branch to start from full remote ref"
   assert_not_exists "$project/bar/topic"
@@ -1620,7 +1686,7 @@ test_bare_picker_cancel_returns_success_without_tmux() {
   local project fake_bin log
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
@@ -1634,7 +1700,7 @@ test_bare_picker_without_fzf_falls_back_to_default_worktree() {
   local project fake_bin log branch worktree_real no_fzf_path
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
@@ -1642,8 +1708,8 @@ test_bare_picker_without_fzf_falls_back_to_default_worktree() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
-  branch="$(git -C "$project/main" branch --show-current)"
-  worktree_real="$(cd "$project/main" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/main" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_eq "main" "$branch" "expected bare picker fallback to open default worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -1653,7 +1719,7 @@ test_bare_picker_error_fails_without_tmux() {
   local project fake_bin log
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
@@ -1676,9 +1742,9 @@ test_bare_remote_only_branch_sets_upstream_tracking() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" -b feature/foo
 
-  branch="$(git -C "$project/feature/foo" branch --show-current)"
-  upstream_ref="$(git -C "$project/feature/foo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
-  worktree_real="$(cd "$project/feature/foo" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/feature/foo" branch --show-current)"
+  upstream_ref="$(git -C "$project/.worktrees/feature/foo" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  worktree_real="$(cd "$project/.worktrees/feature/foo" && pwd -P)"
   assert_eq "feature/foo" "$branch" "expected bare remote-only branch to create local branch"
   assert_eq "origin/feature/foo" "$upstream_ref" "expected bare remote-only branch tracking"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfoo'
@@ -1698,8 +1764,8 @@ test_bare_zero_worktree_uses_head_branch_when_no_refs_exist() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project"
 
-  branch="$(git -C "$project/missing" branch --show-current)"
-  worktree_real="$(cd "$project/missing" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/missing" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/missing" && pwd -P)"
   assert_eq "missing" "$branch" "expected orphan worktree branch to use HEAD symbolic-ref"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmissing'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -1721,7 +1787,7 @@ test_bare_zero_worktree_fails_when_refs_exist_but_no_default_resolves() {
     fail "expected bare project with unresolved refs to fail"
   fi
 
-  assert_not_exists "$project/missing"
+  assert_not_exists "$project/.worktrees/missing"
   [[ ! -f "$log" ]] || fail "expected tmux not to run after unresolved bare default"
 }
 
@@ -1741,7 +1807,7 @@ test_bare_zero_worktree_fails_when_only_tag_ref_exists() {
     fail "expected bare project with only a tag ref to fail"
   fi
 
-  assert_not_exists "$project/missing"
+  assert_not_exists "$project/.worktrees/missing"
   [[ ! -f "$log" ]] || fail "expected tmux not to run after tag-only bare default"
 }
 
@@ -1755,8 +1821,8 @@ test_bare_project_named_branch_without_worktree_opens_branch_worktree() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" -b develop
 
-  branch="$(git -C "$project/develop" branch --show-current)"
-  worktree_real="$(cd "$project/develop" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/develop" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/develop" && pwd -P)"
   assert_eq "develop" "$branch" "expected bare -b to open branch worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tdevelop'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -1766,19 +1832,19 @@ test_explicit_bare_worktree_subdir_with_branch_opens_project_root_worktree() {
   local project fake_bin log branch worktree_real
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/main" main >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/main" main >/dev/null 2>&1
   git --git-dir "$project/.git" branch feature-x main
-  mkdir -p "$project/main/src"
+  mkdir -p "$project/.worktrees/main/src"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$TEST_TMPDIR" -p "$project/main/src" -b feature-x
+    run_taw "$TEST_TMPDIR" -p "$project/.worktrees/main/src" -b feature-x
 
-  branch="$(git -C "$project/feature-x" branch --show-current)"
-  worktree_real="$(cd "$project/feature-x" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/feature-x" && pwd -P)"
   assert_eq "feature-x" "$branch" "expected bare worktree subdir -b to target project root"
-  assert_not_exists "$project/main/src/feature-x"
+  assert_not_exists "$project/.worktrees/main/src/feature-x"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
@@ -1787,16 +1853,16 @@ test_explicit_bare_worktree_subdir_without_operands_opens_containing_worktree_ro
   local project fake_bin log branch worktree_real
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/develop" develop >/dev/null 2>&1
-  mkdir -p "$project/develop/src"
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/develop" develop >/dev/null 2>&1
+  mkdir -p "$project/.worktrees/develop/src"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$TEST_TMPDIR" -p "$project/develop/src"
+    run_taw "$TEST_TMPDIR" -p "$project/.worktrees/develop/src"
 
-  branch="$(git -C "$project/develop" branch --show-current)"
-  worktree_real="$(cd "$project/develop" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/develop" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/develop" && pwd -P)"
   assert_eq "develop" "$branch" "expected explicit bare subdir to open containing worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tdevelop\t-c\t'"$worktree_real"$'\tvim'
   assert_file_not_contains "$log" $'worktree\tadd'
@@ -1806,15 +1872,15 @@ test_explicit_bare_worktree_root_without_operands_opens_containing_worktree_root
   local project fake_bin log branch worktree_real
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  git --git-dir "$project/.git" worktree add "$project/develop" develop >/dev/null 2>&1
+  git --git-dir "$project/.git" worktree add "$project/.worktrees/develop" develop >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$TEST_TMPDIR" -p "$project/develop"
+    run_taw "$TEST_TMPDIR" -p "$project/.worktrees/develop"
 
-  branch="$(git -C "$project/develop" branch --show-current)"
-  worktree_real="$(cd "$project/develop" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/develop" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/develop" && pwd -P)"
   assert_eq "develop" "$branch" "expected explicit bare worktree root to open itself"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tdevelop\t-c\t'"$worktree_real"$'\tvim'
   assert_file_not_contains "$log" $'worktree\tadd'
@@ -1836,7 +1902,7 @@ test_bare_project_reuses_existing_default_branch_worktree_when_confirmed() {
   branch="$(git -C "$TEST_TMPDIR/main-existing" branch --show-current)"
   existing_real="$(cd "$TEST_TMPDIR/main-existing" && pwd -P)"
   assert_eq "main" "$branch" "expected accepted existing worktree to stay on main"
-  assert_not_exists "$project/main"
+  assert_not_exists "$project/.worktrees/main"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain-existing'
   assert_file_contains "$log" $'-c\t'"$existing_real"$'\tvim'
 }
@@ -1852,8 +1918,8 @@ test_bare_project_branch_with_slash_creates_nested_worktree() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" -b "feature/nested"
 
-  branch="$(git -C "$project/feature/nested" branch --show-current)"
-  worktree_real="$(cd "$project/feature/nested" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/feature/nested" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/feature/nested" && pwd -P)"
   assert_eq "feature/nested" "$branch" "expected branch with slash to create nested worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tnested'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -1870,10 +1936,10 @@ test_bare_project_local_slash_base_ref_stays_local() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" fix/broken-feature "feature/base"
 
-  branch="$(git -C "$project/fix/broken-feature" branch --show-current)"
+  branch="$(git -C "$project/.worktrees/fix/broken-feature" branch --show-current)"
   expected="$(git --git-dir "$project/.git" rev-parse feature/base)"
-  actual="$(git -C "$project/fix/broken-feature" rev-parse HEAD)"
-  worktree_real="$(cd "$project/fix/broken-feature" && pwd -P)"
+  actual="$(git -C "$project/.worktrees/fix/broken-feature" rev-parse HEAD)"
+  worktree_real="$(cd "$project/.worktrees/fix/broken-feature" && pwd -P)"
   assert_eq "fix/broken-feature" "$branch" "expected local slash base to create the requested path branch"
   assert_eq "$expected" "$actual" "expected local slash base to be used as the start point"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tbroken-feature'
@@ -1916,7 +1982,7 @@ test_bare_project_absolute_worktree_path_must_stay_under_wrapper() {
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
-  absolute_under="$project/fix/broken-feature"
+  absolute_under="$project/.worktrees/fix/broken-feature"
   outside_target="$TEST_TMPDIR/project-other/fix/broken-feature"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
@@ -1956,43 +2022,48 @@ test_bare_project_dot_segment_worktree_paths_are_rejected() {
 }
 
 test_normal_repo_checks_out_branch_from_single_positional() {
-  local repo repo_real fake_bin log branch
+  local repo worktree_real fake_bin log branch
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
   git -C "$repo" branch feature-x develop
-  repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo" feature-x
 
-  branch="$(git -C "$repo" branch --show-current)"
-  assert_eq "feature-x" "$branch" "expected single positional to check out branch in normal repo"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  worktree_real="$(cd "$repo/.worktrees/feature-x" && pwd -P)"
+  branch="$(git -C "$worktree_real" branch --show-current)"
+  assert_eq "feature-x" "$branch" "expected single positional to open a managed worktree"
+  assert_eq "main" "$(git -C "$repo" branch --show-current)" \
+    "expected the primary worktree branch to remain unchanged"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tfeature-x\t-c\t'"$worktree_real"$'\tvim'
 }
 
 test_normal_repo_rejects_two_positional_operands() {
-  local repo fake_bin log
+  local repo fake_bin log worktree
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
-  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$repo" -p "$repo" feature-x develop; then
-    fail "expected normal repo to reject two positional operands"
-  fi
-  [[ ! -f "$log" ]] || fail "expected tmux not to run after invalid normal operands"
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" feature-x develop
+
+  worktree="$repo/.worktrees/feature-x"
+  assert_eq "feature-x" "$(git -C "$worktree" branch --show-current)" \
+    "expected the first positional to name the worktree branch"
+  assert_eq "$(git -C "$repo" rev-parse develop)" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected the second positional to provide the base ref"
 }
 
 test_rejects_unrelated_git_repo_at_worktree_path() {
   local project fake_bin log unrelated
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
-  unrelated="$project/feature-x"
+  unrelated="$project/.worktrees/feature-x"
   make_git_repo "$unrelated"
   git -C "$unrelated" checkout -qb feature-x
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
@@ -2031,14 +2102,14 @@ test_existing_worktree_branch_switch_prompts() {
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   git -C "$project" branch feature-x develop
-  git -C "$project" worktree add -b other "$project/feature-x" main >/dev/null 2>&1
+  git -C "$project" worktree add -b other "$project/.worktrees/feature-x" main >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   printf 'y\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" feature-x develop
 
-  branch="$(git -C "$project/feature-x" branch --show-current)"
+  branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
   assert_eq "feature-x" "$branch" "expected existing worktree to switch after confirmation"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tfeature-x'
 }
@@ -2048,16 +2119,16 @@ test_existing_worktree_without_base_uses_project_head() {
 
   project="$(make_bare_wrapper "$TEST_TMPDIR")"
   git -C "$project" branch other develop
-  git -C "$project" worktree add "$project/feature-x" other >/dev/null 2>&1
+  git -C "$project" worktree add "$project/.worktrees/feature-x" other >/dev/null 2>&1
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
 
   printf 'y\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR" -p "$project" feature-x
 
-  branch="$(git -C "$project/feature-x" branch --show-current)"
+  branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
   expected="$(git -C "$project" rev-parse HEAD)"
-  actual="$(git -C "$project/feature-x" rev-parse HEAD)"
+  actual="$(git -C "$project/.worktrees/feature-x" rev-parse HEAD)"
   assert_eq "feature-x" "$branch" "expected existing worktree to switch to basename branch"
   assert_eq "$expected" "$actual" "expected missing basename branch to start from project HEAD"
 }
@@ -2174,7 +2245,7 @@ test_non_git_child_under_bare_wrapper_prompts_for_project() {
 
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
   assert_file_not_contains "$log" $'-s\tproject'
-  assert_not_exists "$project/main"
+  assert_not_exists "$project/.worktrees/main"
 }
 
 test_non_git_parent_with_bare_wrapper_child_prompts_for_project() {
@@ -2195,7 +2266,7 @@ test_non_git_parent_with_bare_wrapper_child_prompts_for_project() {
 
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
   assert_file_not_contains "$log" $'-s\tproject'
-  assert_not_exists "$project/main"
+  assert_not_exists "$project/.worktrees/main"
 }
 
 test_current_bare_wrapper_auto_detects_without_prompt() {
@@ -2210,8 +2281,8 @@ test_current_bare_wrapper_auto_detects_without_prompt() {
     TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$project"
 
-  branch="$(git -C "$project/main" branch --show-current)"
-  worktree_real="$(cd "$project/main" && pwd -P)"
+  branch="$(git -C "$project/.worktrees/main" branch --show-current)"
+  worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_eq "main" "$branch" "expected current bare wrapper to auto-detect"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
@@ -2744,7 +2815,7 @@ test_project_picker_flag_opens_bare_wrapper_default_worktree_without_second_pick
     run_taw "$current_repo" --pick-project
 
   assert_file_contains "$fzf_log" "$project"
-  project_real="$(cd "$project/main" && pwd -P)"
+  project_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\tproject\t-n\tmain\t-c\t'"$project_real"$'\tvim'
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_contains "$log" $'select-pane\t-t\t%1'
@@ -2823,16 +2894,16 @@ test_bare_creation_pending_worktree_path_becomes_branch() {
 
   printf 'y\nbare\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR/elsewhere" -p "$positional_target" fix/broken-feature
-  branch="$(git -C "$positional_target/fix/broken-feature" branch --show-current)"
-  worktree_real="$(cd "$positional_target/fix/broken-feature" && pwd -P)"
+  branch="$(git -C "$positional_target/.worktrees/fix/broken-feature" branch --show-current)"
+  worktree_real="$(cd "$positional_target/.worktrees/fix/broken-feature" && pwd -P)"
   assert_eq "fix/broken-feature" "$branch" "expected pending positional bare worktree path to become branch"
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 
   rm -f "$log"
   printf 'y\nbare\n' | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$TEST_TMPDIR/elsewhere" -p "$branch_target" -b fix/broken-feature
-  branch="$(git -C "$branch_target/fix/broken-feature" branch --show-current)"
-  worktree_real="$(cd "$branch_target/fix/broken-feature" && pwd -P)"
+  branch="$(git -C "$branch_target/.worktrees/fix/broken-feature" branch --show-current)"
+  worktree_real="$(cd "$branch_target/.worktrees/fix/broken-feature" && pwd -P)"
   assert_eq "fix/broken-feature" "$branch" "expected pending -b bare worktree path to become branch"
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
@@ -3452,8 +3523,10 @@ test_peer_normal_branch_resolution_is_unchanged() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$current_repo" --peer "$repo" develop
 
-  assert_eq "develop" "$(git -C "$repo" branch --show-current)" \
-    "expected peer to preserve normal branch resolution"
+  assert_eq "develop" "$(git -C "$repo/.worktrees/develop" branch --show-current)" \
+    "expected peer to create the requested worktree"
+  assert_eq "main" "$(git -C "$repo" branch --show-current)" \
+    "expected peer to preserve the primary worktree branch"
   assert_eq "main" "$(git -C "$current_repo" branch --show-current)" \
     "expected peer not to treat target arguments as current-project branches"
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:'
@@ -3494,8 +3567,10 @@ test_peer_positional_project_accepts_branch_flag() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$current_repo" --peer "$target" -b develop
 
-  assert_eq "develop" "$(git -C "$target" branch --show-current)" \
-    "expected -b to apply to the positional peer project"
+  assert_eq "develop" "$(git -C "$target/.worktrees/develop" branch --show-current)" \
+    "expected -b to create a worktree in the positional peer project"
+  assert_eq "main" "$(git -C "$target" branch --show-current)" \
+    "expected the target primary worktree branch to remain unchanged"
   assert_eq "main" "$(git -C "$current_repo" branch --show-current)" \
     "expected the invoking project branch to remain unchanged"
 }
@@ -3528,8 +3603,10 @@ test_non_peer_positional_keeps_current_project_branch_shorthand() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" develop
 
-  assert_eq "develop" "$(git -C "$repo" branch --show-current)" \
-    "expected ordinary taw positional branch shorthand to remain unchanged"
+  assert_eq "develop" "$(git -C "$repo/.worktrees/develop" branch --show-current)" \
+    "expected ordinary positional shorthand to create a managed worktree"
+  assert_eq "main" "$(git -C "$repo" branch --show-current)" \
+    "expected ordinary positional shorthand to preserve the root branch"
 }
 
 test_peer_links_resolved_bare_worktree() {
@@ -3607,15 +3684,249 @@ if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = remove \
   && "\${1:-}" = --git-dir && "\${3:-}" = symbolic-ref && "\${4:-}" = HEAD ]]; then
   exit 95
 fi
-if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = remove \
-  && "\${1:-}" = --git-dir && "\${3:-}" = worktree && "\${4:-}" = remove ]]; then
-  exit 96
-fi
+  if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = remove \
+    && "\${1:-}" = --git-dir && "\${3:-}" = worktree && "\${4:-}" = remove ]]; then
+    exit 96
+  fi
+  if [[ "\${TAW_CONVERT_FAIL_STAGE:-worktree}" = nonbare \
+    && "\${1:-}" = --git-dir && "\${3:-}" = config \
+    && "\${4:-}" = core.bare && "\${5:-}" = false ]]; then
+    exit 97
+  fi
 
 exec "$real_git" "\$@"
 EOF
   chmod +x "$bin/git"
   printf '%s\n' "$bin"
+}
+
+test_convert_bare_project_promotes_dirty_default_and_moves_worktrees() {
+  local project main_worktree develop_worktree external before_main before_develop
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  main_worktree="$project/main"
+  external="$TEST_TMPDIR/develop-external"
+  git --git-dir "$project/.git" worktree add -q "$main_worktree" main
+  git --git-dir "$project/.git" worktree add -q "$external" develop
+  printf 'staged\n' >"$main_worktree/staged.txt"
+  git -C "$main_worktree" add staged.txt
+  printf 'dirty\n' >>"$main_worktree/README.md"
+  printf 'untracked\n' >"$external/untracked.txt"
+  before_main="$(git -C "$main_worktree" status --porcelain=v2 --branch --untracked-files=all)"
+  before_develop="$(git -C "$external" status --porcelain=v2 --branch --untracked-files=all)"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  develop_worktree="$project/.worktrees/develop"
+  assert_eq "false" "$(git -C "$project" rev-parse --is-bare-repository)" \
+    "expected a normal primary repository"
+  assert_eq "main" "$(git -C "$project" branch --show-current)" \
+    "expected the default branch at the repository root"
+  assert_eq "$before_main" \
+    "$(git -C "$project" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected promoted default worktree state to be preserved"
+  assert_eq "$before_develop" \
+    "$(git -C "$develop_worktree" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected linked worktree state to be preserved"
+  assert_not_exists "$main_worktree"
+  assert_not_exists "$external"
+}
+
+test_convert_bare_project_moves_slash_and_detached_worktrees() {
+  local project detached_source detached_commit
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  git --git-dir "$project/.git" branch feature/topic develop
+  git --git-dir "$project/.git" worktree add -q \
+    "$TEST_TMPDIR/topic-external" feature/topic
+  detached_source="$TEST_TMPDIR/detached-copy"
+  git --git-dir "$project/.git" worktree add -q --detach "$detached_source" main
+  detached_commit="$(git -C "$detached_source" rev-parse HEAD)"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "feature/topic" \
+    "$(git -C "$project/.worktrees/feature/topic" branch --show-current)" \
+    "expected branch names to determine managed paths"
+  assert_eq "$detached_commit" \
+    "$(git -C "$project/.worktrees/detached-copy" rev-parse HEAD)" \
+    "expected detached worktree commit to be preserved"
+  assert_eq "" "$(git -C "$project/.worktrees/detached-copy" branch --show-current)" \
+    "expected detached worktree state to be preserved"
+}
+
+test_convert_conventional_bare_repository() {
+  local bare project
+
+  bare="$(make_conventional_bare_clone "$TEST_TMPDIR" "project")"
+  project="${bare%.git}"
+  git --git-dir "$bare" worktree add -q "$TEST_TMPDIR/main-external" main
+  git --git-dir "$bare" worktree add -q "$TEST_TMPDIR/develop-external" develop
+
+  run_taw "$TEST_TMPDIR" --convert "$bare"
+
+  assert_exists "$project/.git"
+  assert_not_exists "$bare"
+  assert_eq "false" "$(git -C "$project" rev-parse --is-bare-repository)" \
+    "expected conventional bare repository to become a normal clone"
+  assert_eq "develop" \
+    "$(git -C "$project/.worktrees/develop" branch --show-current)" \
+    "expected external linked worktree to move under the normal clone"
+}
+
+test_convert_without_default_worktree_checks_out_root() {
+  local project
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$TEST_TMPDIR/develop" develop
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "main" "$(git -C "$project" branch --show-current)" \
+    "expected a fresh default checkout at the repository root"
+  assert_eq "" "$(git -C "$project" status --porcelain --untracked-files=all)" \
+    "expected the fresh default checkout to be clean"
+  assert_exists "$project/.worktrees/develop"
+}
+
+test_convert_unborn_default_worktree_preserves_index() {
+  local project before
+
+  project="$TEST_TMPDIR/project"
+  mkdir -p "$project"
+  git init -q --bare -b main "$project/.git"
+  git --git-dir "$project/.git" worktree add -q --orphan -b main "$project/main"
+  printf 'staged\n' >"$project/main/staged.txt"
+  git -C "$project/main" add staged.txt
+  printf 'untracked\n' >"$project/main/untracked.txt"
+  before="$(git -C "$project/main" status --porcelain=v2 --branch --untracked-files=all)"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "$before" \
+    "$(git -C "$project" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected unborn default worktree index and files to be preserved"
+  assert_eq "main" "$(git -C "$project" branch --show-current)" \
+    "expected the unborn default branch at the repository root"
+}
+
+test_convert_creates_remote_only_default_branch() {
+  local project
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/trunk refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref \
+    refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "trunk" "$(git -C "$project" branch --show-current)" \
+    "expected origin HEAD to provide the normal default branch"
+  assert_eq "origin/trunk" "$(git -C "$project" rev-parse --abbrev-ref '@{upstream}')" \
+    "expected the remote-only default branch to track origin"
+}
+
+test_convert_preserves_unmanaged_wrapper_entries() {
+  local project
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  printf 'wrapper note\n' >"$project/note.txt"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "wrapper note" "$(<"$project/note.txt")" \
+    "expected unmanaged wrapper content at the normal repository root"
+  assert_eq "?? note.txt" "$(git -C "$project" status --porcelain)" \
+    "expected unmanaged wrapper content to remain untracked"
+}
+
+test_convert_rejects_destination_collision_before_mutation() {
+  local project output
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  git --git-dir "$project/.git" worktree add -q "$TEST_TMPDIR/develop" develop
+  mkdir -p "$project/.worktrees/develop"
+  printf 'collision\n' >"$project/.worktrees/develop/file.txt"
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$project" 2>&1)"; then
+    fail "expected destination collision to reject conversion"
+  fi
+
+  assert_string_contains "$output" "worktree destination already exists"
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected collision rejection before mutation"
+  assert_exists "$TEST_TMPDIR/develop"
+}
+
+test_convert_from_linked_worktree_remaps_cwd() {
+  local project output after
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  git --git-dir "$project/.git" worktree add -q "$project/develop" develop
+  mkdir -p "$project/develop/nested"
+
+  output="$(
+    cd "$project/develop/nested" || exit 1
+    TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" zsh -fc \
+      'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw --convert "$1" || exit; pwd -P' \
+      taw "$project"
+  )"
+  after="${output##*$'\n'}"
+
+  assert_eq "$(cd "$project/.worktrees/develop/nested" && pwd -P)" "$after" \
+    "expected invoking shell to follow the relocated worktree"
+}
+
+test_convert_nonbare_failure_restores_original_layout() {
+  local project fake_bin before backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  git --git-dir "$project/.git" worktree add -q "$project/develop" develop
+  printf 'dirty\n' >>"$project/main/README.md"
+  before="$(git -C "$project/main" status --porcelain=v2 --branch --untracked-files=all)"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/failing")"
+
+  if TAW_CONVERT_FAIL_STAGE=nonbare TAW_RUN_PATH="$fake_bin:$PATH" \
+    run_taw "$TEST_TMPDIR" --convert "$project"; then
+    fail "expected injected conversion failure"
+  fi
+
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected rollback to restore the bare repository"
+  assert_eq "$before" \
+    "$(git -C "$project/main" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected rollback to preserve default worktree state"
+  assert_exists "$project/develop"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected successful rollback to remove its backup"
+}
+
+test_convert_rejects_normal_project() {
+  local repo output
+
+  repo="$TEST_TMPDIR/project"
+  make_git_repo "$repo"
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$repo" 2>&1)"; then
+    fail "expected normal project conversion to fail"
+  fi
+
+  assert_string_contains "$output" "--convert requires a bare git project"
+  assert_eq "false" "$(git -C "$repo" rev-parse --is-bare-repository)" \
+    "expected the normal project to remain unchanged"
+}
+
+test_global_gitignore_excludes_managed_worktrees() {
+  assert_file_contains "$REPO_ROOT/home/.config/git/ignore" ".worktrees/"
 }
 
 test_convert_same_branch_preserves_dirty_state() {
@@ -4069,44 +4380,30 @@ test_convert_rejects_incompatible_options() {
 
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
-test_case "taw: convert same branch preserves dirty state" \
-  test_convert_same_branch_preserves_dirty_state
-test_case "taw: convert non-default branch creates two worktrees" \
-  test_convert_non_default_branch_creates_two_worktrees
-test_case "taw: convert prefers origin HEAD for default branch" \
-  test_convert_prefers_origin_head_for_default_branch
-test_case "taw: convert retains concurrently created default branch" \
-  test_convert_does_not_delete_concurrently_created_default_branch
-test_case "taw: convert removes owned default branch after config failure" \
-  test_convert_removes_owned_default_branch_after_config_failure
-test_case "taw: convert unborn repository preserves index" \
-  test_convert_unborn_repository_preserves_index
-test_case "taw: convert rejects unborn remote default collision" \
-  test_convert_rejects_unborn_remote_default_collision
-test_case "taw: convert from inside follows current worktree" \
-  test_convert_from_inside_project_follows_current_worktree
-test_case "taw: convert from .git stays in bare git directory" \
-  test_convert_from_git_dir_stays_in_bare_git_dir
-test_case "taw: convert rejects linked worktrees before mutation" \
-  test_convert_rejects_linked_worktrees_before_mutation
-test_case "taw: convert rejects dot-named initialized submodule" \
-  test_convert_rejects_dot_named_initialized_submodule
-test_case "taw: convert worktree failure rolls back" \
-  test_convert_worktree_failure_rolls_back
-test_case "taw: convert late failure restores original index" \
-  test_convert_late_failure_restores_original_index
-test_case "taw: convert retains recovery after worktree removal failure" \
-  test_convert_retains_recovery_when_worktree_removal_fails
-test_case "taw: convert ignores stale REBASE_HEAD" \
-  test_convert_ignores_stale_rebase_head
-test_case "taw: convert preserves concurrent new change" \
-  test_convert_preserves_concurrent_new_change
-test_case "taw: convert captures concurrent change at wrapper root" \
-  test_convert_captures_concurrent_change_at_wrapper_root
-test_case "taw: convert captures root change after git verification" \
-  test_convert_captures_root_change_after_git_verification
-test_case "taw: convert preserves colliding wrapper rewrite" \
-  test_convert_preserves_colliding_wrapper_rewrite
+test_case "taw: convert promotes dirty default and moves worktrees" \
+  test_convert_bare_project_promotes_dirty_default_and_moves_worktrees
+test_case "taw: convert moves slash and detached worktrees" \
+  test_convert_bare_project_moves_slash_and_detached_worktrees
+test_case "taw: convert handles conventional bare repositories" \
+  test_convert_conventional_bare_repository
+test_case "taw: convert checks out missing default worktree" \
+  test_convert_without_default_worktree_checks_out_root
+test_case "taw: convert preserves unborn default worktree" \
+  test_convert_unborn_default_worktree_preserves_index
+test_case "taw: convert creates remote-only default branch" \
+  test_convert_creates_remote_only_default_branch
+test_case "taw: convert preserves unmanaged wrapper entries" \
+  test_convert_preserves_unmanaged_wrapper_entries
+test_case "taw: convert rejects destination collisions" \
+  test_convert_rejects_destination_collision_before_mutation
+test_case "taw: convert remaps linked-worktree cwd" \
+  test_convert_from_linked_worktree_remaps_cwd
+test_case "taw: convert failure restores bare layout" \
+  test_convert_nonbare_failure_restores_original_layout
+test_case "taw: convert rejects normal projects" \
+  test_convert_rejects_normal_project
+test_case "taw: global gitignore excludes managed worktrees" \
+  test_global_gitignore_excludes_managed_worktrees
 test_case "taw: convert rejects incompatible options" \
   test_convert_rejects_incompatible_options
 test_case "taw: peer creates in current session" \
@@ -4149,7 +4446,7 @@ test_case "taw: existing session selects new window before attach" \
   test_existing_session_adds_window_and_selects_it_before_attach
 test_case "taw: reuses existing worktree window" \
   test_existing_worktree_window_is_reused
-test_case "taw: named branch checks out normal repo" \
+test_case "taw: named branch creates normal repo worktree" \
   test_named_branch_checks_out_normal_repo
 test_case "taw: normal repo no explicit branch uses picker" \
   test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch
@@ -4157,6 +4454,8 @@ test_case "taw: normal repo picker lists deduped branches" \
   test_normal_repo_picker_lists_deduped_branches
 test_case "taw: normal repo no explicit branch without fzf opens unchanged" \
   test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged
+test_case "taw: normal linked worktree resolves primary project" \
+  test_normal_linked_worktree_resolves_primary_project
 test_case "taw: normal repo picker cancel returns success" \
   test_normal_repo_picker_cancel_returns_success_without_tmux
 test_case "taw: normal repo picker error fails" \
@@ -4187,6 +4486,8 @@ test_case "taw: -p preserves invoking shell cwd" \
   test_project_arg_preserves_invoking_shell_cwd
 test_case "taw: -p GitHub URL clones and opens project" \
   test_project_arg_github_url_clones_and_opens_project
+test_case "taw: -p URL allows explicit bare clone" \
+  test_project_arg_url_allows_explicit_bare_clone
 test_case "taw: -p resolves by tmux session name" \
   test_project_arg_resolves_by_tmux_session_name
 test_case "taw: -p resolves by tmux session path basename" \
@@ -4203,6 +4504,8 @@ test_case "taw: prompt input creates repo project" \
   test_prompt_input_unresolved_creates_repo_project
 test_case "taw: outside positional shorthand creates repo project" \
   test_outside_positional_unresolved_creates_repo_project
+test_case "taw: unresolved repo branch target creates worktree" \
+  test_unresolved_repo_branch_target_creates_worktree
 test_case "taw: unresolved creation rejects invalid repo and bare names" \
   test_unresolved_project_creation_rejects_invalid_repo_and_bare_names_before_mkdir
 test_case "taw: unresolved creation rejects two pending operands before mkdir" \
@@ -4291,9 +4594,9 @@ test_case "taw: bare project absolute worktree path must stay under wrapper" \
   test_bare_project_absolute_worktree_path_must_stay_under_wrapper
 test_case "taw: bare project dot-segment worktree paths are rejected" \
   test_bare_project_dot_segment_worktree_paths_are_rejected
-test_case "taw: normal repo checks out branch from single positional" \
+test_case "taw: normal repo creates worktree from single positional" \
   test_normal_repo_checks_out_branch_from_single_positional
-test_case "taw: normal repo rejects two positional operands" \
+test_case "taw: normal repo accepts worktree path and base ref" \
   test_normal_repo_rejects_two_positional_operands
 test_case "taw: rejects unrelated git repo at worktree path" \
   test_rejects_unrelated_git_repo_at_worktree_path
