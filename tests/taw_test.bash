@@ -3838,6 +3838,42 @@ test_convert_without_default_worktree_checks_out_root() {
   assert_exists "$project/.worktrees/develop"
 }
 
+test_convert_without_default_worktree_rejects_tracked_managed_path() {
+  local project default_worktree external before output
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  default_worktree="$TEST_TMPDIR/main"
+  external="$TEST_TMPDIR/develop"
+  git --git-dir "$project/.git" worktree add -q "$default_worktree" main
+  mkdir -p "$default_worktree/.worktrees/develop"
+  printf 'owned by main\n' >"$default_worktree/.worktrees/develop/main-owned.txt"
+  git -C "$default_worktree" add -f .worktrees/develop/main-owned.txt
+  git -C "$default_worktree" commit -qm "track managed path"
+  git --git-dir "$project/.git" worktree remove "$default_worktree"
+  git --git-dir "$project/.git" worktree add -q "$external" develop
+  before="$(git -C "$external" status --porcelain=v2 --branch --untracked-files=all)"
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$project" 2>&1)"; then
+    fail "expected tracked managed path to reject conversion"
+  fi
+
+  assert_string_contains "$output" \
+    "cannot check out a default branch that tracks .worktrees"
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected tracked managed path rejection before mutation"
+  assert_exists "$external"
+  assert_not_exists "$project/.worktrees"
+  assert_not_exists "$external/main-owned.txt"
+  assert_eq "$before" \
+    "$(git -C "$external" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected tracked managed path rejection to preserve linked worktree state"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected rejection before backup creation"
+}
+
 test_convert_unborn_default_worktree_preserves_index() {
   local project before
 
@@ -4622,6 +4658,8 @@ test_case "taw: convert handles .bare wrappers" \
   test_convert_bare_child_not_named_git
 test_case "taw: convert checks out missing default worktree" \
   test_convert_without_default_worktree_checks_out_root
+test_case "taw: convert rejects tracked managed path without default worktree" \
+  test_convert_without_default_worktree_rejects_tracked_managed_path
 test_case "taw: convert preserves unborn default worktree" \
   test_convert_unborn_default_worktree_preserves_index
 test_case "taw: convert creates remote-only default branch" \

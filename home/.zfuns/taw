@@ -1452,6 +1452,13 @@ _taw_convert_project() {
       _taw_die "--convert cannot promote a worktree that tracks .worktrees"
       return 1
     fi
+  elif [[ -n "$_taw_default_ref" ]]; then
+    _taw_output="$(git --git-dir "$_taw_original_git_dir" ls-tree \
+      --name-only "$_taw_default_ref" -- .worktrees 2>/dev/null)" || return 1
+    if [[ -n "$_taw_output" ]]; then
+      _taw_die "--convert cannot check out a default branch that tracks .worktrees"
+      return 1
+    fi
   fi
 
   if [[ "$_taw_original_git_dir" != "$_taw_project_root/.git" ]]; then
