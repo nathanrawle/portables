@@ -2066,6 +2066,36 @@ test_normal_repo_single_positional_tracks_remote_only_branch() {
     "expected the primary worktree branch to remain unchanged"
 }
 
+test_normal_repo_remote_prefixed_positional_uses_resolved_branch() {
+  local repo worktree fake_bin log output upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/foo refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  output="$(
+    EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$repo" -p "$repo" origin/feature/foo 2>&1
+  )"
+
+  worktree="$repo/.worktrees/feature/foo"
+  upstream_ref="$(git -C "$worktree" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq "feature/foo" "$(git -C "$worktree" branch --show-current)" \
+    "expected the resolved remote branch name locally"
+  assert_eq "origin/feature/foo" "$upstream_ref" \
+    "expected the resolved local branch to track origin"
+  assert_eq "$(git -C "$repo" rev-parse develop)" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected the resolved local branch to start from the remote commit"
+  assert_not_exists "$repo/.worktrees/origin/feature/foo"
+  if git -C "$repo" show-ref --verify --quiet refs/heads/origin/feature/foo; then
+    fail "expected no remote-prefixed local branch"
+  fi
+  assert_string_not_contains "$output" "ambiguous"
+}
+
 test_normal_repo_rejects_two_positional_operands() {
   local repo fake_bin log worktree
 
@@ -4911,6 +4941,8 @@ test_case "taw: normal repo creates worktree from single positional" \
   test_normal_repo_checks_out_branch_from_single_positional
 test_case "taw: normal repo positional remote-only branch tracks upstream" \
   test_normal_repo_single_positional_tracks_remote_only_branch
+test_case "taw: normal repo remote-prefixed positional uses resolved branch" \
+  test_normal_repo_remote_prefixed_positional_uses_resolved_branch
 test_case "taw: normal repo accepts worktree path and base ref" \
   test_normal_repo_rejects_two_positional_operands
 test_case "taw: rejects unrelated git repo at worktree path" \
