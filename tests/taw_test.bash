@@ -3868,11 +3868,60 @@ test_convert_creates_remote_only_default_branch() {
     refs/remotes/origin/HEAD refs/remotes/origin/trunk
   git --git-dir "$project/.git" update-ref -d refs/heads/main
   git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  git --git-dir "$project/.git" config --unset-all remote.origin.fetch || true
 
   run_taw "$TEST_TMPDIR" --convert "$project"
 
   assert_eq "trunk" "$(git -C "$project" branch --show-current)" \
     "expected origin HEAD to provide the normal default branch"
+  assert_eq "origin/trunk" "$(git -C "$project" rev-parse --abbrev-ref '@{upstream}')" \
+    "expected the remote-only default branch to track origin"
+  assert_eq "+refs/heads/*:refs/remotes/origin/*" \
+    "$(git -C "$project" config --get-all remote.origin.fetch)" \
+    "expected conversion to add a missing origin fetch refspec"
+}
+
+test_convert_preserves_narrow_origin_fetch_refspec() {
+  local project refspec
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  refspec='+refs/heads/trunk:refs/remotes/origin/trunk'
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/trunk refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref \
+    refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  git --git-dir "$project/.git" config --unset-all remote.origin.fetch || true
+  git --git-dir "$project/.git" config --add remote.origin.fetch "$refspec"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "$refspec" "$(git -C "$project" config --get-all remote.origin.fetch)" \
+    "expected conversion to preserve a narrow origin fetch refspec"
+  assert_eq "origin/trunk" "$(git -C "$project" rev-parse --abbrev-ref '@{upstream}')" \
+    "expected the remote-only default branch to track origin"
+}
+
+test_convert_preserves_multiple_origin_fetch_refspecs() {
+  local project before
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/trunk refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref \
+    refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  git --git-dir "$project/.git" config --unset-all remote.origin.fetch || true
+  git --git-dir "$project/.git" config --add remote.origin.fetch \
+    '+refs/heads/trunk:refs/remotes/origin/trunk'
+  git --git-dir "$project/.git" config --add remote.origin.fetch \
+    '+refs/heads/release/*:refs/remotes/origin/release/*'
+  before="$(git --git-dir "$project/.git" config --get-all remote.origin.fetch)"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "$before" "$(git -C "$project" config --get-all remote.origin.fetch)" \
+    "expected conversion to preserve multiple origin fetch refspecs"
   assert_eq "origin/trunk" "$(git -C "$project" rev-parse --abbrev-ref '@{upstream}')" \
     "expected the remote-only default branch to track origin"
 }
@@ -4577,6 +4626,10 @@ test_case "taw: convert preserves unborn default worktree" \
   test_convert_unborn_default_worktree_preserves_index
 test_case "taw: convert creates remote-only default branch" \
   test_convert_creates_remote_only_default_branch
+test_case "taw: convert preserves narrow origin fetch refspec" \
+  test_convert_preserves_narrow_origin_fetch_refspec
+test_case "taw: convert preserves multiple origin fetch refspecs" \
+  test_convert_preserves_multiple_origin_fetch_refspecs
 test_case "taw: convert preserves unmanaged wrapper entries" \
   test_convert_preserves_unmanaged_wrapper_entries
 test_case "taw: convert rejects destination collisions" \

@@ -1505,8 +1505,13 @@ _taw_convert_project() {
         "branch.$_taw_default_branch.remote" origin \
         && git --git-dir "$_taw_active_git_dir" config \
           "branch.$_taw_default_branch.merge" "refs/heads/$_taw_default_branch" \
-        && git --git-dir "$_taw_active_git_dir" config \
-          "remote.origin.fetch" "+refs/heads/*:refs/remotes/origin/*" \
+        || _taw_failure="could not configure the default tracking branch"
+    fi
+    if [[ -z "$_taw_failure" ]] \
+      && ! git --git-dir "$_taw_active_git_dir" config --get-all \
+        remote.origin.fetch >/dev/null 2>&1; then
+      git --git-dir "$_taw_active_git_dir" config --add \
+        remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" \
         || _taw_failure="could not configure the default tracking branch"
     fi
   fi
