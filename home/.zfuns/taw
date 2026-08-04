@@ -1025,6 +1025,16 @@ _taw_remote_branch_for_path() {
   print -r -- "$_taw_remote	$_taw_branch"
 }
 
+_taw_has_configured_remote_prefix() {
+  local _taw_path="$1" _taw_remote
+
+  for _taw_remote in "${(@f)$(_taw_git remote 2>/dev/null)}"; do
+    [[ -n "$_taw_remote" && "$_taw_path" == "$_taw_remote/"* ]] && return 0
+  done
+
+  return 1
+}
+
 _taw_remote_target_for_branch_name() {
   local _taw_branch="$1" _taw_remote _taw_remote_ref
   local -a _taw_remote_names
@@ -2570,6 +2580,12 @@ if [[ "$_taw_project_kind" != plain && -n "$_taw_worktree_arg" ]]; then
     fi
     _taw_open_managed_worktree "$_taw_worktree_branch" \
       "$_taw_branch_target_ref" "$_taw_window_dir" || return 1
+  elif [[ "$_taw_project_kind" == normal \
+    && "$_taw_worktree_branch" == refs/remotes/* ]]; then
+    return 1
+  elif [[ "$_taw_project_kind" == normal ]] \
+    && _taw_has_configured_remote_prefix "$_taw_worktree_branch"; then
+    return 1
   elif _taw_git rev-parse --verify --quiet HEAD^{commit} >/dev/null 2>&1; then
     _taw_open_managed_worktree "$_taw_worktree_branch" \
       "$(_taw_current_head_ref)" "$_taw_window_dir" || return 1

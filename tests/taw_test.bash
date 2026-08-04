@@ -2096,6 +2096,65 @@ test_normal_repo_remote_prefixed_positional_uses_resolved_branch() {
   assert_string_not_contains "$output" "ambiguous"
 }
 
+test_normal_repo_positional_missing_configured_remote_ref_fails() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" origin/topic; then
+    fail "expected missing configured remote ref to fail"
+  fi
+
+  assert_not_exists "$repo/.worktrees/origin/topic"
+  if git -C "$repo" show-ref --verify --quiet refs/heads/origin/topic; then
+    fail "expected no local branch shadowing a configured remote"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after missing remote ref"
+}
+
+test_normal_repo_positional_rejects_refs_remotes_prefix() {
+  local repo fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" refs/remotes/origin/topic; then
+    fail "expected refs/remotes positional input to fail"
+  fi
+
+  assert_not_exists "$repo/.worktrees/refs/remotes/origin/topic"
+  if git -C "$repo" show-ref --verify --quiet refs/heads/refs/remotes/origin/topic; then
+    fail "expected no local branch for refs/remotes positional input"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after rejected remote syntax"
+}
+
+test_normal_repo_positional_unresolved_slash_branch_uses_head() {
+  local repo worktree fake_bin log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" feature/new
+
+  worktree="$repo/.worktrees/feature/new"
+  assert_eq "feature/new" "$(git -C "$worktree" branch --show-current)" \
+    "expected an ordinary unresolved slash branch to remain creatable"
+  assert_eq "$(git -C "$repo" rev-parse main)" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected an ordinary unresolved slash branch to start from HEAD"
+}
+
 test_normal_repo_rejects_two_positional_operands() {
   local repo fake_bin log worktree
 
@@ -4943,6 +5002,12 @@ test_case "taw: normal repo positional remote-only branch tracks upstream" \
   test_normal_repo_single_positional_tracks_remote_only_branch
 test_case "taw: normal repo remote-prefixed positional uses resolved branch" \
   test_normal_repo_remote_prefixed_positional_uses_resolved_branch
+test_case "taw: normal repo positional missing configured remote ref fails" \
+  test_normal_repo_positional_missing_configured_remote_ref_fails
+test_case "taw: normal repo positional rejects refs/remotes prefix" \
+  test_normal_repo_positional_rejects_refs_remotes_prefix
+test_case "taw: normal repo positional unresolved slash branch uses HEAD" \
+  test_normal_repo_positional_unresolved_slash_branch_uses_head
 test_case "taw: normal repo accepts worktree path and base ref" \
   test_normal_repo_rejects_two_positional_operands
 test_case "taw: rejects unrelated git repo at worktree path" \
