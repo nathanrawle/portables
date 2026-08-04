@@ -1260,6 +1260,16 @@ _taw_move_primary_entries() {
   done
 }
 
+_taw_prune_empty_worktree_parents() {
+  local _taw_source="${1:A}" _taw_root="${2:A}" _taw_parent
+
+  _taw_parent="${_taw_source:h}"
+  while [[ "$_taw_parent" == "$_taw_root"/* ]]; do
+    rmdir -- "$_taw_parent" 2>/dev/null || break
+    _taw_parent="${_taw_parent:h}"
+  done
+}
+
 _taw_status_records_preserved() {
   local _taw_before="$1" _taw_after="$2" _taw_record
   local -A _taw_after_records
@@ -1509,6 +1519,8 @@ _taw_convert_project() {
       if [[ -z "$_taw_failure" ]] && git --git-dir "$_taw_active_git_dir" worktree move \
         "${_taw_paths[_taw_i]}" "${_taw_destinations[_taw_i]}"; then
         _taw_moved_flags[_taw_i]=true
+        _taw_prune_empty_worktree_parents \
+          "${_taw_paths[_taw_i]}" "$_taw_project_root"
       elif [[ -z "$_taw_failure" ]]; then
         _taw_failure="could not move worktree: ${_taw_paths[_taw_i]}"
       fi

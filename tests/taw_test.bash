@@ -3941,6 +3941,60 @@ test_convert_rejects_overlapping_destinations_before_mutation() {
   assert_eq "0" "${#backups[@]}" "expected overlap rejection before backup creation"
 }
 
+test_convert_prunes_empty_in_wrapper_worktree_parents() {
+  local project nested before
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  nested="$project/docs/feature"
+  git --git-dir "$project/.git" branch docs/feature develop
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  git --git-dir "$project/.git" worktree add -q "$nested" docs/feature
+  mkdir -p "$project/main/docs"
+  printf 'default docs\n' >"$project/main/docs/note.txt"
+  before="$(git -C "$project/main" status --porcelain=v2 --branch --untracked-files=all)"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "$before" \
+    "$(git -C "$project" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected default worktree content to survive nested source pruning"
+  assert_eq "default docs" "$(<"$project/docs/note.txt")" \
+    "expected the default worktree docs directory at the repository root"
+  assert_eq "docs/feature" \
+    "$(git -C "$project/.worktrees/docs/feature" branch --show-current)" \
+    "expected the nested worktree under the managed root"
+  assert_not_exists "$nested"
+}
+
+test_convert_failure_restores_pruned_worktree_parents() {
+  local project nested fake_bin
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  nested="$project/docs/feature"
+  git --git-dir "$project/.git" branch docs/feature develop
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  git --git-dir "$project/.git" worktree add -q "$nested" docs/feature
+  mkdir -p "$project/main/docs"
+  printf 'default docs\n' >"$project/main/docs/note.txt"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/failing")"
+
+  if TAW_CONVERT_FAIL_STAGE=nonbare TAW_RUN_PATH="$fake_bin:$PATH" \
+    run_taw "$TEST_TMPDIR" --convert "$project"; then
+    fail "expected injected conversion failure"
+  fi
+
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected rollback to restore the bare repository"
+  assert_eq "docs/feature" "$(git -C "$nested" branch --show-current)" \
+    "expected rollback to recreate the pruned source parents"
+  assert_not_exists "$project/.worktrees/docs/feature"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected successful rollback to remove its backup"
+}
+
 test_convert_from_linked_worktree_remaps_cwd() {
   local project output after
 
@@ -4478,6 +4532,10 @@ test_case "taw: convert rejects destination collisions" \
   test_convert_rejects_destination_collision_before_mutation
 test_case "taw: convert rejects overlapping destinations" \
   test_convert_rejects_overlapping_destinations_before_mutation
+test_case "taw: convert prunes empty in-wrapper worktree parents" \
+  test_convert_prunes_empty_in_wrapper_worktree_parents
+test_case "taw: convert rollback restores pruned worktree parents" \
+  test_convert_failure_restores_pruned_worktree_parents
 test_case "taw: convert remaps linked-worktree cwd" \
   test_convert_from_linked_worktree_remaps_cwd
 test_case "taw: convert failure restores bare layout" \
