@@ -1560,21 +1560,31 @@ _taw_convert_project() {
       _taw_wrapper_entries=( "$_taw_backup/wrapper"/*(ND) )
       (( ${#_taw_wrapper_entries[@]} == 0 )) || _taw_wrapper_staged=true
     fi
-    if [[ -z "$_taw_failure" && "$_taw_default_staged" == true ]]; then
-      _taw_default_entries=(
-        "$_taw_backup/default"/*(N)
-        "$_taw_backup/default"/.[!.]*(N)
-        "$_taw_backup/default"/..?*(N)
-      )
-      for _taw_wrapper_entry in "${_taw_wrapper_entries[@]}"; do
-        for _taw_default_entry in "${_taw_default_entries[@]}"; do
-          [[ "${_taw_default_entry:t}" == .git ]] && continue
-          if [[ "${_taw_wrapper_entry:t}" == "${_taw_default_entry:t}" ]]; then
-            _taw_failure="wrapper entry conflicts with default worktree: ${_taw_wrapper_entry:t}"
-            break 2
-          fi
+    if [[ -z "$_taw_failure" && "$_taw_wrapper_staged" == true ]]; then
+      if [[ "$_taw_default_staged" == true ]]; then
+        _taw_default_entries=(
+          "$_taw_backup/default"/*(N)
+          "$_taw_backup/default"/.[!.]*(N)
+          "$_taw_backup/default"/..?*(N)
+        )
+      elif [[ -n "$_taw_default_ref" ]]; then
+        _taw_output="$(git --git-dir "$_taw_active_git_dir" ls-tree \
+          --name-only "$_taw_default_ref" 2>/dev/null)" \
+          || _taw_failure="could not inspect the default checkout"
+        [[ -n "$_taw_failure" ]] \
+          || _taw_default_entries=( "${(@f)_taw_output}" )
+      fi
+      if [[ -z "$_taw_failure" ]]; then
+        for _taw_wrapper_entry in "${_taw_wrapper_entries[@]}"; do
+          for _taw_default_entry in "${_taw_default_entries[@]}"; do
+            [[ "${_taw_default_entry:t}" == .git ]] && continue
+            if [[ "${_taw_wrapper_entry:t}" == "${_taw_default_entry:t}" ]]; then
+              _taw_failure="wrapper entry conflicts with default checkout: ${_taw_wrapper_entry:t}"
+              break 2
+            fi
+          done
         done
-      done
+      fi
     fi
   fi
 

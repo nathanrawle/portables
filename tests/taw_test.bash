@@ -3977,6 +3977,31 @@ test_convert_preserves_unmanaged_wrapper_entries() {
     "expected unmanaged wrapper content to remain untracked"
 }
 
+test_convert_rejects_fallback_wrapper_conflict_without_data_loss() {
+  local project output
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  printf 'keep me\n' >"$project/00-keep.txt"
+  printf 'wrapper README\n' >"$project/README.md"
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$project" 2>&1)"; then
+    fail "expected wrapper/default conflict to reject conversion"
+  fi
+
+  assert_string_contains "$output" \
+    "wrapper entry conflicts with default checkout: README.md"
+  assert_string_not_contains "$output" "HEAD is now at"
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected wrapper conflict rejection to preserve the bare repository"
+  assert_file_contents "$project/00-keep.txt" "keep me"
+  assert_file_contents "$project/README.md" "wrapper README"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected wrapper conflict rollback to remove its backup"
+}
+
 test_convert_rejects_destination_collision_before_mutation() {
   local project output
 
@@ -4670,6 +4695,8 @@ test_case "taw: convert preserves multiple origin fetch refspecs" \
   test_convert_preserves_multiple_origin_fetch_refspecs
 test_case "taw: convert preserves unmanaged wrapper entries" \
   test_convert_preserves_unmanaged_wrapper_entries
+test_case "taw: convert rejects fallback wrapper conflicts without data loss" \
+  test_convert_rejects_fallback_wrapper_conflict_without_data_loss
 test_case "taw: convert rejects destination collisions" \
   test_convert_rejects_destination_collision_before_mutation
 test_case "taw: convert rejects overlapping destinations" \
