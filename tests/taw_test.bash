@@ -3889,6 +3889,40 @@ test_convert_conventional_bare_repository() {
     "expected external linked worktree to move under the normal clone"
 }
 
+test_convert_rejects_suffixless_bare_repository_before_mutation() {
+  local source container bare default_worktree before output
+  local -a backups
+
+  source="$TEST_TMPDIR/source"
+  container="$TEST_TMPDIR/container"
+  bare="$container/foo"
+  default_worktree="$TEST_TMPDIR/main-external"
+  make_git_repo "$source"
+  mkdir -p "$container"
+  git clone --bare "$source" "$bare" >/dev/null 2>&1
+  git --git-dir "$bare" worktree add -q "$default_worktree" main
+  printf 'sibling\n' >"$container/sibling.txt"
+  before="$(git -C "$default_worktree" status --porcelain=v2 --branch --untracked-files=all)"
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$bare" 2>&1)"; then
+    fail "expected suffixless bare conversion to fail"
+  fi
+
+  assert_string_contains "$output" "does not support suffixless bare repositories"
+  assert_eq "true" "$(git --git-dir "$bare" rev-parse --is-bare-repository)" \
+    "expected suffixless rejection to preserve the bare repository"
+  assert_not_exists "$container/.git"
+  assert_file_contents "$container/sibling.txt" "sibling"
+  assert_exists "$default_worktree"
+  assert_eq "$before" \
+    "$(git -C "$default_worktree" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected suffixless rejection to preserve the registered worktree"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.container.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected suffixless rejection before backup creation"
+}
+
 test_convert_bare_child_not_named_git() {
   local project external
 
@@ -4768,6 +4802,8 @@ test_case "taw: convert moves slash and detached worktrees" \
   test_convert_bare_project_moves_slash_and_detached_worktrees
 test_case "taw: convert handles conventional bare repositories" \
   test_convert_conventional_bare_repository
+test_case "taw: convert rejects suffixless bare repositories before mutation" \
+  test_convert_rejects_suffixless_bare_repository_before_mutation
 test_case "taw: convert handles .bare wrappers" \
   test_convert_bare_child_not_named_git
 test_case "taw: convert checks out missing default worktree" \
