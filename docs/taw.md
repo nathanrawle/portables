@@ -210,8 +210,9 @@ taw --convert <project>
 
 Conversion is an action-only mode. It converts an existing bare repository to
 a normal clone, prints the resulting worktree paths, and exits without creating
-or selecting a tmux window. It accepts taw wrappers containing `.git` and
-conventional `<name>.git` repositories. Normal and plain projects are rejected.
+or selecting a tmux window. It accepts taw wrappers containing `.git` or
+`.bare`, and conventional `<name>.git` repositories. Normal and plain projects
+are rejected.
 
 The bare repository's symbolic `HEAD` selects the default branch, followed by
 the normal `origin/HEAD`, `main`, and `master` fallbacks. An existing worktree

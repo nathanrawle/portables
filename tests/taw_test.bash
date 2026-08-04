@@ -3775,6 +3775,29 @@ test_convert_conventional_bare_repository() {
     "expected external linked worktree to move under the normal clone"
 }
 
+test_convert_bare_child_not_named_git() {
+  local project external
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR" ".bare")"
+  external="$TEST_TMPDIR/develop-external"
+  git --git-dir "$project/.bare" worktree add -q "$project/main" main
+  git --git-dir "$project/.bare" worktree add -q "$external" develop
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_exists "$project/.git"
+  assert_not_exists "$project/.bare"
+  assert_eq "false" "$(git -C "$project" rev-parse --is-bare-repository)" \
+    "expected .bare wrapper to become a normal clone"
+  assert_eq "main" "$(git -C "$project" branch --show-current)" \
+    "expected .bare wrapper default branch at the repository root"
+  assert_eq "develop" \
+    "$(git -C "$project/.worktrees/develop" branch --show-current)" \
+    "expected .bare wrapper linked worktree under the normal clone"
+  assert_not_exists "$project/main"
+  assert_not_exists "$external"
+}
+
 test_convert_without_default_worktree_checks_out_root() {
   local project
 
@@ -4386,6 +4409,8 @@ test_case "taw: convert moves slash and detached worktrees" \
   test_convert_bare_project_moves_slash_and_detached_worktrees
 test_case "taw: convert handles conventional bare repositories" \
   test_convert_conventional_bare_repository
+test_case "taw: convert handles .bare wrappers" \
+  test_convert_bare_child_not_named_git
 test_case "taw: convert checks out missing default worktree" \
   test_convert_without_default_worktree_checks_out_root
 test_case "taw: convert preserves unborn default worktree" \

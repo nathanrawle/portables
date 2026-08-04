@@ -1243,13 +1243,16 @@ _taw_move_worktree_entries() {
 }
 
 _taw_move_primary_entries() {
-  local _taw_source="$1" _taw_dest="$2" _taw_entry _taw_target
+  local _taw_source="$1" _taw_dest="$2" _taw_protected="${3:-}"
+  local _taw_entry _taw_target
   local -a _taw_entries
 
+  [[ -z "$_taw_protected" ]] || _taw_protected="${_taw_protected:A}"
   mkdir -p -- "$_taw_dest" || return 1
   _taw_entries=( "$_taw_source"/*(N) "$_taw_source"/.[!.]*(N) "$_taw_source"/..?*(N) )
   for _taw_entry in "${_taw_entries[@]}"; do
     [[ "${_taw_entry:t}" == .git || "${_taw_entry:t}" == .worktrees ]] && continue
+    [[ -z "$_taw_protected" || "${_taw_entry:A}" != "$_taw_protected" ]] || continue
     _taw_target="$_taw_dest/${_taw_entry:t}"
     [[ ! -e "$_taw_target" && ! -L "$_taw_target" ]] || return 1
     mv -n -- "$_taw_entry" "$_taw_target" || return 1
@@ -1523,6 +1526,7 @@ _taw_convert_project() {
       || _taw_failure="could not preserve wrapper entries"
     if [[ -z "$_taw_failure" ]]; then
       _taw_move_primary_entries "$_taw_project_root" "$_taw_backup/wrapper" \
+        "$_taw_original_git_dir" \
         || _taw_failure="could not preserve wrapper entries"
       _taw_wrapper_entries=( "$_taw_backup/wrapper"/*(ND) )
       (( ${#_taw_wrapper_entries[@]} == 0 )) || _taw_wrapper_staged=true
