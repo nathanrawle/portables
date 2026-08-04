@@ -3995,6 +3995,57 @@ test_convert_failure_restores_pruned_worktree_parents() {
   assert_eq "0" "${#backups[@]}" "expected successful rollback to remove its backup"
 }
 
+test_convert_prunes_empty_default_worktree_parents() {
+  local project default_worktree before
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR" ".git" "docs/feature")"
+  default_worktree="$project/docs/feature"
+  git --git-dir "$project/.git" worktree add -q "$default_worktree" docs/feature
+  mkdir -p "$default_worktree/docs"
+  printf 'default docs\n' >"$default_worktree/docs/note.txt"
+  before="$(git -C "$default_worktree" status \
+    --porcelain=v2 --branch --untracked-files=all)"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "docs/feature" "$(git -C "$project" branch --show-current)" \
+    "expected the slash-named default branch at the repository root"
+  assert_eq "$before" \
+    "$(git -C "$project" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected nested default worktree content to survive parent pruning"
+  assert_eq "default docs" "$(<"$project/docs/note.txt")" \
+    "expected default worktree docs at the repository root"
+  assert_not_exists "$default_worktree"
+}
+
+test_convert_failure_restores_pruned_default_worktree_parents() {
+  local project default_worktree fake_bin
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR" ".git" "docs/feature")"
+  default_worktree="$project/docs/feature"
+  git --git-dir "$project/.git" worktree add -q "$default_worktree" docs/feature
+  mkdir -p "$default_worktree/docs"
+  printf 'default docs\n' >"$default_worktree/docs/note.txt"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/failing")"
+
+  if TAW_CONVERT_FAIL_STAGE=nonbare TAW_RUN_PATH="$fake_bin:$PATH" \
+    run_taw "$TEST_TMPDIR" --convert "$project"; then
+    fail "expected injected conversion failure"
+  fi
+
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected rollback to restore the bare repository"
+  assert_eq "docs/feature" "$(git -C "$default_worktree" branch --show-current)" \
+    "expected rollback to recreate the pruned default worktree parents"
+  assert_eq "default docs" "$(<"$default_worktree/docs/note.txt")" \
+    "expected rollback to preserve default worktree content"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected successful rollback to remove its backup"
+}
+
 test_convert_from_linked_worktree_remaps_cwd() {
   local project output after
 
@@ -4536,6 +4587,10 @@ test_case "taw: convert prunes empty in-wrapper worktree parents" \
   test_convert_prunes_empty_in_wrapper_worktree_parents
 test_case "taw: convert rollback restores pruned worktree parents" \
   test_convert_failure_restores_pruned_worktree_parents
+test_case "taw: convert prunes empty default worktree parents" \
+  test_convert_prunes_empty_default_worktree_parents
+test_case "taw: convert rollback restores pruned default worktree parents" \
+  test_convert_failure_restores_pruned_default_worktree_parents
 test_case "taw: convert remaps linked-worktree cwd" \
   test_convert_from_linked_worktree_remaps_cwd
 test_case "taw: convert failure restores bare layout" \

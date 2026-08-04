@@ -1531,6 +1531,8 @@ _taw_convert_project() {
     if git --git-dir "$_taw_active_git_dir" worktree move \
       "$_taw_default_path" "$_taw_backup/default"; then
       _taw_default_staged=true
+      _taw_prune_empty_worktree_parents \
+        "$_taw_default_path" "$_taw_project_root"
     else
       _taw_failure="could not stage the default worktree"
     fi
@@ -1683,8 +1685,11 @@ _taw_convert_project() {
         _taw_rollback_ok=false
       fi
     elif [[ "$_taw_default_staged" == true && -d "$_taw_backup/default" ]]; then
-      git --git-dir "$_taw_active_git_dir" worktree move \
-        "$_taw_backup/default" "$_taw_default_path" || _taw_rollback_ok=false
+      mkdir -p -- "${_taw_default_path:h}" || _taw_rollback_ok=false
+      if ! git --git-dir "$_taw_active_git_dir" worktree move \
+        "$_taw_backup/default" "$_taw_default_path"; then
+        _taw_rollback_ok=false
+      fi
     fi
     for (( _taw_i = ${#_taw_paths[@]}; _taw_i >= 1; _taw_i-- )); do
       if [[ "${_taw_moved_flags[_taw_i]}" == true ]]; then
