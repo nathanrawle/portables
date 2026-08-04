@@ -2520,6 +2520,10 @@ if [[ "$_taw_project_kind" != plain && -n "$_taw_worktree_arg" ]]; then
     _taw_resolve_branch_target "$_taw_base_ref" || return 1
     _taw_open_managed_worktree "$_taw_worktree_branch" \
       "$_taw_branch_target_ref" "$_taw_window_dir" || return 1
+  elif [[ "$_taw_project_kind" == normal ]] \
+    && _taw_resolve_branch_target "$_taw_worktree_branch"; then
+    _taw_open_managed_worktree "$_taw_worktree_branch" \
+      "$_taw_branch_target_ref" "$_taw_window_dir" || return 1
   elif _taw_git rev-parse --verify --quiet HEAD^{commit} >/dev/null 2>&1; then
     _taw_open_managed_worktree "$_taw_worktree_branch" \
       "$(_taw_current_head_ref)" "$_taw_window_dir" || return 1

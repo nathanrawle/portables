@@ -2041,6 +2041,31 @@ test_normal_repo_checks_out_branch_from_single_positional() {
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-s\trepo\t-n\tfeature-x\t-c\t'"$worktree_real"$'\tvim'
 }
 
+test_normal_repo_single_positional_tracks_remote_only_branch() {
+  local repo worktree fake_bin log upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/foo refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" -p "$repo" feature/foo
+
+  worktree="$repo/.worktrees/feature/foo"
+  upstream_ref="$(git -C "$worktree" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq "feature/foo" "$(git -C "$worktree" branch --show-current)" \
+    "expected positional remote-only branch to create a local branch"
+  assert_eq "origin/feature/foo" "$upstream_ref" \
+    "expected positional remote-only branch tracking"
+  assert_eq "$(git -C "$repo" rev-parse develop)" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected positional branch to start from the remote commit"
+  assert_eq "main" "$(git -C "$repo" branch --show-current)" \
+    "expected the primary worktree branch to remain unchanged"
+}
+
 test_normal_repo_rejects_two_positional_operands() {
   local repo fake_bin log worktree
 
@@ -4621,6 +4646,8 @@ test_case "taw: bare project dot-segment worktree paths are rejected" \
   test_bare_project_dot_segment_worktree_paths_are_rejected
 test_case "taw: normal repo creates worktree from single positional" \
   test_normal_repo_checks_out_branch_from_single_positional
+test_case "taw: normal repo positional remote-only branch tracks upstream" \
+  test_normal_repo_single_positional_tracks_remote_only_branch
 test_case "taw: normal repo accepts worktree path and base ref" \
   test_normal_repo_rejects_two_positional_operands
 test_case "taw: rejects unrelated git repo at worktree path" \
