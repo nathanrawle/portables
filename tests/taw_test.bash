@@ -3911,6 +3911,36 @@ test_convert_rejects_destination_collision_before_mutation() {
   assert_exists "$TEST_TMPDIR/develop"
 }
 
+test_convert_rejects_overlapping_destinations_before_mutation() {
+  local project topic detached output
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  topic="$TEST_TMPDIR/topic"
+  detached="$TEST_TMPDIR/detached/feature"
+  mkdir -p "${detached%/*}"
+  git --git-dir "$project/.git" branch feature/foo develop
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  git --git-dir "$project/.git" worktree add -q "$topic" feature/foo
+  git --git-dir "$project/.git" worktree add -q --detach "$detached" main
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$project" 2>&1)"; then
+    fail "expected overlapping destinations to reject conversion"
+  fi
+
+  assert_string_contains "$output" "worktree destination collision"
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected overlap rejection before mutation"
+  assert_exists "$project/main"
+  assert_exists "$topic"
+  assert_exists "$detached"
+  assert_not_exists "$project/.worktrees"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected overlap rejection before backup creation"
+}
+
 test_convert_from_linked_worktree_remaps_cwd() {
   local project output after
 
@@ -4446,6 +4476,8 @@ test_case "taw: convert preserves unmanaged wrapper entries" \
   test_convert_preserves_unmanaged_wrapper_entries
 test_case "taw: convert rejects destination collisions" \
   test_convert_rejects_destination_collision_before_mutation
+test_case "taw: convert rejects overlapping destinations" \
+  test_convert_rejects_overlapping_destinations_before_mutation
 test_case "taw: convert remaps linked-worktree cwd" \
   test_convert_from_linked_worktree_remaps_cwd
 test_case "taw: convert failure restores bare layout" \
