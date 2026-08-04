@@ -984,6 +984,15 @@ _taw_git() {
   fi
 }
 
+_taw_ensure_remote_fetch_refspec() {
+  local _taw_remote_name="$1"
+
+  if ! _taw_git config --get-all "remote.$_taw_remote_name.fetch" >/dev/null 2>&1; then
+    _taw_git config --add "remote.$_taw_remote_name.fetch" \
+      "+refs/heads/*:refs/remotes/$_taw_remote_name/*"
+  fi
+}
+
 _taw_branch_exists() {
   _taw_git show-ref --verify --quiet "refs/heads/$1"
 }
@@ -1945,7 +1954,7 @@ _taw_checkout_existing_worktree_branch() {
       if ! git -C "$_taw_path" config --get "remote.$_taw_remote_name.url" >/dev/null 2>&1; then
         git -C "$_taw_path" config "remote.$_taw_remote_name.url" "$_taw_git_dir" || return 1
       fi
-      git -C "$_taw_path" config "remote.$_taw_remote_name.fetch" "+refs/heads/*:refs/remotes/$_taw_remote_name/*" || return 1
+      _taw_ensure_remote_fetch_refspec "$_taw_remote_name" || return 1
       git -C "$_taw_path" config "branch.$_taw_expected_branch.remote" "$_taw_remote_name" || return 1
       git -C "$_taw_path" config "branch.$_taw_expected_branch.merge" "refs/heads/$_taw_remote_branch" || return 1
     fi
@@ -2001,7 +2010,7 @@ _taw_prepare_worktree() {
       if ! _taw_git config --get "remote.$_taw_remote_name.url" >/dev/null 2>&1; then
         _taw_git config "remote.$_taw_remote_name.url" "$_taw_git_dir" || return 1
       fi
-      _taw_git config "remote.$_taw_remote_name.fetch" "+refs/heads/*:refs/remotes/$_taw_remote_name/*" || return 1
+      _taw_ensure_remote_fetch_refspec "$_taw_remote_name" || return 1
       _taw_git config "branch.$_taw_branch.remote" "$_taw_remote_name" || return 1
       _taw_git config "branch.$_taw_branch.merge" "refs/heads/$_taw_remote_branch" || return 1
     fi
