@@ -14,6 +14,7 @@ source ~/.aliases.zsh
 source ~/.keybinds.zsh
 source ~/.named-dirs.zsh
 source ~/.fin.zsh
+[[ -r ~/.tmux-pane-titles.zsh ]] && source ~/.tmux-pane-titles.zsh
 
 # Anything below this comment has been added by a wayward shell command and will be
 # dealt with appropriately in due course. LOOKING AT YOU TERRAFORM 👀
