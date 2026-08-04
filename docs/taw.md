@@ -20,6 +20,7 @@ Relevant options:
 - `--peer`
 - `--force` (peer only)
 - `--convert`
+- `--mode=<ts|session|wt|worktree|b|branch>`
 - project picker aliases: `-ts`, `--ts`, `-picker`, `--picker`, `-pick-project`, `--pick-project`
 
 ## Project Kinds
@@ -58,17 +59,40 @@ If no project is supplied and `taw` is not already inside a project:
 - Outside a project, two positionals mean `project` plus one operand.
 - Outside a project, `-b` is rejected.
 
-## Project Picker
+## Picker Modes
 
-Project picker aliases:
+Explicit picker modes:
+
+- `--mode=ts` and `--mode=session` open the session picker
+- `--mode=wt` and `--mode=worktree` open the worktree picker
+- `--mode=b` and `--mode=branch` open the branch picker
+- `--mode value` and `--mode=value` are equivalent
+- project picker aliases open the session picker
+- Tab cycles `session -> worktree -> branch -> session` from every explicit mode
+- the fzf query is preserved while cycling
+
+The session picker keeps the existing tmux-sessionizer scope: it lists tmux
+sessions and projects found under the configured search paths. Worktree and
+branch modes use the Git project containing the directory where `taw` was
+invoked. They fail without opening a tmux window when there is no current Git
+project.
+
+Worktree rows include every non-bare entry from `git worktree list`, including
+detached worktrees. Selecting one opens its registered path without changing
+Git state. Branch rows include local and deduplicated remote branches, even
+when a branch already has a worktree. Selecting an assigned branch opens that
+worktree directly. Otherwise, normal repositories use their existing checkout
+behavior and bare repositories create or open the branch's canonical worktree.
+
+Explicit picker invocations:
 
 - reject `-p`, `-b`, and positionals
 - allow `-agent`, `-ed`, and `-sh`
-- bypass current-project detection
+- session mode bypasses current-project target selection
 - ignore `TAW_AGENT`
 - create an agent only when `-agent` is given explicitly
 
-Picker result handling:
+Session picker result handling:
 
 - `[TMUX]` rows switch or attach directly by tmux session identity, preserving the session's active window
 - with `--peer`, a `[TMUX]` row links that active window into the invoking session and selects it there
@@ -267,4 +291,6 @@ taw --convert ~/src/repo
 taw --peer sheffield-live hallamshire-hotel-all-day
 taw --peer --force -p ~/src/repo -agent "claude --resume"
 taw --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
+taw --mode=wt
+taw --mode=branch
 ```
