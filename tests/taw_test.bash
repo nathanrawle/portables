@@ -4334,6 +4334,54 @@ test_convert_rejects_fallback_wrapper_conflict_without_data_loss() {
   assert_eq "0" "${#backups[@]}" "expected wrapper conflict rollback to remove its backup"
 }
 
+test_convert_rejects_deleted_default_wrapper_conflict_without_data_loss() {
+  local project output before
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  rm -- "$project/main/README.md"
+  printf 'wrapper README\n' >"$project/README.md"
+  before="$(git -C "$project/main" status --porcelain=v2 --branch --untracked-files=all)"
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$project" 2>&1)"; then
+    fail "expected deleted default path to conflict with wrapper entry"
+  fi
+
+  assert_string_contains "$output" \
+    "wrapper entry conflicts with default checkout: README.md"
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected deleted-path conflict to preserve the bare repository"
+  assert_file_contents "$project/README.md" "wrapper README"
+  assert_not_exists "$project/main/README.md"
+  assert_eq "$before" \
+    "$(git -C "$project/main" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected deleted-path conflict to preserve the default worktree status"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected deleted-path conflict rollback to remove its backup"
+}
+
+test_convert_allows_staged_delete_with_wrapper_entry() {
+  local project
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  git -C "$project/main" rm -q README.md
+  printf 'wrapper README\n' >"$project/README.md"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "false" "$(git -C "$project" rev-parse --is-bare-repository)" \
+    "expected staged deletion to remain convertible"
+  assert_file_contents "$project/README.md" "wrapper README"
+  assert_eq $'D\tREADME.md' "$(git -C "$project" diff --cached --name-status)" \
+    "expected the staged deletion to remain staged"
+  assert_eq "README.md" "$(git -C "$project" ls-files --others --exclude-standard)" \
+    "expected the wrapper entry to remain untracked"
+}
+
 test_convert_rejects_destination_collision_before_mutation() {
   local project output
 
@@ -5037,6 +5085,10 @@ test_case "taw: convert preserves unmanaged wrapper entries" \
   test_convert_preserves_unmanaged_wrapper_entries
 test_case "taw: convert rejects fallback wrapper conflicts without data loss" \
   test_convert_rejects_fallback_wrapper_conflict_without_data_loss
+test_case "taw: convert rejects deleted default wrapper conflicts without data loss" \
+  test_convert_rejects_deleted_default_wrapper_conflict_without_data_loss
+test_case "taw: convert allows staged deletes with wrapper entries" \
+  test_convert_allows_staged_delete_with_wrapper_entry
 test_case "taw: convert rejects destination collisions" \
   test_convert_rejects_destination_collision_before_mutation
 test_case "taw: convert rejects overlapping destinations" \

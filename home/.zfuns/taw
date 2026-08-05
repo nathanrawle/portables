@@ -1603,6 +1603,14 @@ _taw_convert_project() {
           "$_taw_backup/default"/.[!.]*(N)
           "$_taw_backup/default"/..?*(N)
         )
+        _taw_output="$(git -C "$_taw_backup/default" ls-files --cached 2>/dev/null)" \
+          || _taw_failure="could not inspect the default worktree index"
+        if [[ -z "$_taw_failure" ]]; then
+          for _taw_line in "${(@f)_taw_output}"; do
+            [[ -n "$_taw_line" ]] || continue
+            _taw_default_entries+=( "${_taw_line%%/*}" )
+          done
+        fi
       elif [[ -n "$_taw_default_ref" ]]; then
         _taw_output="$(git --git-dir "$_taw_active_git_dir" ls-tree \
           --name-only "$_taw_default_ref" 2>/dev/null)" \
