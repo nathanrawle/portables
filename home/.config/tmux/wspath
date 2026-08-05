@@ -5,17 +5,14 @@
 
 # path shortening
 abrvdir=${(D)${~1}}
+dirarry=("${(@s:/:)${abrvdir}}")
 
-if (( $#abrvdir > 16 )); then
-  if (( ${#${(s:/:)abbrvdir}} == 2 )); then
-    print "$abrvdir"
-    exit
-  fi
-  print "${abrvdir%%/*}/…/${abrvdir##*/}"
+if (( $#dirarry <= 3 )); then
+  print "$abrvdir"
   exit
 fi
-
-print "$abrvdir"
+print "${dirarry[1]}/…/${(j:/:)dirarry[-2,-1]}"
+exit
 
 # bash-friendly snippet if I ever decide to implement a fallback
 # sed -E "s@^$HOME@~@; s@([^/])[^/]*/@\1/@g" <<< $1
