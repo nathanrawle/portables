@@ -4556,6 +4556,35 @@ test_convert_from_linked_worktree_remaps_cwd() {
     "expected invoking shell to follow the relocated worktree"
 }
 
+test_convert_from_nested_worktree_remaps_cwd() {
+  local project child output after
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  child="$project/main/scratch"
+  git --git-dir "$project/.git" worktree add -q --detach "$child" develop
+  mkdir -p "$child/nested"
+
+  output="$(
+    cd "$child/nested" || exit 1
+    TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" zsh -fc \
+      'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw --convert "$1" || exit; pwd -P' \
+      taw "$project" 2>&1
+  )"
+  after="${output##*$'\n'}"
+
+  assert_eq "$(cd "$project/.worktrees/scratch/nested" && pwd -P)" "$after" \
+    "expected invoking shell to follow the relocated nested worktree"
+  assert_eq "false" "$(git -C "$project" rev-parse --is-bare-repository)" \
+    "expected conversion from the nested worktree to succeed"
+  assert_not_exists "$project/main"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected successful conversion to remove its backup"
+}
+
 test_convert_from_default_worktree_root_remaps_cwd() {
   local project output after
   local -a backups
@@ -5164,6 +5193,8 @@ test_case "taw: convert rollback restores pruned default worktree parents" \
   test_convert_failure_restores_pruned_default_worktree_parents
 test_case "taw: convert remaps linked-worktree cwd" \
   test_convert_from_linked_worktree_remaps_cwd
+test_case "taw: convert remaps nested-worktree cwd" \
+  test_convert_from_nested_worktree_remaps_cwd
 test_case "taw: convert remaps default-worktree-root cwd" \
   test_convert_from_default_worktree_root_remaps_cwd
 test_case "taw: convert rollback restores default-worktree-root cwd" \

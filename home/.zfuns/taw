@@ -1506,22 +1506,21 @@ _taw_convert_project() {
   fi
 
   _taw_saved_pwd="$(pwd -P)" || return 1
-  if [[ -n "$_taw_default_path" \
+  for (( _taw_i = 1; _taw_i <= ${#_taw_paths[@]}; _taw_i++ )); do
+    if [[ "$_taw_saved_pwd" == "${_taw_paths[_taw_i]}" \
+      || "$_taw_saved_pwd" == "${_taw_paths[_taw_i]}"/* ]]; then
+      _taw_caller_target="worktree:$_taw_i"
+      _taw_caller_relative="${_taw_saved_pwd#${_taw_paths[_taw_i]}}"
+      _taw_caller_original_path="${_taw_paths[_taw_i]}$_taw_caller_relative"
+      break
+    fi
+  done
+  if [[ "$_taw_caller_target" == outside && -n "$_taw_default_path" \
     && ( "$_taw_saved_pwd" == "$_taw_default_path" \
       || "$_taw_saved_pwd" == "$_taw_default_path"/* ) ]]; then
     _taw_caller_target=default
     _taw_caller_relative="${_taw_saved_pwd#$_taw_default_path}"
     _taw_caller_original_path="$_taw_default_path$_taw_caller_relative"
-  else
-    for (( _taw_i = 1; _taw_i <= ${#_taw_paths[@]}; _taw_i++ )); do
-      if [[ "$_taw_saved_pwd" == "${_taw_paths[_taw_i]}" \
-        || "$_taw_saved_pwd" == "${_taw_paths[_taw_i]}"/* ]]; then
-        _taw_caller_target="worktree:$_taw_i"
-        _taw_caller_relative="${_taw_saved_pwd#${_taw_paths[_taw_i]}}"
-        _taw_caller_original_path="${_taw_paths[_taw_i]}$_taw_caller_relative"
-        break
-      fi
-    done
   fi
 
   _taw_backup="$(mktemp -d \
