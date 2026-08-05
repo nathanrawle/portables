@@ -1941,6 +1941,7 @@ _taw_current_head_ref() {
 
 _taw_checkout_existing_worktree_branch() {
   local _taw_path="$1" _taw_expected_branch="$2" _taw_existing_branch _taw_ref="$3"
+  local _taw_confirm_switch="${4:-true}"
   local _taw_remote_target _taw_remote_name _taw_remote_branch _taw_start_point _taw_is_remote_ref=false
 
   _taw_existing_branch="$(git -C "$_taw_path" symbolic-ref --quiet --short HEAD 2>/dev/null)" \
@@ -1949,7 +1950,8 @@ _taw_checkout_existing_worktree_branch() {
 
   [[ "$_taw_existing_branch" == "$_taw_expected_branch" ]] && return 0
 
-  _taw_confirm "Worktree $_taw_path is on $_taw_existing_branch; switch to $_taw_expected_branch?" || {
+  [[ "$_taw_confirm_switch" != true ]] \
+    || _taw_confirm "Worktree $_taw_path is on $_taw_existing_branch; switch to $_taw_expected_branch?" || {
     _taw_die "worktree branch mismatch"
     return 1
   }
@@ -2596,7 +2598,21 @@ fi
 
 _taw_classify_operands || return 1
 
-if [[ "$_taw_project_kind" != plain && -n "$_taw_worktree_arg" ]]; then
+if [[ "$_taw_project_kind" == normal \
+  && "$_taw_explicit_picker_requested" == true \
+  && "$_taw_picker_mode" == branch ]]; then
+  local _taw_existing_worktree
+
+  _taw_existing_worktree="$(_taw_existing_worktree_for_branch "$_taw_picker_branch")" \
+    || _taw_existing_worktree=
+  if [[ -n "$_taw_existing_worktree" ]]; then
+    _taw_window_dir="${_taw_existing_worktree:A}"
+  else
+    _taw_window_dir="$_taw_project_dir"
+    _taw_checkout_existing_worktree_branch \
+      "$_taw_project_dir" "$_taw_picker_branch" "$_taw_picker_ref" false || return 1
+  fi
+elif [[ "$_taw_project_kind" != plain && -n "$_taw_worktree_arg" ]]; then
   local _taw_worktree_target _taw_worktree_branch
 
   _taw_worktree_target="$(_taw_resolve_bare_worktree_arg "$_taw_worktree_arg")" || return 1

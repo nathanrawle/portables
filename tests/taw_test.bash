@@ -3339,7 +3339,7 @@ test_branch_mode_creates_unassigned_bare_worktree() {
   local project worktree fake_bin no_fzf_path log
 
   project="$(make_bare_wrapper "$TEST_TMPDIR/bare")"
-  worktree="$project/develop"
+  worktree="$project/.worktrees/develop"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
@@ -3438,7 +3438,7 @@ test_session_selection_after_project_mode_replaces_context() {
   git --git-dir "$launch/.git" worktree add "$launch/main" main >/dev/null 2>&1
   launch_worktree="$(cd "$launch/main" && pwd -P)"
   target="$(make_bare_wrapper "$projects_home")"
-  target_worktree="$target/main"
+  target_worktree="$target/.worktrees/main"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
