@@ -1309,7 +1309,7 @@ _taw_convert_project() {
   local _taw_active_git_dir="${_taw_original_git_dir:A}" _taw_default_branch
   local _taw_default_ref _taw_default_commit _taw_default_created=false
   local _taw_output _taw_line _taw_path _taw_branch_ref _taw_branch _taw_dest_name
-  local _taw_existing_destination
+  local _taw_existing_destination _taw_other_path
   local _taw_default_path= _taw_default_count=0 _taw_locked=false
   local _taw_is_bare_entry=false _taw_backup _taw_failure= _taw_actual_git_dir
   local _taw_before_default_status= _taw_after_default_status _taw_saved_pwd
@@ -1468,6 +1468,18 @@ _taw_convert_project() {
     _taw_die "multiple worktrees use the default branch: $_taw_default_branch"
     return 1
   }
+  for _taw_path in "${_taw_paths[@]}"; do
+    if [[ -n "$_taw_default_path" && "$_taw_default_path" == "$_taw_path"/* ]]; then
+      _taw_die "--convert cannot move a worktree that contains another registered worktree: $_taw_path"
+      return 1
+    fi
+    for _taw_other_path in "${_taw_paths[@]}"; do
+      if [[ "$_taw_other_path" == "$_taw_path"/* ]]; then
+        _taw_die "--convert cannot move a worktree that contains another registered worktree: $_taw_path"
+        return 1
+      fi
+    done
+  done
   if [[ -n "$_taw_default_path" ]]; then
     _taw_before_default_status="$(git -C "$_taw_default_path" status \
       --porcelain=v2 --branch --untracked-files=all)" || return 1

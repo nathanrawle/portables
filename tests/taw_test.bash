@@ -3977,6 +3977,108 @@ test_convert_bare_project_moves_slash_and_detached_worktrees() {
     "expected detached worktree state to be preserved"
 }
 
+test_convert_rejects_nondefault_worktree_containing_detached_worktree() {
+  local project parent child before_parent before_child before_list output
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  parent="$project/develop"
+  git --git-dir "$project/.git" worktree add -q "$parent" develop
+  parent="$(cd "$parent" && pwd -P)"
+  child="$parent/scratch"
+  git --git-dir "$project/.git" worktree add -q --detach "$child" main
+  printf 'dirty\n' >>"$parent/develop.txt"
+  printf 'untracked\n' >"$child/untracked.txt"
+  before_parent="$(git -C "$parent" status --porcelain=v2 --branch --untracked-files=all)"
+  before_child="$(git -C "$child" status --porcelain=v2 --branch --untracked-files=all)"
+  before_list="$(git --git-dir "$project/.git" worktree list --porcelain)"
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$project" 2>&1)"; then
+    fail "expected nested non-default worktrees to reject conversion"
+  fi
+
+  assert_string_contains "$output" \
+    "cannot move a worktree that contains another registered worktree: $parent"
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected nested-source rejection to preserve the bare repository"
+  assert_eq "$before_parent" \
+    "$(git -C "$parent" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected nested-source rejection to preserve the parent worktree"
+  assert_eq "$before_child" \
+    "$(git -C "$child" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected nested-source rejection to preserve the child worktree"
+  assert_eq "$before_list" "$(git --git-dir "$project/.git" worktree list --porcelain)" \
+    "expected nested-source rejection to preserve worktree metadata"
+  assert_not_exists "$project/.worktrees"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected nested-source rejection before backup creation"
+}
+
+test_convert_rejects_nondefault_worktree_containing_default_worktree() {
+  local project parent default_worktree before_parent before_default before_list output
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  parent="$project/develop"
+  git --git-dir "$project/.git" worktree add -q "$parent" develop
+  parent="$(cd "$parent" && pwd -P)"
+  default_worktree="$parent/main"
+  git --git-dir "$project/.git" worktree add -q "$default_worktree" main
+  before_parent="$(git -C "$parent" status --porcelain=v2 --branch --untracked-files=all)"
+  before_default="$(git -C "$default_worktree" status \
+    --porcelain=v2 --branch --untracked-files=all)"
+  before_list="$(git --git-dir "$project/.git" worktree list --porcelain)"
+
+  if output="$(run_taw "$TEST_TMPDIR" --convert "$project" 2>&1)"; then
+    fail "expected a non-default parent of the default worktree to reject conversion"
+  fi
+
+  assert_string_contains "$output" \
+    "cannot move a worktree that contains another registered worktree: $parent"
+  assert_eq "$before_parent" \
+    "$(git -C "$parent" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected rejection to preserve the non-default parent worktree"
+  assert_eq "$before_default" \
+    "$(git -C "$default_worktree" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected rejection to preserve the nested default worktree"
+  assert_eq "$before_list" "$(git --git-dir "$project/.git" worktree list --porcelain)" \
+    "expected rejection to preserve nested default worktree metadata"
+  assert_not_exists "$project/.worktrees"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected rejection before backup creation"
+}
+
+test_convert_allows_default_worktree_containing_detached_worktree() {
+  local project default_worktree child target before_default before_child
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  default_worktree="$project/main"
+  child="$default_worktree/scratch"
+  target="$project/.worktrees/scratch"
+  git --git-dir "$project/.git" worktree add -q "$default_worktree" main
+  git --git-dir "$project/.git" worktree add -q --detach "$child" develop
+  printf 'dirty\n' >>"$default_worktree/README.md"
+  printf 'untracked\n' >"$child/untracked.txt"
+  before_default="$(git -C "$default_worktree" status \
+    --porcelain=v2 --branch --untracked-files=all)"
+  before_child="$(git -C "$child" status --porcelain=v2 --branch --untracked-files=all)"
+
+  run_taw "$TEST_TMPDIR" --convert "$project"
+
+  assert_eq "$before_default" \
+    "$(git -C "$project" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected the containing default worktree state to be preserved"
+  assert_eq "$before_child" \
+    "$(git -C "$target" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected the nested detached worktree state to be preserved"
+  assert_not_exists "$default_worktree"
+  assert_exists "$target"
+}
+
 test_convert_conventional_bare_repository() {
   local bare project
 
@@ -4907,6 +5009,12 @@ test_case "taw: convert promotes dirty default and moves worktrees" \
   test_convert_bare_project_promotes_dirty_default_and_moves_worktrees
 test_case "taw: convert moves slash and detached worktrees" \
   test_convert_bare_project_moves_slash_and_detached_worktrees
+test_case "taw: convert rejects nested non-default worktrees before mutation" \
+  test_convert_rejects_nondefault_worktree_containing_detached_worktree
+test_case "taw: convert rejects non-default parent of default before mutation" \
+  test_convert_rejects_nondefault_worktree_containing_default_worktree
+test_case "taw: convert allows default worktree containing detached worktree" \
+  test_convert_allows_default_worktree_containing_detached_worktree
 test_case "taw: convert handles conventional bare repositories" \
   test_convert_conventional_bare_repository
 test_case "taw: convert rejects suffixless bare repositories before mutation" \
