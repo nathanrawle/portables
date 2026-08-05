@@ -25,8 +25,10 @@ Relevant options:
 
 ## Project Kinds
 
-- `normal`: a standard git repository with a working tree at the project root.
-- `bare`: a bare git repository that manages worktrees under the project root.
+- `normal`: a standard git repository with its primary working tree at the
+  project root and linked worktrees under `<project>/.worktrees`.
+- `bare`: a legacy or explicitly requested bare repository. New linked
+  worktrees are created under the wrapper's `.worktrees` directory.
 - `plain`: a non-git directory that opens directly.
 
 ## Project Resolution
@@ -54,7 +56,7 @@ If no project is supplied and `taw` is not already inside a project:
 - In peer mode, the first positional always identifies the project; a
   second positional is that project's worktree or branch.
 - Peer with no positionals still detects the current project.
-- Inside a `normal` project, one positional and no `-b` acts like `-b <branch>`.
+- Inside a git project, one positional names a managed worktree and its branch.
 - Outside a project, one positional acts like `-p <project>`.
 - Outside a project, two positionals mean `project` plus one operand.
 - Outside a project, `-b` is rejected.
@@ -113,25 +115,27 @@ Picker return behavior:
 
 | Inputs | Result |
 | --- | --- |
-| zero operands, no `-b` | branch picker; if `fzf` is missing or returns no rows, open the repo unchanged |
-| zero operands, `-b` | checkout or open that branch |
-| one positional, no `-b` | checkout or open that branch |
+| zero operands, no `-b` | worktree/branch picker; if `fzf` is missing or returns no rows, open the primary worktree unchanged |
+| zero operands, `-b` | create or open `.worktrees/<branch>` |
+| one positional, no `-b` | create or open `.worktrees/<path>` with the same branch name |
+| two positionals, no `-b` | create or open `.worktrees/<path>` using the second positional as its base ref |
 | one positional, `-b` | reject |
-| two positionals | reject |
 
 ### `bare`
 
 | Inputs | Result |
 | --- | --- |
 | zero operands, no `-b` | if there are no non-bare worktrees, open the default worktree; otherwise use the picker when available, falling back to the default worktree when it is not |
-| zero operands, `-b` | create or open a branch worktree under the project root |
-| one positional, no `-b` | treat it as a worktree path under the project root; the branch name is the same relative path |
-| two positionals, no `-b` | treat them as worktree path plus base ref |
+| zero operands, `-b` | create or open a branch worktree under `.worktrees` |
+| one positional, no `-b` | treat it as a path under `.worktrees`; the branch name is the same relative path |
+| two positionals, no `-b` | treat them as managed worktree path plus base ref |
 | any positional with `-b` | reject |
 | explicit bare worktree path with `-b` | resolve the project root from the path and open the branch worktree under the root |
 
-If a bare project is already resolved from an existing worktree path, `taw` opens that worktree directly when no branch target is requested.
-Bare worktree path operands reject `.` and `..` segments; absolute path operands must resolve under the project root.
+If a project is resolved from an existing linked worktree path, `taw` opens
+that worktree directly when no branch target is requested. Worktree path
+operands reject `.` and `..` segments; absolute paths must resolve beneath
+the project's `.worktrees` directory.
 
 ### `plain`
 
@@ -148,16 +152,23 @@ Branch resolution follows this order:
 2. Exact local branch match wins.
 3. If the input contains `/`, try the longest configured remote-name prefix first.
 4. Otherwise search remotes in this order: `origin`, then the remaining remotes sorted by name.
-5. If only a remote ref exists, create a local tracking branch/worktree.
+5. If only a remote ref exists, create a local tracking branch and worktree.
 
 Picker dedupe rules:
 
 - local branch rows suppress matching remote rows
 - `origin` wins over other remotes for the same branch name
 
-## Bare Default Worktree
+## Default And Managed Worktrees
 
-When a bare project needs a default worktree and no explicit branch/worktree target was given, `taw` probes in this order:
+Normal projects keep their primary checkout unchanged. Selecting its current
+branch opens the project root because Git cannot check out one branch in two
+worktrees. Other branch targets are created or reused beneath `.worktrees`.
+The portable global Git ignore contains `.worktrees/`, so managed worktree
+directories do not appear as untracked content in the primary checkout.
+
+When a bare project needs a default worktree and no explicit target was given,
+`taw` probes in this order:
 
 1. `HEAD` when it resolves to a local branch or commit-backed local branch
 2. `origin/HEAD`
@@ -183,10 +194,13 @@ Validation happens before mutation:
 
 - refusing creation returns nonzero and leaves the filesystem unchanged
 - `plain` rejects operands and only creates a directory
-- `repo` without a branch uses git's default branch; it accepts at most one branch operand, validates the branch name, then runs `git init`
-- `bare` accepts at most one pending worktree input, validates the path and branch name before creating the bare repo, then creates an orphan worktree
+- `repo` without a target uses git's default branch; with one target it
+  initializes the primary repository and creates the requested orphan
+  worktree beneath `.worktrees`
+- `bare` accepts at most one pending worktree input, validates the path and branch name before creating the bare repo, then creates an orphan worktree under `.worktrees`
 
 URL clone failures stop the flow; they do not fall through to the create prompt.
+URL cloning prompts for `normal` or `bare`, with `normal` as the default.
 
 ## Conversion
 
@@ -194,45 +208,36 @@ URL clone failures stop the flow; they do not fall through to the create prompt.
 taw --convert <project>
 ```
 
-Conversion is an action-only mode. It converts an existing `normal` project
-to taw's `bare` layout, prints the resulting worktree paths, and exits without
-creating or selecting a tmux window. The project is resolved from an existing
-literal path, a simple name under `PROJECTS_HOME`, or a tmux session. URLs,
-missing projects, plain projects, and projects that are already bare are
-rejected without prompting.
+Conversion is an action-only mode. It converts an existing bare repository to
+a normal clone, prints the resulting worktree paths, and exits without creating
+or selecting a tmux window. It accepts taw wrappers containing `.git` or
+`.bare`, and conventional `<name>.git` repositories. Normal and plain projects
+are rejected.
 
-The default branch is selected in this order:
+The bare repository's symbolic `HEAD` selects the default branch, followed by
+the normal `origin/HEAD`, `main`, and `master` fallbacks. An existing worktree
+for that branch is promoted to the repository root. If one does not exist, taw
+creates a clean default checkout there.
 
-1. `origin/HEAD`
-2. local `main`
-3. local `master`
-4. the currently checked-out branch
+Every other registered worktree is moved beneath `.worktrees`. Branch
+worktrees use their complete branch names, including slash-separated paths;
+detached worktrees use their previous directory basename. Internal, external,
+dirty, staged, untracked, ignored, and detached worktrees retain their Git
+state.
 
-If `origin/HEAD` only has a remote branch, conversion creates a local tracking
-branch for it. When the current branch is the default branch, conversion
-creates one worktree under `<project>/<branch>`. Otherwise it creates a clean
-default-branch worktree and a second worktree for the current branch. The bare
-repository remains at `<project>/.git`, and its symbolic `HEAD` names the
-selected default branch.
-
-Conversion preserves the original index and moves the working tree rather
-than copying or checking it out again. Staged, unstaged, untracked, and ignored
-files therefore move to the current-branch worktree without losing their Git
-status. Repositories with no commits are supported with a single orphan
-worktree.
-
-Conversion validates the repository before moving files. It rejects detached
-HEAD, active Git operations or unmerged entries, Git lock files, linked
-worktrees, initialized submodules, sparse or split indexes, worktree-specific
-config, external Git directories, and branch worktree paths that overlap.
-Failures after mutation starts trigger rollback to the original normal
-repository. If rollback cannot finish, taw reports the private recovery
-directory and leaves it in place.
+Conversion validates all destinations before mutation. It rejects collisions,
+duplicate destination names, locked worktrees, active Git operations, Git lock
+files, unmerged entries, initialized submodules, sparse or split indexes,
+worktree-specific config, and a default worktree that tracks `.worktrees`.
+Unmanaged wrapper files are retained at the normal repository root unless
+they conflict with promoted default-worktree content. Failures after mutation
+starts trigger rollback to the original bare layout. If rollback cannot
+finish, taw reports the private recovery directory and leaves it in place.
 
 `--convert` accepts `--debug` but cannot be combined with project, branch,
 picker, peer, agent, editor, or shell options. If the invoking shell is inside
-the converted project, taw changes it to the equivalent relative directory in
-the current-branch worktree.
+a converted worktree, taw changes it to the equivalent directory at its new
+location.
 
 ## `TAW_AGENT`
 
@@ -286,8 +291,8 @@ it from every session to which it is linked.
 ```bash
 taw -p ~/src/repo
 taw -p ~/src/repo feature/foo
-taw -p ~/src/bare feature/foo develop
-taw --convert ~/src/repo
+taw -p ~/src/repo feature/foo develop
+taw --convert ~/src/legacy-bare
 taw --peer sheffield-live hallamshire-hotel-all-day
 taw --peer --force -p ~/src/repo -agent "claude --resume"
 taw --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
