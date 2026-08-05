@@ -4556,6 +4556,67 @@ test_convert_from_linked_worktree_remaps_cwd() {
     "expected invoking shell to follow the relocated worktree"
 }
 
+test_convert_from_default_worktree_root_remaps_cwd() {
+  local project output after
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+
+  output="$(
+    cd "$project/main" || exit 1
+    TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" zsh -fc \
+      'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw --convert "$1" || exit; pwd -P' \
+      taw "$project" 2>&1
+  )"
+  after="${output##*$'\n'}"
+
+  assert_string_not_contains "$output" "Unable to read current working directory"
+  assert_eq "$(cd "$project" && pwd -P)" "$after" \
+    "expected invoking shell to follow the promoted default worktree"
+  assert_eq "false" "$(git -C "$project" rev-parse --is-bare-repository)" \
+    "expected conversion from the default worktree root to succeed"
+  assert_not_exists "$project/main"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected successful conversion to remove its backup"
+}
+
+test_convert_failure_from_default_worktree_root_restores_cwd() {
+  local project fake_bin before output after
+  local -a backups
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  git --git-dir "$project/.git" worktree add -q "$project/main" main
+  printf 'dirty\n' >>"$project/main/README.md"
+  before="$(git -C "$project/main" status --porcelain=v2 --branch --untracked-files=all)"
+  fake_bin="$(make_convert_failing_git "$TEST_TMPDIR/failing")"
+
+  output="$(
+    cd "$project/main" || exit 1
+    TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" \
+      TAW_CONVERT_FAIL_STAGE=nonbare PATH="$fake_bin:$PATH" zsh -fc \
+      'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw;
+       if taw --convert "$1"; then exit 1; fi; pwd -P' taw "$project" 2>&1
+  )"
+  after="${output##*$'\n'}"
+
+  assert_string_contains "$output" "original bare project restored"
+  assert_string_not_contains "$output" "Unable to read current working directory"
+  assert_eq "$(cd "$project/main" && pwd -P)" "$after" \
+    "expected rollback to restore the invoking shell cwd"
+  assert_eq "true" "$(git --git-dir "$project/.git" rev-parse --is-bare-repository)" \
+    "expected rollback to restore the bare repository"
+  assert_eq "$before" \
+    "$(git -C "$project/main" status --porcelain=v2 --branch --untracked-files=all)" \
+    "expected rollback to preserve the default worktree state"
+  shopt -s nullglob
+  backups=( "$TEST_TMPDIR"/.project.taw-convert.* )
+  shopt -u nullglob
+  assert_eq "0" "${#backups[@]}" "expected successful rollback to remove its backup"
+}
+
 test_convert_nonbare_failure_restores_original_layout() {
   local project fake_bin before backups
 
@@ -5103,6 +5164,10 @@ test_case "taw: convert rollback restores pruned default worktree parents" \
   test_convert_failure_restores_pruned_default_worktree_parents
 test_case "taw: convert remaps linked-worktree cwd" \
   test_convert_from_linked_worktree_remaps_cwd
+test_case "taw: convert remaps default-worktree-root cwd" \
+  test_convert_from_default_worktree_root_remaps_cwd
+test_case "taw: convert rollback restores default-worktree-root cwd" \
+  test_convert_failure_from_default_worktree_root_restores_cwd
 test_case "taw: convert failure restores bare layout" \
   test_convert_nonbare_failure_restores_original_layout
 test_case "taw: convert rejects normal projects" \
