@@ -772,7 +772,7 @@ _taw_resolve_explicit_picker() {
       _taw_ensure_picker_project_context || return 1
     fi
     _taw_output="$(_taw_explicit_picker_rows | fzf \
-      --delimiter=$'\t' --with-nth=1 --prompt="taw $_taw_picker_mode> " \
+      --delimiter=$'\t' --with-nth=1 --prompt="$_taw_picker_mode> " \
       --header='Enter: default | C-S: shell | C-A: agent | Opt-Z: editor+shell | Opt-A: editor+agent | Opt-Enter: all | Tab: mode' \
       --print-query --expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter --query="$_taw_query" \
       --bind='load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'

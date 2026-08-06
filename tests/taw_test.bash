@@ -4093,10 +4093,10 @@ test_picker_tab_cycles_all_modes_and_preserves_query() {
 
   mapfile -t fzf_args <"$args_log"
   assert_eq 4 "${#fzf_args[@]}" "expected one fzf invocation per visited mode"
-  assert_string_contains "${fzf_args[0]}" $'--prompt=taw session> '
-  assert_string_contains "${fzf_args[1]}" $'--prompt=taw worktree> '
-  assert_string_contains "${fzf_args[2]}" $'--prompt=taw branch> '
-  assert_string_contains "${fzf_args[3]}" $'--prompt=taw session> '
+  assert_string_contains "${fzf_args[0]}" $'--prompt=session> '
+  assert_string_contains "${fzf_args[1]}" $'--prompt=worktree> '
+  assert_string_contains "${fzf_args[2]}" $'--prompt=branch> '
+  assert_string_contains "${fzf_args[3]}" $'--prompt=session> '
   assert_string_contains "${fzf_args[1]}" '--query=needle'
   assert_string_contains "${fzf_args[2]}" '--query=needle'
   assert_string_contains "${fzf_args[3]}" '--query=needle'
@@ -4134,7 +4134,7 @@ test_each_explicit_mode_can_cycle_from_its_start() {
 
     mapfile -t fzf_args <"$args_log"
     assert_eq 2 "${#fzf_args[@]}" "expected $mode to cycle once"
-    assert_string_contains "${fzf_args[1]}" "--prompt=taw $expected> "
+    assert_string_contains "${fzf_args[1]}" "--prompt=$expected> "
   done
 }
 
