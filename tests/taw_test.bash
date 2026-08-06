@@ -124,6 +124,13 @@ case "${1:-}" in
     [[ "$windows" = *$'\n' ]] || printf '\n'
     ;;
   list-sessions)
+    if [[ -n "${TAW_FAKE_TMUX_WAIT_FOR_FILE:-}" ]]; then
+      for ((attempt = 0; attempt < 200; attempt++)); do
+        [[ -f "$TAW_FAKE_TMUX_WAIT_FOR_FILE" ]] && break
+        sleep 0.01
+      done
+      [[ -f "$TAW_FAKE_TMUX_WAIT_FOR_FILE" ]] || exit 98
+    fi
     [[ -n "${TAW_FAKE_TMUX_SESSIONS+x}" ]] || exit 1
     sessions="$TAW_FAKE_TMUX_SESSIONS"
     if [[ -n "${TAW_FAKE_TMUX_SESSIONS_AFTER_FIRST+x}" ]]; then
@@ -403,10 +410,19 @@ if [[ -n "${TAW_FZF_ARGS_LOG:-}" ]]; then
   printf '\n' >>"$TAW_FZF_ARGS_LOG"
 fi
 
+if [[ -n "${TAW_FAKE_FZF_STARTED_FILE:-}" ]]; then
+  : >"$TAW_FAKE_FZF_STARTED_FILE"
+fi
+
 lines=()
-while IFS= read -r line; do
-  lines+=( "$line" )
-done
+if [[ "${TAW_FAKE_FZF_CLOSE_EARLY:-0}" = 1 ]]; then
+  IFS= read -r line && lines+=( "$line" )
+  exec 0<&-
+else
+  while IFS= read -r line; do
+    lines+=( "$line" )
+  done
+fi
 
 count_file="${TAW_FAKE_FZF_COUNT_FILE:-${TAW_TMUX_LOG:-/tmp/fzf}.fzf.count}"
 count=1
@@ -2850,28 +2866,34 @@ EOF
   assert_not_exists "$find_log"
 }
 
-test_project_picker_rejects_control_characters_in_discovered_paths() {
-  local xdg projects_home unsafe_project elsewhere fake_bin log output
+test_project_picker_skips_control_characters_in_discovered_paths() {
+  local xdg projects_home unsafe_project safe_project safe_real elsewhere
+  local fake_bin no_fzf_path log fzf_log
 
   xdg="$TEST_TMPDIR/xdg"
   projects_home="$TEST_TMPDIR/projects"
   unsafe_project="$projects_home/unsafe"$'\n'"project"
+  safe_project="$projects_home/safe"
   elsewhere="$TEST_TMPDIR/elsewhere"
   mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere"
   printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
   make_git_repo "$unsafe_project"
+  make_git_repo "$safe_project"
+  safe_real="$(cd "$safe_project" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
 
-  if output="$(XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" \
-    TAW_TMUX_LOG="$log" run_taw "$elsewhere" --pick-project 2>&1)"; then
-    fail "expected project picker to reject a newline in a project path"
-  fi
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$safe_project" \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --pick-project
 
-  assert_string_contains "$output" \
-    "project path contains control characters and cannot be used by the picker"
-  assert_no_tmux_work_window "$log"
+  assert_file_contains "$fzf_log" "$safe_project"
+  assert_file_not_contains "$fzf_log" unsafe
+  assert_file_contains "$log" $'-c\t'"$safe_real"$'\tvim'
 }
 
 test_project_picker_rejects_control_characters_in_tmux_sessions() {
@@ -2929,6 +2951,77 @@ test_project_picker_batches_tmux_session_metadata() {
   metadata_call_count="$(grep -Fxc -- "$metadata_call" "$log" || true)"
   assert_eq "1" "$metadata_call_count" "expected one batched tmux metadata query"
   assert_file_not_contains "$log" $'display-message\t-p\t-t\t'
+}
+
+test_explicit_picker_starts_fzf_before_rows_finish() {
+  local xdg projects_home target target_real elsewhere fake_bin no_fzf_path
+  local log fzf_log started
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  target="$projects_home/target"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$target"
+  target_real="$(cd "$target" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+  started="$TEST_TMPDIR/fzf-started"
+
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FAKE_TMUX_WAIT_FOR_FILE="$started" TAW_FAKE_FZF_STARTED_FILE="$started" \
+    TAW_FAKE_FZF_MATCH="$target" TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --mode=session
+
+  assert_exists "$started"
+  assert_file_contains "$fzf_log" "$target"
+  assert_file_contains "$log" $'-c\t'"$target_real"$'\tvim'
+}
+
+test_explicit_picker_handles_early_fzf_exit() {
+  local xdg projects_home target elsewhere fake_bin no_fzf_path
+  local log cancel_log directory_name i rc
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  target="$projects_home/000-target"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere" "$target"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  for ((i = 0; i < 800; i++)); do
+    printf -v directory_name \
+      'project-%04d-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz' "$i"
+    mkdir "$projects_home/$directory_name"
+  done
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FAKE_FZF_CLOSE_EARLY=1 TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --mode=session
+
+  assert_file_contains "$log" $'new-session\t'
+  assert_file_contains "$log" "$projects_home/"
+
+  cancel_log="$TEST_TMPDIR/tmux-cancel.log"
+  set +e
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FAKE_FZF_CLOSE_EARLY=1 TAW_FAKE_FZF_CANCEL=1 \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$cancel_log" \
+    TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" --mode=session
+  rc=$?
+  set -e
+
+  assert_eq "0" "$rc" "expected early fzf cancellation to return successfully"
+  assert_no_tmux_work_window "$cancel_log"
 }
 
 test_project_picker_skips_unsafe_current_tmux_session() {
@@ -3717,25 +3810,27 @@ test_worktree_mode_opens_linked_normal_worktree() {
   assert_file_contains "$log" $'-c\t'"$detached_real"$'\tvim'
 }
 
-test_worktree_picker_rejects_control_characters_in_paths() {
-  local repo unsafe_worktree fake_bin log output
+test_worktree_picker_skips_control_characters_in_paths() {
+  local repo repo_real unsafe_worktree fake_bin no_fzf_path log fzf_log
 
   repo="$TEST_TMPDIR/repo"
   unsafe_worktree="$TEST_TMPDIR/unsafe"$'\t'"worktree"
   make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
   git -C "$repo" worktree add -qb topic "$unsafe_worktree"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
 
-  if output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$repo" --mode=worktree 2>&1)"; then
-    fail "expected worktree picker to reject a tab in a worktree path"
-  fi
+  EDITOR=vim TAW_FAKE_FZF_MATCH='main [worktree]' TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=worktree
 
-  assert_string_contains "$output" \
-    "worktree path contains control characters and cannot be used by the picker"
-  assert_no_tmux_work_window "$log"
+  assert_file_contains "$fzf_log" $'main [worktree]\tworktree\tmain\tmain\t'"$repo_real"
+  assert_file_not_contains "$fzf_log" unsafe
+  assert_file_contains "$log" $'-c\t'"$repo_real"$'\tvim'
 }
 
 test_worktree_picker_preserves_spaces_and_unicode_in_paths() {
@@ -3953,6 +4048,48 @@ test_project_scoped_modes_require_current_git_project() {
     fail "expected cycling to worktree mode outside Git to fail"
   fi
   assert_string_contains "$output" "worktree picker requires a current Git project"
+  assert_no_tmux_work_window "$log"
+}
+
+test_explicit_picker_reports_empty_modes() {
+  local xdg empty_search elsewhere unborn bare fake_bin log args_log output
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  unborn="$TEST_TMPDIR/unborn"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere" "$unborn"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  git -C "$unborn" init -q -b main
+  bare="$(make_bare_wrapper "$TEST_TMPDIR/bare")"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+
+  log="$TEST_TMPDIR/tmux-session.log"
+  if output="$(XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" run_taw "$elsewhere" --mode=session 2>&1)"; then
+    fail "expected an empty session picker to fail"
+  fi
+  assert_string_contains "$output" "session picker has no targets"
+  assert_file_contains "$args_log" 'load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'
+  assert_no_tmux_work_window "$log"
+
+  log="$TEST_TMPDIR/tmux-branch.log"
+  if output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$unborn" --mode=branch 2>&1)"; then
+    fail "expected an empty branch picker to fail"
+  fi
+  assert_string_contains "$output" "branch picker has no targets"
+  assert_no_tmux_work_window "$log"
+
+  log="$TEST_TMPDIR/tmux-worktree.log"
+  if output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$bare" --mode=worktree 2>&1)"; then
+    fail "expected an empty worktree picker to fail"
+  fi
+  assert_string_contains "$output" "worktree picker has no targets"
   assert_no_tmux_work_window "$log"
 }
 
@@ -5918,12 +6055,16 @@ test_case "taw: empty project prompt mentions fzf" \
   test_empty_project_prompt_mentions_fzf
 test_case "taw: project picker uses Zsh directory traversal" \
   test_project_picker_uses_zsh_directory_traversal
-test_case "taw: project picker rejects control characters in paths" \
-  test_project_picker_rejects_control_characters_in_discovered_paths
+test_case "taw: project picker skips control characters in paths" \
+  test_project_picker_skips_control_characters_in_discovered_paths
 test_case "taw: project picker rejects control characters in tmux sessions" \
   test_project_picker_rejects_control_characters_in_tmux_sessions
 test_case "taw: project picker batches tmux session metadata" \
   test_project_picker_batches_tmux_session_metadata
+test_case "taw: explicit picker starts fzf before rows finish" \
+  test_explicit_picker_starts_fzf_before_rows_finish
+test_case "taw: explicit picker handles early fzf exit" \
+  test_explicit_picker_handles_early_fzf_exit
 test_case "taw: project picker skips unsafe current tmux session" \
   test_project_picker_skips_unsafe_current_tmux_session
 test_case "taw: empty project prompt picker resolves tmux session rows" \
@@ -5970,8 +6111,8 @@ test_case "taw: session mode aliases use project picker" \
   test_session_mode_aliases_use_project_picker
 test_case "taw: worktree mode opens linked normal worktree" \
   test_worktree_mode_opens_linked_normal_worktree
-test_case "taw: worktree picker rejects control characters in paths" \
-  test_worktree_picker_rejects_control_characters_in_paths
+test_case "taw: worktree picker skips control characters in paths" \
+  test_worktree_picker_skips_control_characters_in_paths
 test_case "taw: worktree picker preserves spaces and Unicode in paths" \
   test_worktree_picker_preserves_spaces_and_unicode_in_paths
 test_case "taw: branch mode opens existing worktree without checkout" \
@@ -5988,5 +6129,7 @@ test_case "taw: session selection after project mode replaces context" \
   test_session_selection_after_project_mode_replaces_context
 test_case "taw: project-scoped modes require current git project" \
   test_project_scoped_modes_require_current_git_project
+test_case "taw: explicit picker reports empty modes" \
+  test_explicit_picker_reports_empty_modes
 test_case "taw: invalid picker modes and combinations are rejected" \
   test_invalid_picker_modes_and_combinations_are_rejected
