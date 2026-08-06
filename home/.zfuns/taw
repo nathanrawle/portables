@@ -1313,7 +1313,8 @@ _taw_convert_project() {
   local _taw_default_path= _taw_default_count=0 _taw_locked=false
   local _taw_is_bare_entry=false _taw_backup _taw_failure= _taw_actual_git_dir
   local _taw_before_default_status= _taw_after_default_status _taw_saved_pwd
-  local _taw_caller_target=outside _taw_caller_relative= _taw_default_git_dir
+  local _taw_caller_target=outside _taw_caller_relative= _taw_caller_original_path=
+  local _taw_caller_relocated=false _taw_default_git_dir
   local _taw_common_moved=false _taw_default_staged=false _taw_default_removed=false
   local _taw_config_changed=false _taw_rollback_ok=true
   local _taw_wrapper_staged=false _taw_wrapper_entry _taw_default_entry
@@ -1505,20 +1506,21 @@ _taw_convert_project() {
   fi
 
   _taw_saved_pwd="$(pwd -P)" || return 1
-  if [[ -n "$_taw_default_path" \
+  for (( _taw_i = 1; _taw_i <= ${#_taw_paths[@]}; _taw_i++ )); do
+    if [[ "$_taw_saved_pwd" == "${_taw_paths[_taw_i]}" \
+      || "$_taw_saved_pwd" == "${_taw_paths[_taw_i]}"/* ]]; then
+      _taw_caller_target="worktree:$_taw_i"
+      _taw_caller_relative="${_taw_saved_pwd#${_taw_paths[_taw_i]}}"
+      _taw_caller_original_path="${_taw_paths[_taw_i]}$_taw_caller_relative"
+      break
+    fi
+  done
+  if [[ "$_taw_caller_target" == outside && -n "$_taw_default_path" \
     && ( "$_taw_saved_pwd" == "$_taw_default_path" \
       || "$_taw_saved_pwd" == "$_taw_default_path"/* ) ]]; then
     _taw_caller_target=default
     _taw_caller_relative="${_taw_saved_pwd#$_taw_default_path}"
-  else
-    for (( _taw_i = 1; _taw_i <= ${#_taw_paths[@]}; _taw_i++ )); do
-      if [[ "$_taw_saved_pwd" == "${_taw_paths[_taw_i]}" \
-        || "$_taw_saved_pwd" == "${_taw_paths[_taw_i]}"/* ]]; then
-        _taw_caller_target="worktree:$_taw_i"
-        _taw_caller_relative="${_taw_saved_pwd#${_taw_paths[_taw_i]}}"
-        break
-      fi
-    done
+    _taw_caller_original_path="$_taw_default_path$_taw_caller_relative"
   fi
 
   _taw_backup="$(mktemp -d \
@@ -1531,6 +1533,15 @@ _taw_convert_project() {
   cp -p -- "$_taw_original_git_dir/config" "$_taw_backup/meta/config" \
     && cp -p -- "$_taw_original_git_dir/HEAD" "$_taw_backup/meta/HEAD" \
     || _taw_failure="could not preserve bare repository metadata"
+
+  if [[ -z "$_taw_failure" && "$_taw_caller_target" != outside ]]; then
+    # Git refuses to run after the caller's worktree directory is removed.
+    if builtin cd -q -- "${_taw_project_root:h}"; then
+      _taw_caller_relocated=true
+    else
+      _taw_failure="could not move the invoking shell to a stable directory"
+    fi
+  fi
 
   if [[ -z "$_taw_failure" && "$_taw_default_ref" != "$_taw_default_branch" \
     && -n "$_taw_default_ref" ]]; then
@@ -1783,6 +1794,9 @@ _taw_convert_project() {
     if [[ "$_taw_wrapper_staged" == true && -d "$_taw_backup/wrapper" ]]; then
       _taw_move_worktree_entries "$_taw_backup/wrapper" "$_taw_project_root" \
         || _taw_rollback_ok=false
+    fi
+    if [[ "$_taw_rollback_ok" == true && "$_taw_caller_relocated" == true ]]; then
+      builtin cd -- "$_taw_caller_original_path" || _taw_rollback_ok=false
     fi
     if [[ "$_taw_rollback_ok" == true ]]; then
       rm -rf -- "$_taw_backup"
