@@ -535,25 +535,17 @@ _taw_resolve_project_from_tmux() {
   return 1
 }
 
-_taw_read_tmux_picker_value() {
-  local _taw_target="$1" _taw_format="$2"
-  local _taw_marker=__taw_picker_end__ _taw_output
-
-  _taw_output="$(tmux display-message -p -t "$_taw_target" \
-    "${_taw_format}${_taw_marker}" 2>/dev/null)" || return 1
-  [[ "$_taw_output" == *"$_taw_marker" ]] || return 1
-  _taw_tmux_picker_value="${_taw_output%$_taw_marker}"
-}
-
 _taw_tmux_sessionizer_picker_rows() {
   local CONFIG_FILE_NAME="tmux-sessionizer.conf"
   local CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer"
   local CONFIG_FILE="$CONFIG_DIR/$CONFIG_FILE_NAME"
   local TS_MAX_DEPTH
-  local -a TS_SEARCH_PATHS TS_EXTRA_SEARCH_PATHS TS_SESSION_COMMANDS
-  local _taw_picker_current_session_id _taw_session_ids _taw_session_id
-  local _taw_session_name _taw_session_path
-  local _taw_tmux_picker_value _taw_entry _taw_path _taw_depth _taw_found_path
+  local -a TS_SEARCH_PATHS TS_EXTRA_SEARCH_PATHS TS_SESSION_COMMANDS _taw_tmux_list_args
+  local _taw_picker_current_session_id _taw_sessions _taw_session_line
+  local _taw_session_id _taw_session_name _taw_session_path _taw_session_rest
+  local _taw_entry _taw_path _taw_depth _taw_found_path
+  local _taw_marker=__taw_picker_end__ _taw_session_format
+  local _taw_tab=$'\t'
 
   if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
@@ -572,15 +564,35 @@ _taw_tmux_sessionizer_picker_rows() {
     _taw_picker_current_session_id="$(tmux display-message -p '#{session_id}' 2>/dev/null)" \
       || _taw_picker_current_session_id=
   fi
-  _taw_session_ids="$(tmux list-sessions -F '#{session_id}' 2>/dev/null)" || _taw_session_ids=
-  for _taw_session_id in "${(@f)_taw_session_ids}"; do
-    [[ -n "$_taw_session_id" ]] || continue
-    [[ -n "${TMUX:-}" \
+
+  _taw_session_format=$'#{session_id}\t#{session_name}\t#{session_path}'"$_taw_marker"
+  _taw_tmux_list_args=(list-sessions -F "$_taw_session_format")
+  if [[ -n "$_taw_picker_current_session_id" ]]; then
+    _taw_tmux_list_args+=(
+      -f "#{!=:#{session_id},$_taw_picker_current_session_id}"
+    )
+  fi
+  _taw_sessions="$(tmux "${_taw_tmux_list_args[@]}" 2>/dev/null)" || _taw_sessions=
+  for _taw_session_line in "${(@f)_taw_sessions}"; do
+    [[ -n "$_taw_session_line" ]] || continue
+    _taw_session_id="${_taw_session_line%%${_taw_tab}*}"
+    [[ -n "$_taw_picker_current_session_id" \
       && "$_taw_session_id" == "$_taw_picker_current_session_id" ]] && continue
-    _taw_read_tmux_picker_value "$_taw_session_id" '#{session_name}' || continue
-    _taw_session_name="$_taw_tmux_picker_value"
-    _taw_read_tmux_picker_value "$_taw_session_id" '#{session_path}' || continue
-    _taw_session_path="$_taw_tmux_picker_value"
+    _taw_session_rest="${_taw_session_line#*${_taw_tab}}"
+    _taw_session_name="${_taw_session_rest%%${_taw_tab}*}"
+    _taw_session_path="${_taw_session_rest#*${_taw_tab}}"
+    [[ "$_taw_session_rest" != "$_taw_session_line" \
+      && "$_taw_session_path" != "$_taw_session_rest" \
+      && "$_taw_session_path" == *"$_taw_marker" ]] || {
+      _taw_die "tmux returned invalid session metadata"
+      return 1
+    }
+    _taw_session_path="${_taw_session_path%$_taw_marker}"
+    [[ -n "$_taw_session_id" && -n "$_taw_session_name" \
+      && -n "$_taw_session_path" ]] || {
+      _taw_die "tmux returned invalid session metadata"
+      return 1
+    }
     _taw_require_picker_safe "tmux session" \
       "$_taw_session_id" "$_taw_session_name" "$_taw_session_path" || return 1
     print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"

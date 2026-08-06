@@ -139,12 +139,19 @@ case "${1:-}" in
       fi
     fi
     format=""
+    filter=""
     while [[ $# -gt 0 ]]; do
-      if [[ "$1" = "-F" && $# -ge 2 ]]; then
-        format="$2"
-        break
-      fi
-      shift
+      case "$1" in
+        -F)
+          format="$2"
+          shift 2
+          ;;
+        -f)
+          filter="$2"
+          shift 2
+          ;;
+        *) shift ;;
+      esac
     done
     if [[ -n "$format" ]]; then
       line_number=0
@@ -161,6 +168,10 @@ case "${1:-}" in
           session="$first"
           path="$second"
         fi
+        if [[ -n "$filter" \
+          && "$session_id" = "${TAW_FAKE_TMUX_CURRENT_SESSION_ID:-\$1}" ]]; then
+          continue
+        fi
         case "$format" in
           '#{session_id}')
             printf '%s\n' "$session_id"
@@ -170,6 +181,13 @@ case "${1:-}" in
             ;;
           $'#{session_id}\t#{session_name}\t#{session_path}')
             printf '%s\t%s\t%s\n' "$session_id" "$session" "$path"
+            ;;
+          $'#{session_id}\t#{session_name}\t#{session_path}__taw_picker_end__')
+            if [[ ( "$first" = @* || "$first" = \$* ) && -n "$third" ]]; then
+              printf '%s__taw_picker_end__\n' "$line"
+            else
+              printf '%s\t%s__taw_picker_end__\n' "$session_id" "$line"
+            fi
             ;;
           $'#{session_name}\t#{session_path}')
             printf '%s\t%s\n' "$session" "$path"
@@ -2815,15 +2833,13 @@ test_project_picker_rejects_control_characters_in_tmux_sessions() {
   elsewhere="$TEST_TMPDIR/elsewhere"
   mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$session_path" "$elsewhere"
   printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
-  sessions=$'$7\tsafe\t'"$session_path"
+  sessions=$'$7\tunsafe\tname\t'"$session_path"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   log="$TEST_TMPDIR/tmux.log"
 
   if output="$(XDG_CONFIG_HOME="$xdg" EDITOR=vim \
     TAW_FAKE_TMUX_SESSIONS="$sessions" \
-    TAW_FAKE_TMUX_DISPLAY_SESSION_NAME=$'unsafe\tname' \
-    TAW_FAKE_TMUX_DISPLAY_SESSION_PATH="$session_path" \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$elsewhere" --pick-project 2>&1)"; then
     fail "expected project picker to reject a tab in a tmux session name"
@@ -2834,45 +2850,35 @@ test_project_picker_rejects_control_characters_in_tmux_sessions() {
   assert_no_tmux_work_window "$log"
 }
 
-test_project_picker_skips_tmux_sessions_that_disappear_during_lookup() {
-  local xdg empty_search vanished_path survivor_path elsewhere fake_bin no_fzf_path
-  local sessions lookup fail_name fail_path log fzf_log
+test_project_picker_batches_tmux_session_metadata() {
+  local xdg empty_search first_path second_path elsewhere fake_bin
+  local sessions log fzf_log metadata_call metadata_call_count
 
   xdg="$TEST_TMPDIR/xdg"
   empty_search="$TEST_TMPDIR/empty"
-  vanished_path="$TEST_TMPDIR/vanished"
-  survivor_path="$TEST_TMPDIR/survivor"
+  first_path="$TEST_TMPDIR/first"
+  second_path="$TEST_TMPDIR/second"
   elsewhere="$TEST_TMPDIR/elsewhere"
-  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$vanished_path" \
-    "$survivor_path" "$elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$first_path" \
+    "$second_path" "$elsewhere"
   printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
-  sessions=$'$7\tvanished\t'"$vanished_path"$'\n$8\tsurvivor\t'"$survivor_path"
+  sessions=$'$7\tfirst\t'"$first_path"$'\n$8\tsecond\t'"$second_path"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
-  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
 
-  for lookup in session-name session-path; do
-    fail_name=
-    fail_path=
-    case "$lookup" in
-      session-name) fail_name='$7' ;;
-      session-path) fail_path='$7' ;;
-    esac
-    log="$TEST_TMPDIR/tmux-$lookup.log"
-    fzf_log="$TEST_TMPDIR/fzf-$lookup.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_FZF_CANCEL=1 TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere" --pick-project
 
-    XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS="$sessions" \
-      TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_NAME_TARGETS="$fail_name" \
-      TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_PATH_TARGETS="$fail_path" \
-      TAW_FAKE_TMUX_HAS_SESSION_TARGETS='$8' TAW_FAKE_FZF_MATCH='[TMUX] survivor' \
-      TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
-      TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-      run_taw "$elsewhere" --pick-project
-
-    assert_file_contains "$fzf_log" '[TMUX] survivor'
-    assert_file_not_contains "$fzf_log" '[TMUX] vanished'
-    assert_file_contains "$log" $'attach-session\t-t\t$8'
-  done
+  assert_file_contains "$fzf_log" '[TMUX] first'
+  assert_file_contains "$fzf_log" '[TMUX] second'
+  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}__taw_picker_end__'
+  metadata_call_count="$(grep -Fxc -- "$metadata_call" "$log" || true)"
+  assert_eq "1" "$metadata_call_count" "expected one batched tmux metadata query"
+  assert_file_not_contains "$log" $'display-message\t-p\t-t\t'
 }
 
 test_project_picker_skips_unsafe_current_tmux_session() {
@@ -2896,7 +2902,7 @@ test_project_picker_skips_unsafe_current_tmux_session() {
 
   printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
     TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_SESSIONS="$sessions" \
-    TAW_FAKE_TMUX_DISPLAY_SESSION_PATH="$unsafe_path" TAW_FAKE_FZF_MATCH="$repo" \
+    TAW_FAKE_FZF_MATCH="$repo" \
     TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 TAW_FAKE_FZF_FAIL_ON_SECOND=1 \
     TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
@@ -2904,6 +2910,8 @@ test_project_picker_skips_unsafe_current_tmux_session() {
 
   assert_file_contains "$fzf_log" "$repo"
   assert_file_not_contains "$fzf_log" '[TMUX] current'
+  assert_file_contains "$log" \
+    $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}__taw_picker_end__\t-f\t#{!=:#{session_id},$1}'
   assert_file_not_contains "$log" $'display-message\t-p\t-t\t$1\t#{session_path}'
 }
 
@@ -5862,8 +5870,8 @@ test_case "taw: project picker rejects control characters in paths" \
   test_project_picker_rejects_control_characters_in_discovered_paths
 test_case "taw: project picker rejects control characters in tmux sessions" \
   test_project_picker_rejects_control_characters_in_tmux_sessions
-test_case "taw: project picker skips tmux sessions that disappear during lookup" \
-  test_project_picker_skips_tmux_sessions_that_disappear_during_lookup
+test_case "taw: project picker batches tmux session metadata" \
+  test_project_picker_batches_tmux_session_metadata
 test_case "taw: project picker skips unsafe current tmux session" \
   test_project_picker_skips_unsafe_current_tmux_session
 test_case "taw: empty project prompt picker resolves tmux session rows" \
