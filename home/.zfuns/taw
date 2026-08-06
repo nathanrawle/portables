@@ -94,6 +94,18 @@ _taw_trim_whitespace() {
   print -r -- "$_taw_value"
 }
 
+_taw_require_picker_safe() {
+  local _taw_label="$1" _taw_value
+  shift
+
+  for _taw_value in "$@"; do
+    [[ "$_taw_value" != *[[:cntrl:]]* ]] || {
+      _taw_die "$_taw_label contains control characters and cannot be used by the picker"
+      return 1
+    }
+  done
+}
+
 _taw_debug_dump() {
   [[ "$_taw_debug" == true ]] || return 0
 
@@ -523,15 +535,24 @@ _taw_resolve_project_from_tmux() {
   return 1
 }
 
+_taw_read_tmux_picker_value() {
+  local _taw_target="$1" _taw_format="$2"
+  local _taw_marker=__taw_picker_end__ _taw_output
+
+  _taw_output="$(tmux display-message -p -t "$_taw_target" \
+    "${_taw_format}${_taw_marker}" 2>/dev/null)" || return 1
+  [[ "$_taw_output" == *"$_taw_marker" ]] || return 1
+  _taw_tmux_picker_value="${_taw_output%$_taw_marker}"
+}
+
 _taw_tmux_sessionizer_picker_rows() {
   local CONFIG_FILE_NAME="tmux-sessionizer.conf"
   local CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer"
   local CONFIG_FILE="$CONFIG_DIR/$CONFIG_FILE_NAME"
   local TS_MAX_DEPTH
   local -a TS_SEARCH_PATHS TS_EXTRA_SEARCH_PATHS TS_SESSION_COMMANDS
-  local _taw_current_session _taw_sessions _taw_session_line _taw_session_id _taw_session_name _taw_session_path _taw_session_rest
-  local _taw_entry _taw_path _taw_depth
-  local _taw_tab=$'\t'
+  local _taw_current_session _taw_session_ids _taw_session_id _taw_session_name _taw_session_path
+  local _taw_tmux_picker_value _taw_entry _taw_path _taw_depth _taw_found_path
 
   if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
@@ -548,29 +569,19 @@ _taw_tmux_sessionizer_picker_rows() {
 
   if [[ -n "${TMUX:-}" ]]; then
     _taw_current_session="$(tmux display-message -p '#S' 2>/dev/null)" || _taw_current_session=
-    _taw_sessions="$(tmux list-sessions -F '#{session_id}	#{session_name}	#{session_path}' 2>/dev/null)" || _taw_sessions=
-    for _taw_session_line in "${(@f)_taw_sessions}"; do
-      _taw_session_id="${_taw_session_line%%${_taw_tab}*}"
-      _taw_session_rest="${_taw_session_line#*${_taw_tab}}"
-      [[ "$_taw_session_rest" == "$_taw_session_line" ]] && _taw_session_rest=
-      _taw_session_name="${_taw_session_rest%%${_taw_tab}*}"
-      _taw_session_path="${_taw_session_rest#*${_taw_tab}}"
-      [[ "$_taw_session_path" == "$_taw_session_rest" ]] && _taw_session_path=
-      [[ "$_taw_session_name" == "$_taw_current_session" ]] && continue
-      print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"
-    done
-  else
-    _taw_sessions="$(tmux list-sessions -F '#{session_id}	#{session_name}	#{session_path}' 2>/dev/null)" || _taw_sessions=
-    for _taw_session_line in "${(@f)_taw_sessions}"; do
-      _taw_session_id="${_taw_session_line%%${_taw_tab}*}"
-      _taw_session_rest="${_taw_session_line#*${_taw_tab}}"
-      [[ "$_taw_session_rest" == "$_taw_session_line" ]] && _taw_session_rest=
-      _taw_session_name="${_taw_session_rest%%${_taw_tab}*}"
-      _taw_session_path="${_taw_session_rest#*${_taw_tab}}"
-      [[ "$_taw_session_path" == "$_taw_session_rest" ]] && _taw_session_path=
-      print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"
-    done
   fi
+  _taw_session_ids="$(tmux list-sessions -F '#{session_id}' 2>/dev/null)" || _taw_session_ids=
+  for _taw_session_id in "${(@f)_taw_session_ids}"; do
+    [[ -n "$_taw_session_id" ]] || continue
+    _taw_read_tmux_picker_value "$_taw_session_id" '#{session_name}' || return 1
+    _taw_session_name="$_taw_tmux_picker_value"
+    _taw_read_tmux_picker_value "$_taw_session_id" '#{session_path}' || return 1
+    _taw_session_path="$_taw_tmux_picker_value"
+    _taw_require_picker_safe "tmux session" \
+      "$_taw_session_id" "$_taw_session_name" "$_taw_session_path" || return 1
+    [[ -n "${TMUX:-}" && "$_taw_session_name" == "$_taw_current_session" ]] && continue
+    print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"
+  done
 
   for _taw_entry in "${TS_SEARCH_PATHS[@]}"; do
     if [[ "$_taw_entry" == *:<-> ]]; then
@@ -582,10 +593,11 @@ _taw_tmux_sessionizer_picker_rows() {
     fi
 
     [[ -d "$_taw_path" ]] || continue
-    find "$_taw_path" -mindepth 1 -maxdepth "$_taw_depth" -path '*/.git' -prune -o -type d -print \
-      | while IFS= read -r _taw_found_path; do
-        print -r -- "$_taw_found_path"$'\t'"path"$'\t'"$_taw_found_path"
-      done
+    while IFS= read -r -d $'\0' _taw_found_path; do
+      _taw_require_picker_safe "project path" "$_taw_found_path" || return 1
+      print -r -- "$_taw_found_path"$'\t'"path"$'\t'"$_taw_found_path"
+    done < <(find "$_taw_path" -mindepth 1 -maxdepth "$_taw_depth" \
+      -path '*/.git' -prune -o -type d -print0)
   done
 }
 
@@ -612,6 +624,7 @@ _taw_resolve_project_picker_choice() {
   _taw_value="${_taw_choice#*$'\t'}"
   case "$_taw_kind" in
     path)
+      _taw_require_picker_safe "project path" "$_taw_value" || return 1
       _taw_resolve_project_arg "$_taw_value"
       ;;
     tmux)
@@ -621,6 +634,8 @@ _taw_resolve_project_picker_choice() {
       _taw_tmux_session="${_taw_tmux_rest%%$'\t'*}"
       _taw_tmux_path="${_taw_tmux_rest#*$'\t'}"
       [[ "$_taw_tmux_path" == "$_taw_tmux_rest" ]] && _taw_tmux_path=
+      _taw_require_picker_safe "tmux session" \
+        "$_taw_tmux_id" "$_taw_tmux_session" "$_taw_tmux_path" || return 1
       _taw_resolve_tmux_session_exact "$_taw_tmux_session" "$_taw_tmux_path" "$_taw_tmux_id" || {
         _taw_die "could not resolve tmux session: $_taw_tmux_session"
         return 1
@@ -738,7 +753,8 @@ _taw_resolve_explicit_picker() {
     fi
 
     _taw_fields=( "${(@ps:\t:)_taw_choice}" )
-    (( ${#_taw_fields[@]} >= 5 )) || return 1
+    (( ${#_taw_fields[@]} == 5 )) || return 1
+    _taw_require_picker_safe "picker selection" "${_taw_fields[@]}" || return 1
     _taw_picker_kind="${_taw_fields[2]}"
     _taw_picker_branch="${_taw_fields[3]}"
     _taw_picker_ref="${_taw_fields[4]}"
@@ -1826,14 +1842,17 @@ _taw_convert_project() {
 }
 
 _taw_worktree_picker_rows() {
-  local _taw_worktrees _taw_line _taw_path _taw_branch_ref _taw_branch
+  local _taw_line _taw_path _taw_branch_ref _taw_branch
   local _taw_is_bare_entry _taw_is_detached_entry _taw_rows=""
+  local -a _taw_worktree_fields
 
-  _taw_worktrees="$(_taw_git worktree list --porcelain 2>/dev/null)" || return 1
-  for _taw_line in "${(@f)_taw_worktrees}" ""; do
+  _taw_worktree_fields=( "${(@0)$(_taw_git worktree list --porcelain -z 2>/dev/null)}" ) \
+    || return 1
+  for _taw_line in "${_taw_worktree_fields[@]}"; do
     case "$_taw_line" in
       worktree\ *)
         _taw_path="${_taw_line#worktree }"
+        _taw_require_picker_safe "worktree path" "$_taw_path" || return 1
         _taw_branch_ref=
         _taw_is_bare_entry=false
         _taw_is_detached_entry=false
@@ -1856,6 +1875,7 @@ _taw_worktree_picker_rows() {
             _taw_rows+="${_taw_path:t} [detached]"$'\t'"worktree"$'\t\t\t'"$_taw_path"$'\n'
           fi
         fi
+        _taw_path=
         ;;
     esac
   done
@@ -1910,7 +1930,8 @@ _taw_select_bare_target_with_fzf() {
   [[ -n "$_taw_choice" ]] || return 1
 
   _taw_fields=( "${(@ps:\t:)_taw_choice}" )
-  (( ${#_taw_fields[@]} >= 5 )) || return 1
+  (( ${#_taw_fields[@]} == 5 )) || return 1
+  _taw_require_picker_safe "picker selection" "${_taw_fields[@]}" || return 1
   _taw_picker_kind="${_taw_fields[2]}"
   _taw_picker_branch="${_taw_fields[3]}"
   _taw_picker_ref="${_taw_fields[4]}"
