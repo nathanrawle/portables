@@ -546,6 +546,38 @@ EOF
   chmod +x "$bin/git"
 }
 
+make_logging_git() {
+  local bin="$1"
+  local real_git
+
+  real_git="$(command -v git)"
+  export TAW_REAL_GIT="$real_git"
+  rm -f "$bin/git"
+  cat >"$bin/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${TAW_GIT_LOG:?}"
+: "${TAW_REAL_GIT:?}"
+
+{
+  first=1
+  for arg in "$@"; do
+    if [[ $first -eq 1 ]]; then
+      printf '%s' "$arg"
+      first=0
+    else
+      printf '\t%s' "$arg"
+    fi
+  done
+  printf '\n'
+} >>"$TAW_GIT_LOG"
+
+exec "$TAW_REAL_GIT" "$@"
+EOF
+  chmod +x "$bin/git"
+}
+
 make_git_repo() {
   local repo="$1"
   local primary_branch="${2:-main}"
@@ -906,6 +938,37 @@ test_normal_repo_picker_lists_deduped_branches() {
   assert_file_contains "$fzf_log" $'remote-only\tbranch\tremote-only\torigin/remote-only\t'
   assert_file_not_contains "$fzf_log" $'origin/main'
   assert_file_not_contains "$fzf_log" $'upstream/remote-only'
+}
+
+test_branch_picker_loads_remotes_once() {
+  local repo repo_real fake_bin no_fzf_path log git_log remote_call
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" remote add upstream "$TEST_TMPDIR/upstream.git"
+  git -C "$repo" remote add team/nested "$TEST_TMPDIR/team.git"
+  git -C "$repo" update-ref refs/remotes/origin/remote-a refs/heads/main
+  git -C "$repo" update-ref refs/remotes/upstream/remote-b refs/heads/develop
+  git -C "$repo" update-ref refs/remotes/team/nested/remote-c refs/heads/main
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  make_logging_git "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  git_log="$TEST_TMPDIR/git.log"
+  export TAW_GIT_LOG="$git_log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=main \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+  run_taw "$repo" --mode=branch
+  unset TAW_GIT_LOG
+  unset TAW_REAL_GIT
+
+  remote_call=$'-C\t'"$repo_real"$'\tremote'
+  assert_eq "1" "$(grep -Fxc -- "$remote_call" "$git_log")" \
+    "expected branch picker to load configured remotes once"
 }
 
 test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged() {
@@ -6013,6 +6076,8 @@ test_case "taw: normal repo no explicit branch uses picker" \
   test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch
 test_case "taw: normal repo picker lists deduped branches" \
   test_normal_repo_picker_lists_deduped_branches
+test_case "taw: branch picker loads remotes once" \
+  test_branch_picker_loads_remotes_once
 test_case "taw: normal repo no explicit branch without fzf opens unchanged" \
   test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged
 test_case "taw: normal linked worktree resolves primary project" \

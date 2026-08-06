@@ -1220,10 +1220,11 @@ _taw_resolve_branch_target() {
 }
 
 _taw_picker_branch_rows() {
-  local _taw_local_refs _taw_remote_refs _taw_ref _taw_branch _taw_remote_target
+  local _taw_local_refs _taw_remote_refs _taw_ref _taw_branch
   local _taw_remote_name _taw_remote_branch _taw_remote_path _taw_row_remote
+  local _taw_remote_candidate _taw_remote_prefix
   local -a _taw_remote_names
-  local -A _taw_seen_by_branch
+  local -A _taw_seen_by_branch _taw_remote_by_ref _taw_branch_by_ref
 
   _taw_local_refs="$(_taw_git for-each-ref --sort=refname --format='%(refname)' refs/heads 2>/dev/null)" \
     || return 1
@@ -1237,13 +1238,30 @@ _taw_picker_branch_rows() {
   _taw_remote_refs="$(_taw_git for-each-ref --sort=refname --format='%(refname)' refs/remotes 2>/dev/null)" \
     || return 1
   _taw_remote_names=( "${(@f)$(_taw_remote_names_sorted)}" )
+  for _taw_ref in "${(@f)_taw_remote_refs}"; do
+    _taw_remote_path="${_taw_ref#refs/remotes/}"
+    _taw_row_remote=
+    _taw_remote_branch=
+    for _taw_remote_candidate in "${_taw_remote_names[@]}"; do
+      _taw_remote_prefix="$_taw_remote_candidate/"
+      if [[ "$_taw_remote_path" == "$_taw_remote_prefix"* \
+        && ( -z "$_taw_row_remote" \
+          || ${#_taw_remote_candidate} -gt ${#_taw_row_remote} ) ]]; then
+        _taw_row_remote="$_taw_remote_candidate"
+        _taw_remote_branch="${_taw_remote_path#$_taw_remote_prefix}"
+      fi
+    done
+    [[ -n "$_taw_row_remote" && -n "$_taw_remote_branch" \
+      && "$_taw_remote_branch" != HEAD ]] || continue
+    _taw_remote_by_ref[$_taw_ref]="$_taw_row_remote"
+    _taw_branch_by_ref[$_taw_ref]="$_taw_remote_branch"
+  done
+
   for _taw_remote_name in "${_taw_remote_names[@]}"; do
     [[ -n "$_taw_remote_name" ]] || continue
     for _taw_ref in "${(@f)_taw_remote_refs}"; do
-      _taw_remote_path="${_taw_ref#refs/remotes/}"
-      _taw_remote_target="$(_taw_remote_branch_for_path "$_taw_remote_path")" || continue
-      _taw_row_remote="${_taw_remote_target%%$'\t'*}"
-      _taw_remote_branch="${_taw_remote_target#*$'\t'}"
+      _taw_row_remote="${_taw_remote_by_ref[$_taw_ref]-}"
+      _taw_remote_branch="${_taw_branch_by_ref[$_taw_ref]-}"
       [[ "$_taw_row_remote" == "$_taw_remote_name" && -n "$_taw_remote_branch" && -z "${_taw_seen_by_branch[$_taw_remote_branch]-}" ]] || continue
       _taw_seen_by_branch[$_taw_remote_branch]=remote
       _taw_emit_picker_row "$_taw_remote_branch"$'\t'"branch"$'\t'"$_taw_remote_branch"$'\t'"$_taw_remote_name/$_taw_remote_branch"$'\t' || return 1
