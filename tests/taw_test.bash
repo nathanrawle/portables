@@ -74,6 +74,15 @@ set -euo pipefail
   printf '\n'
 } >>"$TAW_TMUX_LOG"
 
+target_is_listed() {
+  local target="$1" candidates="$2" candidate
+
+  while IFS= read -r candidate || [[ -n "$candidate" ]]; do
+    [[ -n "$candidate" && "$candidate" = "$target" ]] && return 0
+  done <<<"$candidates"
+  return 1
+}
+
 case "${1:-}" in
   has-session)
     target=""
@@ -153,6 +162,9 @@ case "${1:-}" in
           path="$second"
         fi
         case "$format" in
+          '#{session_id}')
+            printf '%s\n' "$session_id"
+            ;;
           "[TMUX] #{session_name}")
             printf '[TMUX] %s\n' "$session"
             ;;
@@ -210,8 +222,65 @@ case "${1:-}" in
     printf '%%%d\n' "$count"
     ;;
   display-message)
+    target=""
+    args=( "$@" )
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      if [[ "${args[$i]}" = -t && $((i + 1)) -lt ${#args[@]} ]]; then
+        target="${args[$((i + 1))]}"
+      fi
+    done
     if [[ "$*" = *'#{window_id}'* ]]; then
       printf '%s\n' "${TAW_FAKE_TMUX_CURRENT_WINDOW_ID:-@1}"
+    elif [[ "$*" = *'#{session_name}'* ]]; then
+      target_is_listed "$target" "${TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_NAME_TARGETS-}" \
+        && exit 1
+      if [[ -n "${TAW_FAKE_TMUX_DISPLAY_SESSION_NAME+x}" ]]; then
+        value="$TAW_FAKE_TMUX_DISPLAY_SESSION_NAME"
+      else
+        value=""
+        line_number=0
+        while IFS= read -r line || [[ -n "$line" ]]; do
+          line_number=$((line_number + 1))
+          [[ -n "$line" ]] || continue
+          IFS=$'\t' read -r first second third _ <<<"$line"
+          if [[ ( "$first" = @* || "$first" = \$* ) && -n "$third" ]]; then
+            session_id="$first"
+            session_name="$second"
+          else
+            session_id="\$${line_number}"
+            session_name="$first"
+          fi
+          [[ "$session_id" = "$target" ]] || continue
+          value="$session_name"
+          break
+        done <<<"${TAW_FAKE_TMUX_SESSIONS-}"
+      fi
+      printf '%s__taw_picker_end__\n' "$value"
+    elif [[ "$*" = *'#{session_path}'* ]]; then
+      target_is_listed "$target" "${TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_PATH_TARGETS-}" \
+        && exit 1
+      if [[ -n "${TAW_FAKE_TMUX_DISPLAY_SESSION_PATH+x}" ]]; then
+        value="$TAW_FAKE_TMUX_DISPLAY_SESSION_PATH"
+      else
+        value=""
+        line_number=0
+        while IFS= read -r line || [[ -n "$line" ]]; do
+          line_number=$((line_number + 1))
+          [[ -n "$line" ]] || continue
+          IFS=$'\t' read -r first second third _ <<<"$line"
+          if [[ ( "$first" = @* || "$first" = \$* ) && -n "$third" ]]; then
+            session_id="$first"
+            session_path="$third"
+          else
+            session_id="\$${line_number}"
+            session_path="$second"
+          fi
+          [[ "$session_id" = "$target" ]] || continue
+          value="$session_path"
+          break
+        done <<<"${TAW_FAKE_TMUX_SESSIONS-}"
+      fi
+      printf '%s__taw_picker_end__\n' "$value"
     elif [[ "$*" = *'#{session_id}'* ]]; then
       printf '%s\n' "${TAW_FAKE_TMUX_CURRENT_SESSION_ID:-\$1}"
     elif [[ "$*" = *'#S'* ]]; then
@@ -2713,6 +2782,131 @@ test_empty_project_prompt_mentions_fzf() {
   assert_file_contains "$REPO_ROOT/home/.zfuns/taw" "empty opens fzf"
 }
 
+test_project_picker_rejects_control_characters_in_discovered_paths() {
+  local xdg projects_home unsafe_project elsewhere fake_bin log output
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  unsafe_project="$projects_home/unsafe"$'\n'"project"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$unsafe_project"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if output="$(XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" run_taw "$elsewhere" --pick-project 2>&1)"; then
+    fail "expected project picker to reject a newline in a project path"
+  fi
+
+  assert_string_contains "$output" \
+    "project path contains control characters and cannot be used by the picker"
+  assert_no_tmux_work_window "$log"
+}
+
+test_project_picker_rejects_control_characters_in_tmux_sessions() {
+  local xdg empty_search session_path elsewhere fake_bin log output sessions
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  session_path="$TEST_TMPDIR/session-path"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$session_path" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$7\tsafe\t'"$session_path"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if output="$(XDG_CONFIG_HOME="$xdg" EDITOR=vim \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_DISPLAY_SESSION_NAME=$'unsafe\tname' \
+    TAW_FAKE_TMUX_DISPLAY_SESSION_PATH="$session_path" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere" --pick-project 2>&1)"; then
+    fail "expected project picker to reject a tab in a tmux session name"
+  fi
+
+  assert_string_contains "$output" \
+    "tmux session contains control characters and cannot be used by the picker"
+  assert_no_tmux_work_window "$log"
+}
+
+test_project_picker_skips_tmux_sessions_that_disappear_during_lookup() {
+  local xdg empty_search vanished_path survivor_path elsewhere fake_bin no_fzf_path
+  local sessions lookup fail_name fail_path log fzf_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  vanished_path="$TEST_TMPDIR/vanished"
+  survivor_path="$TEST_TMPDIR/survivor"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$vanished_path" \
+    "$survivor_path" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$7\tvanished\t'"$vanished_path"$'\n$8\tsurvivor\t'"$survivor_path"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+
+  for lookup in session-name session-path; do
+    fail_name=
+    fail_path=
+    case "$lookup" in
+      session-name) fail_name='$7' ;;
+      session-path) fail_path='$7' ;;
+    esac
+    log="$TEST_TMPDIR/tmux-$lookup.log"
+    fzf_log="$TEST_TMPDIR/fzf-$lookup.log"
+
+    XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS="$sessions" \
+      TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_NAME_TARGETS="$fail_name" \
+      TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_PATH_TARGETS="$fail_path" \
+      TAW_FAKE_TMUX_HAS_SESSION_TARGETS='$8' TAW_FAKE_FZF_MATCH='[TMUX] survivor' \
+      TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+      TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$elsewhere" --pick-project
+
+    assert_file_contains "$fzf_log" '[TMUX] survivor'
+    assert_file_not_contains "$fzf_log" '[TMUX] vanished'
+    assert_file_contains "$log" $'attach-session\t-t\t$8'
+  done
+}
+
+test_project_picker_skips_unsafe_current_tmux_session() {
+  local xdg projects_home repo elsewhere unsafe_path fake_bin no_fzf_path
+  local sessions log fzf_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  repo="$projects_home/repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  unsafe_path="$TEST_TMPDIR/current"$'\t'"session"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere" "$unsafe_path"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$repo"
+  sessions=$'$1\tcurrent\t'"$unsafe_path"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
+    TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_DISPLAY_SESSION_PATH="$unsafe_path" TAW_FAKE_FZF_MATCH="$repo" \
+    TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 TAW_FAKE_FZF_FAIL_ON_SECOND=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --pick-project
+
+  assert_file_contains "$fzf_log" "$repo"
+  assert_file_not_contains "$fzf_log" '[TMUX] current'
+  assert_file_not_contains "$log" $'display-message\t-p\t-t\t$1\t#{session_path}'
+}
+
 test_empty_prompt_project_picker_resolves_tmux_session_row() {
   local xdg empty_search repo repo_real elsewhere fake_bin log fzf_log sessions no_fzf_path
 
@@ -3463,6 +3657,47 @@ test_worktree_mode_opens_linked_normal_worktree() {
 
   assert_file_contains "$fzf_log" $'detached-worktree [detached]\tworktree\t\t\t'"$detached_real"
   assert_file_contains "$log" $'-c\t'"$detached_real"$'\tvim'
+}
+
+test_worktree_picker_rejects_control_characters_in_paths() {
+  local repo unsafe_worktree fake_bin log output
+
+  repo="$TEST_TMPDIR/repo"
+  unsafe_worktree="$TEST_TMPDIR/unsafe"$'\t'"worktree"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add -qb topic "$unsafe_worktree"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$repo" --mode=worktree 2>&1)"; then
+    fail "expected worktree picker to reject a tab in a worktree path"
+  fi
+
+  assert_string_contains "$output" \
+    "worktree path contains control characters and cannot be used by the picker"
+  assert_no_tmux_work_window "$log"
+}
+
+test_worktree_picker_preserves_spaces_and_unicode_in_paths() {
+  local repo worktree worktree_real fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  worktree="$TEST_TMPDIR/linked café"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add -qb topic "$worktree"
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH='topic [worktree]' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=worktree
+
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
 test_branch_mode_opens_existing_worktree_without_checkout() {
@@ -5623,6 +5858,14 @@ test_case "taw: empty project prompt opens tmux-sessionizer project picker" \
   test_empty_prompt_selects_project_from_tmux_sessionizer_config
 test_case "taw: empty project prompt mentions fzf" \
   test_empty_project_prompt_mentions_fzf
+test_case "taw: project picker rejects control characters in paths" \
+  test_project_picker_rejects_control_characters_in_discovered_paths
+test_case "taw: project picker rejects control characters in tmux sessions" \
+  test_project_picker_rejects_control_characters_in_tmux_sessions
+test_case "taw: project picker skips tmux sessions that disappear during lookup" \
+  test_project_picker_skips_tmux_sessions_that_disappear_during_lookup
+test_case "taw: project picker skips unsafe current tmux session" \
+  test_project_picker_skips_unsafe_current_tmux_session
 test_case "taw: empty project prompt picker resolves tmux session rows" \
   test_empty_prompt_project_picker_resolves_tmux_session_row
 test_case "taw: project picker tmux row preserves active window inside tmux" \
@@ -5667,6 +5910,10 @@ test_case "taw: session mode aliases use project picker" \
   test_session_mode_aliases_use_project_picker
 test_case "taw: worktree mode opens linked normal worktree" \
   test_worktree_mode_opens_linked_normal_worktree
+test_case "taw: worktree picker rejects control characters in paths" \
+  test_worktree_picker_rejects_control_characters_in_paths
+test_case "taw: worktree picker preserves spaces and Unicode in paths" \
+  test_worktree_picker_preserves_spaces_and_unicode_in_paths
 test_case "taw: branch mode opens existing worktree without checkout" \
   test_branch_mode_opens_existing_worktree_without_checkout
 test_case "taw: branch mode checks out unassigned normal branch" \
