@@ -5,9 +5,10 @@ setopt pipefail
 
 local -a _taw_shell_cmds _taw_positionals
 local _taw_project_arg _taw_project_picker_requested _taw_explicit_picker_requested _taw_picker_mode
-local _taw_picker_context_resolved _taw_agent_cmd _taw_editor_cmd _taw_named_branch
+local _taw_picker_context_resolved _taw_picker_layout _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_agent_arg_provided _taw_editor_arg_provided _taw_agent_enabled _taw_created_repo_branch_applied _taw_debug
-local _taw_agent_env_override _taw_peer _taw_force _taw_current_session_id _taw_convert
+local _taw_agent_env_override _taw_editor_enabled _taw_shell_enabled _taw_shell_arg_provided
+local _taw_peer _taw_force _taw_current_session_id _taw_convert
 local _taw_worktree_arg _taw_base_ref _taw_window_dir _taw_window_name
 local _taw_project_dir _taw_git_dir _taw_project_kind _taw_is_bare
 local _taw_selected_worktree_dir
@@ -25,12 +26,16 @@ _taw_project_picker_requested=false
 _taw_explicit_picker_requested=false
 _taw_picker_mode=
 _taw_picker_context_resolved=false
+_taw_picker_layout=
 _taw_agent_cmd=codex
 _taw_editor_cmd=
 _taw_named_branch=
 _taw_agent_arg_provided=false
 _taw_editor_arg_provided=false
 _taw_agent_enabled=true
+_taw_editor_enabled=true
+_taw_shell_enabled=false
+_taw_shell_arg_provided=false
 _taw_debug=false
 _taw_agent_env_override=false
 _taw_peer=false
@@ -124,6 +129,7 @@ _taw_debug_dump() {
   print -u2 -r -- "_taw_project_picker_requested=$_taw_project_picker_requested"
   print -u2 -r -- "_taw_explicit_picker_requested=$_taw_explicit_picker_requested"
   print -u2 -r -- "_taw_picker_mode='$_taw_picker_mode'"
+  print -u2 -r -- "_taw_picker_layout='$_taw_picker_layout'"
   print -u2 -r -- "_taw_agent_cmd=$_taw_agent_cmd"
   print -u2 -r -- "_taw_agent_enabled=$_taw_agent_enabled"
   print -u2 -r -- "_taw_editor_cmd=$_taw_editor_cmd"
@@ -767,7 +773,8 @@ _taw_resolve_explicit_picker() {
     fi
     _taw_output="$(_taw_explicit_picker_rows | fzf \
       --delimiter=$'\t' --with-nth=1 --prompt="taw $_taw_picker_mode> " \
-      --header='Tab: next mode' --print-query --expect=tab --query="$_taw_query" \
+      --header='Enter: default | C-S: shell | C-A: agent | Opt-Z: editor+shell | Opt-A: editor+agent | Opt-Enter: all | Tab: mode' \
+      --print-query --expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter --query="$_taw_query" \
       --bind='load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'
       _taw_pipeline_status=( "${pipestatus[@]}" )
       print -r -- "$_taw_status_marker"$'\t'"${_taw_pipeline_status[1]}"$'\t'"${_taw_pipeline_status[2]}"
@@ -807,6 +814,15 @@ _taw_resolve_explicit_picker() {
       _taw_picker_mode="$(_taw_next_picker_mode "$_taw_picker_mode")" || return 1
       continue
     fi
+    case "$_taw_key" in
+      "") _taw_picker_layout= ;;
+      ctrl-s) _taw_picker_layout=shell ;;
+      ctrl-a) _taw_picker_layout=agent ;;
+      alt-z) _taw_picker_layout=editor-shell ;;
+      alt-a) _taw_picker_layout=editor-agent ;;
+      alt-enter) _taw_picker_layout=editor-agent-shell ;;
+      *) return 1 ;;
+    esac
 
     (( ${#_taw_output_lines[@]} >= 3 )) || return 1
     _taw_choice="${_taw_output_lines[3]}"
@@ -2417,16 +2433,32 @@ _taw_switch_to_selected_tmux_session() {
 _taw_can_reuse_existing_window() {
   [[ "$_taw_agent_arg_provided" != true \
     && "$_taw_editor_arg_provided" != true \
-    && ${#_taw_shell_cmds[@]} -eq 0 \
+    && "$_taw_shell_arg_provided" != true \
     && "$_taw_agent_env_override" != true ]]
 }
 
 _taw_create_tmux_window() {
-  local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_editor_pane
+  local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_initial_pane
+  local _taw_editor_pane _taw_focus_pane _taw_shell_is_initial=false
   local _taw_created_session_id _taw_created_session_name _taw_session_status
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
   local _taw_shell_anchor_pane
   local _taw_existing_session_id _taw_existing_window_id _taw_existing_pane_id _taw_existing_rest
+  local -a _taw_initial_cmd_args
+
+  if [[ "$_taw_editor_enabled" == true ]]; then
+    _taw_initial_cmd_args=( "$_taw_editor_cmd" )
+  elif [[ "$_taw_agent_enabled" == true ]]; then
+    _taw_initial_cmd_args=( "$_taw_agent_cmd" )
+  elif [[ "$_taw_shell_enabled" == true ]]; then
+    _taw_shell_is_initial=true
+    if [[ -n "${_taw_shell_cmds[1]}" ]]; then
+      _taw_initial_cmd_args=( "${_taw_shell_cmds[1]}" )
+    fi
+  else
+    _taw_die "layout must include at least one pane"
+    return 1
+  fi
 
   if [[ "$_taw_peer" == true ]]; then
     if [[ "$_taw_force" != true ]]; then
@@ -2455,7 +2487,7 @@ _taw_create_tmux_window() {
 
     _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
       -t "$_taw_current_session_id:" -n "$_taw_window_name" -c "$_taw_window_dir" \
-      "$_taw_editor_cmd")" || return 1
+      "${_taw_initial_cmd_args[@]}")" || return 1
   else
     _taw_resolve_layout_session
     _taw_session_status=$?
@@ -2474,7 +2506,7 @@ _taw_create_tmux_window() {
 
       _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
         -t "$_taw_session_target:" -n "$_taw_window_name" -c "$_taw_window_dir" \
-        "$_taw_editor_cmd")" || return 1
+        "${_taw_initial_cmd_args[@]}")" || return 1
     elif (( _taw_session_status == 2 )) || [[ -n "$_taw_project_session_target" ]]; then
       _taw_die "could not resolve tmux session: $_taw_session_name"
       return 1
@@ -2482,7 +2514,7 @@ _taw_create_tmux_window() {
       _taw_created="$(tmux new-session -d -P \
         -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}' \
         -s "$_taw_session_name" -n "$_taw_window_name" -c "$_taw_window_dir" \
-        "$_taw_editor_cmd")" || {
+        "${_taw_initial_cmd_args[@]}")" || {
         _taw_die "could not create tmux session: $_taw_session_name"
         return 1
       }
@@ -2499,21 +2531,29 @@ _taw_create_tmux_window() {
     _taw_parse_created_window "$_taw_created"
   fi
   _taw_window_id="$_taw_created_window"
-  _taw_editor_pane="$_taw_created_pane"
+  _taw_initial_pane="$_taw_created_pane"
+  if [[ "$_taw_editor_enabled" == true ]]; then
+    _taw_editor_pane="$_taw_initial_pane"
+  elif [[ "$_taw_agent_enabled" == true ]]; then
+    _taw_agent_pane="$_taw_initial_pane"
+  else
+    _taw_shell_pane="$_taw_initial_pane"
+    _taw_last_shell_pane="$_taw_initial_pane"
+  fi
   tmux set-window-option -t "$_taw_window_id" automatic-rename off >/dev/null || return 1
   tmux set-window-option -t "$_taw_window_id" allow-rename off >/dev/null || return 1
   tmux rename-window -t "$_taw_window_id" "$_taw_window_name" >/dev/null || return 1
 
-  _taw_shell_anchor_pane="$_taw_editor_pane"
-  if [[ "$_taw_agent_enabled" == true ]]; then
+  _taw_shell_anchor_pane="$_taw_initial_pane"
+  if [[ "$_taw_agent_enabled" == true && "$_taw_editor_enabled" == true ]]; then
     _taw_agent_pane="$(tmux split-window -h -P -F '#{pane_id}' \
       -t "$_taw_editor_pane" -c "$_taw_window_dir" "$_taw_agent_cmd")" || return 1
     _taw_shell_anchor_pane="$_taw_agent_pane"
   fi
 
-  if (( ${#_taw_shell_cmds[@]} > 0 )); then
+  if [[ "$_taw_shell_enabled" == true && "$_taw_shell_is_initial" != true ]]; then
     if [[ -n "${_taw_shell_cmds[1]}" ]]; then
-      if [[ "$_taw_agent_enabled" == true ]]; then
+      if [[ "$_taw_agent_enabled" == true && "$_taw_editor_enabled" == true ]]; then
         _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
           -t "$_taw_shell_anchor_pane" -c "$_taw_window_dir" \
           "${_taw_shell_cmds[1]}")" || return 1
@@ -2523,7 +2563,7 @@ _taw_create_tmux_window() {
           "${_taw_shell_cmds[1]}")" || return 1
       fi
     else
-      if [[ "$_taw_agent_enabled" == true ]]; then
+      if [[ "$_taw_agent_enabled" == true && "$_taw_editor_enabled" == true ]]; then
         _taw_shell_pane="$(tmux split-window -v -P -F '#{pane_id}' \
           -t "$_taw_shell_anchor_pane" -c "$_taw_window_dir")" || return 1
       else
@@ -2532,7 +2572,9 @@ _taw_create_tmux_window() {
       fi
     fi
     _taw_last_shell_pane="$_taw_shell_pane"
+  fi
 
+  if [[ "$_taw_shell_enabled" == true ]]; then
     for _taw_shell_cmd in "${_taw_shell_cmds[@]:1}"; do
       if [[ -n "$_taw_shell_cmd" ]]; then
         _taw_last_shell_pane="$(tmux split-window -h -P -F '#{pane_id}' \
@@ -2545,7 +2587,8 @@ _taw_create_tmux_window() {
     done
   fi
 
-  tmux select-pane -t "$_taw_editor_pane" >/dev/null 2>&1 || return 1
+  _taw_focus_pane="${_taw_editor_pane:-$_taw_initial_pane}"
+  tmux select-pane -t "$_taw_focus_pane" >/dev/null 2>&1 || return 1
   _taw_switch_to_tmux_window "$_taw_window_id"
 }
 
@@ -2656,6 +2699,7 @@ while (( $# > 0 )); do
       shift
       ;;
     -sh|-shell)
+      _taw_shell_arg_provided=true
       if (( $# >= 2 )) && [[ "$2" != "--" && "$2" != -* ]]; then
         _taw_shell_cmds+=( "$2" )
         shift 2
@@ -2665,6 +2709,7 @@ while (( $# > 0 )); do
       fi
       ;;
     -sh=*|-shell=*)
+      _taw_shell_arg_provided=true
       _taw_shell_cmds+=( "${1#*=}" )
       shift
       ;;
@@ -2916,7 +2961,50 @@ else
   _taw_session_target="$_taw_session_name"
 fi
 
-if [[ "$_taw_agent_arg_provided" == true ]]; then
+_taw_editor_enabled=true
+if (( ${#_taw_shell_cmds[@]} > 0 )); then
+  _taw_shell_enabled=true
+else
+  _taw_shell_enabled=false
+fi
+
+if [[ -n "$_taw_picker_layout" ]]; then
+  case "$_taw_picker_layout" in
+    shell)
+      _taw_editor_enabled=false
+      _taw_agent_enabled=false
+      _taw_shell_enabled=true
+      ;;
+    agent)
+      _taw_editor_enabled=false
+      _taw_agent_enabled=true
+      _taw_shell_enabled=false
+      ;;
+    editor-shell)
+      _taw_agent_enabled=false
+      _taw_shell_enabled=true
+      ;;
+    editor-agent)
+      _taw_agent_enabled=true
+      _taw_shell_enabled=false
+      ;;
+    editor-agent-shell)
+      _taw_agent_enabled=true
+      _taw_shell_enabled=true
+      ;;
+  esac
+
+  if [[ "$_taw_shell_enabled" == true && ${#_taw_shell_cmds[@]} -eq 0 ]]; then
+    _taw_shell_cmds+=( "" )
+  fi
+  if [[ "$_taw_agent_enabled" == true && "$_taw_agent_arg_provided" != true \
+    && -n "${TAW_AGENT:-}" ]]; then
+    local _taw_agent_override
+
+    _taw_agent_override="$(_taw_trim_whitespace "$TAW_AGENT")"
+    [[ -n "$_taw_agent_override" ]] && _taw_agent_cmd="$_taw_agent_override"
+  fi
+elif [[ "$_taw_agent_arg_provided" == true ]]; then
   _taw_agent_enabled=true
 elif [[ "$_taw_project_picker_requested" == true ]]; then
   _taw_agent_enabled=false

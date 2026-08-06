@@ -440,6 +440,7 @@ if [[ -n "${TAW_FAKE_FZF_KEYS:-}" ]]; then
     key="${configured_keys[$((call_number - 1))]}"
   fi
 fi
+[[ "$key" = none ]] && key=""
 
 output_query="$initial_query"
 if [[ -n "${TAW_FAKE_FZF_OUTPUT_QUERIES:-}" ]]; then
@@ -3106,7 +3107,7 @@ test_project_picker_tmux_row_preserves_active_window_inside_tmux() {
   log="$TEST_TMPDIR/tmux.log"
   fzf_log="$TEST_TMPDIR/fzf-input.log"
 
-  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_FZF_KEYS=alt-enter \
     TAW_FAKE_TMUX_CURRENT_SESSION_NAME=current TAW_FAKE_TMUX_HAS_SESSION_TARGETS='$9' \
     TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_MATCH='[TMUX] target' \
     TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 TAW_FZF_INPUT_LOG="$fzf_log" \
@@ -3914,6 +3915,155 @@ test_branch_mode_creates_unassigned_bare_worktree() {
   assert_eq develop "$(git -C "$worktree" branch --show-current)" \
     "expected branch mode to create the selected bare worktree"
   assert_file_contains "$log" $'-c\t'"$(cd "$worktree" && pwd -P)"$'\tvim'
+}
+
+test_picker_accept_keys_select_layouts() {
+  local xdg projects_home target target_real elsewhere fake_bin no_fzf_path log args_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  target="$projects_home/target"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$target"
+  target_real="$(cd "$target" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+
+  log="$TEST_TMPDIR/tmux-shell.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='env-agent' TAW_FAKE_FZF_KEYS=ctrl-s \
+    TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts
+  assert_file_contains "$log" $'-s\ttarget\t-n\ttarget\t-c\t'"$target_real"
+  assert_file_not_contains "$log" $'split-window\t'
+  assert_file_not_contains "$log" $'\tvim'
+  assert_file_not_contains "$log" $'env-agent'
+  assert_file_contains "$log" $'select-pane\t-t\t%1'
+
+  log="$TEST_TMPDIR/tmux-agent.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='  env-agent  ' TAW_FAKE_FZF_KEYS=ctrl-a \
+    TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts
+  assert_file_contains "$log" $'-s\ttarget\t-n\ttarget\t-c\t'"$target_real"$'\tenv-agent'
+  assert_file_not_contains "$log" $'split-window\t'
+  assert_file_not_contains "$log" $'\tvim'
+  assert_file_contains "$log" $'select-pane\t-t\t%1'
+
+  log="$TEST_TMPDIR/tmux-editor-shell.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='env-agent' TAW_FAKE_FZF_KEYS=alt-z \
+    TAW_FAKE_FZF_MATCH="$target" TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" -ts -sh "npm test" -sh "echo later"
+  assert_file_contains "$args_log" '--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter'
+  assert_file_contains "$args_log" 'Opt-Z: editor+shell'
+  assert_file_not_contains "$args_log" 'Opt-S:'
+  assert_file_contains "$log" $'-s\ttarget\t-n\ttarget\t-c\t'"$target_real"$'\tvim'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$target_real"$'\tnpm test'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$target_real"$'\techo later'
+  assert_file_not_contains "$log" $'env-agent'
+  assert_file_not_contains "$log" $'split-window\t-v\t'
+  assert_file_contains "$log" $'select-pane\t-t\t%1'
+
+  log="$TEST_TMPDIR/tmux-editor-agent.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='env-agent' TAW_FAKE_FZF_KEYS=alt-a \
+    TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts -agent "claude --resume"
+  assert_file_contains "$log" $'-s\ttarget\t-n\ttarget\t-c\t'"$target_real"$'\tvim'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$target_real"$'\tclaude --resume'
+  assert_file_not_contains "$log" $'env-agent'
+  assert_file_not_contains "$log" $'split-window\t-v\t'
+  assert_file_contains "$log" $'select-pane\t-t\t%1'
+
+  log="$TEST_TMPDIR/tmux-all.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='env-agent' TAW_FAKE_FZF_KEYS=alt-enter \
+    TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts
+  assert_file_contains "$log" $'-s\ttarget\t-n\ttarget\t-c\t'"$target_real"$'\tvim'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$target_real"$'\tenv-agent'
+  assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$target_real"
+  assert_file_contains "$log" $'select-pane\t-t\t%1'
+}
+
+test_picker_layout_keys_apply_to_worktree_and_branch_modes() {
+  local repo repo_real fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+
+  log="$TEST_TMPDIR/tmux-worktree.log"
+  EDITOR=vim TAW_FAKE_FZF_KEYS=ctrl-s TAW_FAKE_FZF_MATCH='main [worktree]' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=worktree -sh worktree-shell
+  assert_file_contains "$log" $'-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tworktree-shell'
+  assert_file_not_contains "$log" $'\tvim'
+  assert_file_not_contains "$log" $'split-window\t'
+
+  log="$TEST_TMPDIR/tmux-branch.log"
+  EDITOR=vim TAW_FAKE_FZF_KEYS=alt-a TAW_FAKE_FZF_MATCH=main \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch -agent branch-agent
+  assert_file_contains "$log" $'-s\trepo\t-n\trepo\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tbranch-agent'
+}
+
+test_picker_layout_is_ignored_for_matching_window() {
+  local repo repo_real fake_bin no_fzf_path log sessions panes
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  sessions=$'$1\trepo\t'"$repo_real"
+  panes=$'@8\t%8\t'"$repo_real"$'\n'
+
+  EDITOR=vim TAW_AGENT=env-agent TAW_FAKE_FZF_KEYS=alt-enter \
+    TAW_FAKE_FZF_MATCH='main [worktree]' TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" --mode=worktree
+
+  assert_file_contains "$log" $'select-window\t-t\t@8'
+  assert_file_contains "$log" $'select-pane\t-t\t%8'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'new-session\t'
+  assert_file_not_contains "$log" $'split-window\t'
+  assert_file_not_contains "$log" $'env-agent'
+}
+
+test_picker_layout_creates_window_in_existing_session() {
+  local repo repo_real worktree worktree_real fake_bin no_fzf_path log sessions panes
+
+  repo="$TEST_TMPDIR/repo"
+  worktree="$repo/.worktrees/develop"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add -q "$worktree" develop
+  repo_real="$(cd "$repo" && pwd -P)"
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  sessions=$'$1\trepo\t'"$repo_real"
+  panes=$'@8\t%8\t'"$repo_real"$'\n'
+
+  EDITOR=vim TAW_FAKE_FZF_KEYS=alt-z TAW_FAKE_FZF_MATCH='develop [worktree]' \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_TMUX_PANES="$panes" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=worktree
+
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}\t-t\t$1:\t-n\tdevelop\t-c\t'"$worktree_real"$'\tvim'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"
+  assert_file_contains "$log" $'select-pane\t-t\t%1'
+  assert_file_not_contains "$log" $'new-session\t'
 }
 
 test_picker_tab_cycles_all_modes_and_preserves_query() {
@@ -6121,6 +6271,14 @@ test_case "taw: branch mode checks out unassigned normal branch" \
   test_branch_mode_checks_out_unassigned_normal_branch
 test_case "taw: branch mode creates unassigned bare worktree" \
   test_branch_mode_creates_unassigned_bare_worktree
+test_case "taw: picker acceptance keys select layouts" \
+  test_picker_accept_keys_select_layouts
+test_case "taw: picker layout keys apply to worktree and branch modes" \
+  test_picker_layout_keys_apply_to_worktree_and_branch_modes
+test_case "taw: picker layout is ignored for matching window" \
+  test_picker_layout_is_ignored_for_matching_window
+test_case "taw: picker layout creates window in existing session" \
+  test_picker_layout_creates_window_in_existing_session
 test_case "taw: picker tab cycles all modes and preserves query" \
   test_picker_tab_cycles_all_modes_and_preserves_query
 test_case "taw: each explicit mode can cycle from its start" \
