@@ -74,6 +74,15 @@ set -euo pipefail
   printf '\n'
 } >>"$TAW_TMUX_LOG"
 
+target_is_listed() {
+  local target="$1" candidates="$2" candidate
+
+  while IFS= read -r candidate || [[ -n "$candidate" ]]; do
+    [[ -n "$candidate" && "$candidate" = "$target" ]] && return 0
+  done <<<"$candidates"
+  return 1
+}
+
 case "${1:-}" in
   has-session)
     target=""
@@ -223,6 +232,8 @@ case "${1:-}" in
     if [[ "$*" = *'#{window_id}'* ]]; then
       printf '%s\n' "${TAW_FAKE_TMUX_CURRENT_WINDOW_ID:-@1}"
     elif [[ "$*" = *'#{session_name}'* ]]; then
+      target_is_listed "$target" "${TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_NAME_TARGETS-}" \
+        && exit 1
       if [[ -n "${TAW_FAKE_TMUX_DISPLAY_SESSION_NAME+x}" ]]; then
         value="$TAW_FAKE_TMUX_DISPLAY_SESSION_NAME"
       else
@@ -246,6 +257,8 @@ case "${1:-}" in
       fi
       printf '%s__taw_picker_end__\n' "$value"
     elif [[ "$*" = *'#{session_path}'* ]]; then
+      target_is_listed "$target" "${TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_PATH_TARGETS-}" \
+        && exit 1
       if [[ -n "${TAW_FAKE_TMUX_DISPLAY_SESSION_PATH+x}" ]]; then
         value="$TAW_FAKE_TMUX_DISPLAY_SESSION_PATH"
       else
@@ -2819,6 +2832,47 @@ test_project_picker_rejects_control_characters_in_tmux_sessions() {
   assert_string_contains "$output" \
     "tmux session contains control characters and cannot be used by the picker"
   assert_no_tmux_work_window "$log"
+}
+
+test_project_picker_skips_tmux_sessions_that_disappear_during_lookup() {
+  local xdg empty_search vanished_path survivor_path elsewhere fake_bin no_fzf_path
+  local sessions lookup fail_name fail_path log fzf_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  vanished_path="$TEST_TMPDIR/vanished"
+  survivor_path="$TEST_TMPDIR/survivor"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$vanished_path" \
+    "$survivor_path" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$7\tvanished\t'"$vanished_path"$'\n$8\tsurvivor\t'"$survivor_path"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+
+  for lookup in session-name session-path; do
+    fail_name=
+    fail_path=
+    case "$lookup" in
+      session-name) fail_name='$7' ;;
+      session-path) fail_path='$7' ;;
+    esac
+    log="$TEST_TMPDIR/tmux-$lookup.log"
+    fzf_log="$TEST_TMPDIR/fzf-$lookup.log"
+
+    XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS="$sessions" \
+      TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_NAME_TARGETS="$fail_name" \
+      TAW_FAKE_TMUX_DISPLAY_FAIL_SESSION_PATH_TARGETS="$fail_path" \
+      TAW_FAKE_TMUX_HAS_SESSION_TARGETS='$8' TAW_FAKE_FZF_MATCH='[TMUX] survivor' \
+      TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+      TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$elsewhere" --pick-project
+
+    assert_file_contains "$fzf_log" '[TMUX] survivor'
+    assert_file_not_contains "$fzf_log" '[TMUX] vanished'
+    assert_file_contains "$log" $'attach-session\t-t\t$8'
+  done
 }
 
 test_empty_prompt_project_picker_resolves_tmux_session_row() {
@@ -5776,6 +5830,8 @@ test_case "taw: project picker rejects control characters in paths" \
   test_project_picker_rejects_control_characters_in_discovered_paths
 test_case "taw: project picker rejects control characters in tmux sessions" \
   test_project_picker_rejects_control_characters_in_tmux_sessions
+test_case "taw: project picker skips tmux sessions that disappear during lookup" \
+  test_project_picker_skips_tmux_sessions_that_disappear_during_lookup
 test_case "taw: empty project prompt picker resolves tmux session rows" \
   test_empty_prompt_project_picker_resolves_tmux_session_row
 test_case "taw: project picker tmux row preserves active window inside tmux" \
