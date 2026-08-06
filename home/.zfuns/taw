@@ -535,6 +535,21 @@ _taw_resolve_project_from_tmux() {
   return 1
 }
 
+_taw_tmux_sessionizer_project_rows() {
+  local _taw_root="$1" _taw_depth="$2" _taw_found_path
+  local -a _taw_directories
+
+  (( _taw_depth > 0 )) || return 0
+  _taw_directories=("$_taw_root"/*(DNoN/))
+  for _taw_found_path in "${_taw_directories[@]}"; do
+    [[ "${_taw_found_path:t}" == .git ]] && continue
+    _taw_require_picker_safe "project path" "$_taw_found_path" || return 1
+    print -r -- "$_taw_found_path"$'\t'"path"$'\t'"$_taw_found_path"
+    _taw_tmux_sessionizer_project_rows \
+      "$_taw_found_path" "$((_taw_depth - 1))" || return 1
+  done
+}
+
 _taw_tmux_sessionizer_picker_rows() {
   local CONFIG_FILE_NAME="tmux-sessionizer.conf"
   local CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer"
@@ -543,7 +558,7 @@ _taw_tmux_sessionizer_picker_rows() {
   local -a TS_SEARCH_PATHS TS_EXTRA_SEARCH_PATHS TS_SESSION_COMMANDS _taw_tmux_list_args
   local _taw_picker_current_session_id _taw_sessions _taw_session_line
   local _taw_session_id _taw_session_name _taw_session_path _taw_session_rest
-  local _taw_entry _taw_path _taw_depth _taw_found_path
+  local _taw_entry _taw_path _taw_depth
   local _taw_marker=__taw_picker_end__ _taw_session_format
   local _taw_tab=$'\t'
 
@@ -608,11 +623,7 @@ _taw_tmux_sessionizer_picker_rows() {
     fi
 
     [[ -d "$_taw_path" ]] || continue
-    while IFS= read -r -d $'\0' _taw_found_path; do
-      _taw_require_picker_safe "project path" "$_taw_found_path" || return 1
-      print -r -- "$_taw_found_path"$'\t'"path"$'\t'"$_taw_found_path"
-    done < <(find "$_taw_path" -mindepth 1 -maxdepth "$_taw_depth" \
-      -path '*/.git' -prune -o -type d -print0)
+    _taw_tmux_sessionizer_project_rows "$_taw_path" "$_taw_depth" || return 1
   done
 }
 

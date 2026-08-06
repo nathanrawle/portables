@@ -2800,6 +2800,56 @@ test_empty_project_prompt_mentions_fzf() {
   assert_file_contains "$REPO_ROOT/home/.zfuns/taw" "empty opens fzf"
 }
 
+test_project_picker_uses_zsh_directory_traversal() {
+  local xdg projects_home extra_home external_home elsewhere fake_bin
+  local log fzf_log find_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  extra_home="$TEST_TMPDIR/extra"
+  external_home="$TEST_TMPDIR/external"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home/visible/nested/too-deep" \
+    "$projects_home/visible/.git/ignored" "$projects_home/.hidden" \
+    "$extra_home/one/two" "$external_home/linked/child" "$elsewhere"
+  ln -s "$external_home/linked" "$projects_home/link"
+  {
+    printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home"
+    printf 'TS_MAX_DEPTH=2\n'
+    printf 'TS_EXTRA_SEARCH_PATHS=("%s:1")\n' "$extra_home"
+  } >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  cat >"$fake_bin/find" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${TAW_FIND_LOG:?}"
+printf 'called\n' >"$TAW_FIND_LOG"
+exit 99
+EOF
+  chmod +x "$fake_bin/find"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+  find_log="$TEST_TMPDIR/find.log"
+
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_CANCEL=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FIND_LOG="$find_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere" --pick-project
+
+  assert_file_contains "$fzf_log" "$projects_home/visible"
+  assert_file_contains "$fzf_log" "$projects_home/visible/nested"
+  assert_file_contains "$fzf_log" "$projects_home/.hidden"
+  assert_file_contains "$fzf_log" "$extra_home/one"
+  assert_file_not_contains "$fzf_log" "$projects_home/visible/nested/too-deep"
+  assert_file_not_contains "$fzf_log" "$projects_home/visible/.git"
+  assert_file_not_contains "$fzf_log" "$projects_home/link"
+  assert_file_not_contains "$fzf_log" "$extra_home/one/two"
+  assert_not_exists "$find_log"
+}
+
 test_project_picker_rejects_control_characters_in_discovered_paths() {
   local xdg projects_home unsafe_project elsewhere fake_bin log output
 
@@ -5866,6 +5916,8 @@ test_case "taw: empty project prompt opens tmux-sessionizer project picker" \
   test_empty_prompt_selects_project_from_tmux_sessionizer_config
 test_case "taw: empty project prompt mentions fzf" \
   test_empty_project_prompt_mentions_fzf
+test_case "taw: project picker uses Zsh directory traversal" \
+  test_project_picker_uses_zsh_directory_traversal
 test_case "taw: project picker rejects control characters in paths" \
   test_project_picker_rejects_control_characters_in_discovered_paths
 test_case "taw: project picker rejects control characters in tmux sessions" \
