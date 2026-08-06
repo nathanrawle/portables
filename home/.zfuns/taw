@@ -551,7 +551,8 @@ _taw_tmux_sessionizer_picker_rows() {
   local CONFIG_FILE="$CONFIG_DIR/$CONFIG_FILE_NAME"
   local TS_MAX_DEPTH
   local -a TS_SEARCH_PATHS TS_EXTRA_SEARCH_PATHS TS_SESSION_COMMANDS
-  local _taw_current_session _taw_session_ids _taw_session_id _taw_session_name _taw_session_path
+  local _taw_picker_current_session_id _taw_session_ids _taw_session_id
+  local _taw_session_name _taw_session_path
   local _taw_tmux_picker_value _taw_entry _taw_path _taw_depth _taw_found_path
 
   if [[ -f "$CONFIG_FILE" ]]; then
@@ -568,18 +569,20 @@ _taw_tmux_sessionizer_picker_rows() {
   fi
 
   if [[ -n "${TMUX:-}" ]]; then
-    _taw_current_session="$(tmux display-message -p '#S' 2>/dev/null)" || _taw_current_session=
+    _taw_picker_current_session_id="$(tmux display-message -p '#{session_id}' 2>/dev/null)" \
+      || _taw_picker_current_session_id=
   fi
   _taw_session_ids="$(tmux list-sessions -F '#{session_id}' 2>/dev/null)" || _taw_session_ids=
   for _taw_session_id in "${(@f)_taw_session_ids}"; do
     [[ -n "$_taw_session_id" ]] || continue
+    [[ -n "${TMUX:-}" \
+      && "$_taw_session_id" == "$_taw_picker_current_session_id" ]] && continue
     _taw_read_tmux_picker_value "$_taw_session_id" '#{session_name}' || continue
     _taw_session_name="$_taw_tmux_picker_value"
     _taw_read_tmux_picker_value "$_taw_session_id" '#{session_path}' || continue
     _taw_session_path="$_taw_tmux_picker_value"
     _taw_require_picker_safe "tmux session" \
       "$_taw_session_id" "$_taw_session_name" "$_taw_session_path" || return 1
-    [[ -n "${TMUX:-}" && "$_taw_session_name" == "$_taw_current_session" ]] && continue
     print -r -- "[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path"
   done
 

@@ -2875,6 +2875,38 @@ test_project_picker_skips_tmux_sessions_that_disappear_during_lookup() {
   done
 }
 
+test_project_picker_skips_unsafe_current_tmux_session() {
+  local xdg projects_home repo elsewhere unsafe_path fake_bin no_fzf_path
+  local sessions log fzf_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  repo="$projects_home/repo"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  unsafe_path="$TEST_TMPDIR/current"$'\t'"session"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere" "$unsafe_path"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$repo"
+  sessions=$'$1\tcurrent\t'"$unsafe_path"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-input.log"
+
+  printf '\n' | XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_TEST_TMUX=/tmp/tmux \
+    TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_DISPLAY_SESSION_PATH="$unsafe_path" TAW_FAKE_FZF_MATCH="$repo" \
+    TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 TAW_FAKE_FZF_FAIL_ON_SECOND=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --pick-project
+
+  assert_file_contains "$fzf_log" "$repo"
+  assert_file_not_contains "$fzf_log" '[TMUX] current'
+  assert_file_not_contains "$log" $'display-message\t-p\t-t\t$1\t#{session_path}'
+}
+
 test_empty_prompt_project_picker_resolves_tmux_session_row() {
   local xdg empty_search repo repo_real elsewhere fake_bin log fzf_log sessions no_fzf_path
 
@@ -5832,6 +5864,8 @@ test_case "taw: project picker rejects control characters in tmux sessions" \
   test_project_picker_rejects_control_characters_in_tmux_sessions
 test_case "taw: project picker skips tmux sessions that disappear during lookup" \
   test_project_picker_skips_tmux_sessions_that_disappear_during_lookup
+test_case "taw: project picker skips unsafe current tmux session" \
+  test_project_picker_skips_unsafe_current_tmux_session
 test_case "taw: empty project prompt picker resolves tmux session rows" \
   test_empty_prompt_project_picker_resolves_tmux_session_row
 test_case "taw: project picker tmux row preserves active window inside tmux" \
