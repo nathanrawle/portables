@@ -2143,6 +2143,41 @@ _taw_parse_created_window() {
   _taw_created_pane="${_taw_created##* }"
 }
 
+_taw_parse_created_session() {
+  local _taw_created="$1" _taw_rest
+
+  _taw_created_session_id="${_taw_created%%$'\t'*}"
+  _taw_rest="${_taw_created#*$'\t'}"
+  [[ "$_taw_rest" != "$_taw_created" ]] || return 1
+  _taw_created_session_name="${_taw_rest%%$'\t'*}"
+  _taw_rest="${_taw_rest#*$'\t'}"
+  [[ "$_taw_rest" != "$_taw_created_session_name" ]] || return 1
+  _taw_created_window="${_taw_rest%%$'\t'*}"
+  _taw_created_pane="${_taw_rest#*$'\t'}"
+  [[ "$_taw_created_pane" != "$_taw_rest" && -n "$_taw_created_session_id" \
+    && -n "$_taw_created_session_name" && -n "$_taw_created_window" \
+    && -n "$_taw_created_pane" ]]
+}
+
+_taw_resolve_layout_session() {
+  if [[ -n "$_taw_project_session_target" ]]; then
+    tmux has-session -t "$_taw_project_session_target" 2>/dev/null || return 2
+    _taw_session_target="$_taw_project_session_target"
+    return 0
+  fi
+
+  _taw_resolve_tmux_session_exact "$_taw_session_name"
+  case $? in
+    0)
+      _taw_session_name="$_taw_resolved_tmux_session_name"
+      _taw_session_target="$_taw_resolved_tmux_session_id"
+      return 0
+      ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
 _taw_existing_tmux_window_for_dir() {
   local _taw_panes _taw_line _taw_window _taw_pane _taw_pane_path _taw_pane_real _taw_window_match=
   local _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
@@ -2303,6 +2338,7 @@ _taw_can_reuse_existing_window() {
 
 _taw_create_tmux_window() {
   local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_editor_pane
+  local _taw_created_session_id _taw_created_session_name _taw_session_status
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
   local _taw_shell_anchor_pane
   local _taw_existing_session_id _taw_existing_window_id _taw_existing_pane_id _taw_existing_rest
@@ -2335,32 +2371,48 @@ _taw_create_tmux_window() {
     _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
       -t "$_taw_current_session_id:" -n "$_taw_window_name" -c "$_taw_window_dir" \
       "$_taw_editor_cmd")" || return 1
-  elif tmux has-session -t "$_taw_session_target" 2>/dev/null; then
-    if _taw_can_reuse_existing_window && _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
-      _taw_existing_window_id="${_taw_existing_window%%$'\t'*}"
-      if [[ "$_taw_existing_window" == *$'\t'* ]]; then
-        _taw_existing_pane_id="${_taw_existing_window#*$'\t'}"
-      else
-        _taw_existing_pane_id=
-      fi
-      _taw_switch_to_tmux_window "$_taw_existing_window_id" "$_taw_existing_pane_id"
-      return
-    fi
-
-    _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
-      -t "$_taw_session_target:" -n "$_taw_window_name" -c "$_taw_window_dir" \
-      "$_taw_editor_cmd")" || return 1
   else
-    if [[ -n "$_taw_project_session_target" ]]; then
+    _taw_resolve_layout_session
+    _taw_session_status=$?
+    if (( _taw_session_status == 0 )); then
+      if _taw_can_reuse_existing_window \
+        && _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
+        _taw_existing_window_id="${_taw_existing_window%%$'\t'*}"
+        if [[ "$_taw_existing_window" == *$'\t'* ]]; then
+          _taw_existing_pane_id="${_taw_existing_window#*$'\t'}"
+        else
+          _taw_existing_pane_id=
+        fi
+        _taw_switch_to_tmux_window "$_taw_existing_window_id" "$_taw_existing_pane_id"
+        return
+      fi
+
+      _taw_created="$(tmux new-window -d -P -F '#{window_id} #{pane_id}' \
+        -t "$_taw_session_target:" -n "$_taw_window_name" -c "$_taw_window_dir" \
+        "$_taw_editor_cmd")" || return 1
+    elif (( _taw_session_status == 2 )) || [[ -n "$_taw_project_session_target" ]]; then
       _taw_die "could not resolve tmux session: $_taw_session_name"
       return 1
+    else
+      _taw_created="$(tmux new-session -d -P \
+        -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}' \
+        -s "$_taw_session_name" -n "$_taw_window_name" -c "$_taw_window_dir" \
+        "$_taw_editor_cmd")" || {
+        _taw_die "could not create tmux session: $_taw_session_name"
+        return 1
+      }
+      _taw_parse_created_session "$_taw_created" || {
+        _taw_die "tmux returned invalid session metadata"
+        return 1
+      }
+      _taw_session_name="$_taw_created_session_name"
+      _taw_session_target="$_taw_created_session_id"
     fi
-    _taw_created="$(tmux new-session -d -P -F '#{window_id} #{pane_id}' \
-      -s "$_taw_session_name" -n "$_taw_window_name" -c "$_taw_window_dir" \
-      "$_taw_editor_cmd")" || return 1
   fi
 
-  _taw_parse_created_window "$_taw_created"
+  if [[ -z "$_taw_created_session_id" ]]; then
+    _taw_parse_created_window "$_taw_created"
+  fi
   _taw_window_id="$_taw_created_window"
   _taw_editor_pane="$_taw_created_pane"
   tmux set-window-option -t "$_taw_window_id" automatic-rename off >/dev/null || return 1
