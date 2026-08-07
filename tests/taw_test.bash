@@ -392,6 +392,7 @@ fi
 
 print_query=0
 expects_key=0
+prints_key=0
 initial_query=""
 args=( "$@" )
 for ((i = 0; i < ${#args[@]}; i++)); do
@@ -401,6 +402,11 @@ for ((i = 0; i < ${#args[@]}; i++)); do
       ;;
     --expect=*)
       expects_key=1
+      ;;
+    --bind=*)
+      if [[ "${args[$i]}" == *"print("*"+accept"* ]]; then
+        prints_key=1
+      fi
       ;;
     --query=*)
       initial_query="${args[$i]#*=}"
@@ -494,7 +500,7 @@ fi
 if (( print_query )); then
   printf '%s\n' "$output_query"
 fi
-if (( expects_key )); then
+if (( expects_key || prints_key )); then
   printf '%s\n' "$key"
 fi
 if [[ "$key" = tab ]]; then
@@ -4141,10 +4147,10 @@ test_picker_selects_fzf_bindings_by_version() {
       TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
       run_taw "$repo" --mode=worktree
 
-    assert_file_contains "$args_log" '--expect=tab'
+    assert_file_contains "$args_log" 'tab:print(tab)+accept'
     assert_file_contains "$args_log" 'enter:transform:'
     assert_file_contains "$args_log" 'print()+accept'
-    assert_file_not_contains "$args_log" '--expect=tab,ctrl-s'
+    assert_file_not_contains "$args_log" '--expect='
   done
 
   for version in 0.52.1 unknown; do
@@ -4249,7 +4255,8 @@ test_picker_accept_keys_select_layouts() {
     TAW_FAKE_FZF_MATCH="$target" TAW_FZF_ARGS_LOG="$args_log" \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$elsewhere" -ts -sh "npm test" -sh "echo later"
-  assert_file_contains "$args_log" '--expect=tab'
+  assert_file_contains "$args_log" 'tab:print(tab)+accept'
+  assert_file_not_contains "$args_log" '--expect='
   assert_file_contains "$args_log" 'ctrl-s:transform:[[ -n {2} && {2} != message ]]'
   assert_file_contains "$args_log" 'print(ctrl-s)+accept'
   assert_file_contains "$args_log" 'Opt-Z: editor+shell'

@@ -943,7 +943,7 @@ _taw_resolve_explicit_picker() {
       )
       if [[ "$_taw_modern_fzf" == true ]]; then
         _taw_fzf_args+=(
-          --expect=tab
+          '--bind=tab:print(tab)+accept'
           '--bind=enter:transform:[[ -n {2} && {2} != message ]] && printf "print()+accept"'
           '--bind=ctrl-s:transform:[[ -n {2} && {2} != message ]] && printf "print(ctrl-s)+accept"'
           '--bind=ctrl-a:transform:[[ -n {2} && {2} != message ]] && printf "print(ctrl-a)+accept"'
