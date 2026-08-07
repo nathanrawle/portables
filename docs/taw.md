@@ -269,6 +269,7 @@ location.
 ## tmux Reuse And Layout
 
 Reuse is limited to sessions where no explicit `-agent`, `-ed`, or `-sh` arguments were supplied and `TAW_AGENT` trims to empty. A non-empty trimmed `TAW_AGENT` disables reuse.
+When reusing an existing window, taw preserves that window's active pane.
 
 Layout on a new window:
 

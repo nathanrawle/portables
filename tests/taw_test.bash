@@ -791,6 +791,50 @@ test_real_tmux_normalized_session_collision_fails_clearly() {
   assert_file_not_contains "$log" $'attach-session\t'
 }
 
+test_real_tmux_existing_window_preserves_active_pane() {
+  local repo other repo_real real_tmux fake_bin no_fzf_path log socket
+  local matching_pane active_pane selected_pane
+
+  real_tmux="$(command -v tmux || true)"
+  [[ -n "$real_tmux" ]] || return 0
+  repo="$TEST_TMPDIR/repo"
+  other="$TEST_TMPDIR/other"
+  make_git_repo "$repo"
+  mkdir -p "$other"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_real_tmux_wrapper "$TEST_TMPDIR/real-tmux")"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  socket="taw-test-$$-$RANDOM"
+  REAL_TMUX_BIN_FOR_CLEANUP="$real_tmux"
+  REAL_TMUX_SOCKET_FOR_CLEANUP="$socket"
+  trap cleanup_real_tmux EXIT
+
+  matching_pane="$(
+    "$real_tmux" -L "$socket" -f /dev/null new-session -d -P \
+      -F '#{pane_id}' -s repo -n repo -c "$repo_real" zsh
+  )"
+  active_pane="$(
+    "$real_tmux" -L "$socket" -f /dev/null split-window -d -P \
+      -F '#{pane_id}' -t repo: -c "$other" zsh
+  )"
+  "$real_tmux" -L "$socket" select-pane -t "$active_pane"
+
+  EDITOR=zsh TAW_REAL_TMUX_BIN="$real_tmux" TAW_REAL_TMUX_SOCKET="$socket" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" -p "$repo"
+
+  selected_pane="$(
+    "$real_tmux" -L "$socket" display-message -p -t repo: '#{pane_id}'
+  )"
+  assert_eq "$active_pane" "$selected_pane" \
+    "expected existing window reuse to preserve its active pane"
+  [[ "$matching_pane" != "$active_pane" ]] \
+    || fail "expected the matching and active panes to differ"
+  assert_file_contains "$log" $'select-window\t-t\t'
+  assert_file_not_contains "$log" $'select-pane\t'
+}
+
 test_taw_agent_whitespace_only_defaults_to_codex() {
   local repo repo_real fake_bin log no_fzf_path
 
@@ -871,6 +915,7 @@ test_existing_worktree_window_is_reused() {
   assert_file_contains "$log" $'list-panes\t-s\t-t\t$1:\t-F\t#{window_id}\t#{pane_id}\t#{pane_current_path}'
   assert_file_contains "$log" $'select-window\t-t\t@9'
   assert_file_contains "$log" $'attach-session\t-t\t$1'
+  assert_file_not_contains "$log" $'select-pane\t'
   assert_file_not_contains "$log" $'new-window\t'
   assert_file_not_contains "$log" $'new-session\t'
   assert_file_not_contains "$log" $'split-window\t'
@@ -1916,7 +1961,7 @@ test_bare_default_worktree_window_is_reused() {
   assert_file_contains "$log" $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}'
   assert_file_contains "$log" $'list-panes\t-s\t-t\t$1:\t-F\t#{window_id}\t#{pane_id}\t#{pane_current_path}'
   assert_file_contains "$log" $'select-window\t-t\t@8'
-  assert_file_contains "$log" $'select-pane\t-t\t%8'
+  assert_file_not_contains "$log" $'select-pane\t'
   assert_file_contains "$log" $'attach-session\t-t\t$1'
   assert_file_not_contains "$log" $'new-window\t'
   assert_file_not_contains "$log" $'new-session\t'
@@ -4333,7 +4378,7 @@ test_picker_layout_is_ignored_for_matching_window() {
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" --mode=worktree
 
   assert_file_contains "$log" $'select-window\t-t\t@8'
-  assert_file_contains "$log" $'select-pane\t-t\t%8'
+  assert_file_not_contains "$log" $'select-pane\t'
   assert_file_not_contains "$log" $'new-window\t'
   assert_file_not_contains "$log" $'new-session\t'
   assert_file_not_contains "$log" $'split-window\t'
@@ -4712,7 +4757,7 @@ test_peer_links_project_session_match() {
 
   assert_file_contains "$log" $'link-window\t-d\t-s\t@20\t-t\t$1:'
   assert_file_contains "$log" $'select-window\t-t\t@20'
-  assert_file_contains "$log" $'select-pane\t-t\t%20'
+  assert_file_not_contains "$log" $'select-pane\t'
   assert_file_not_contains "$log" $'new-window\t'
 }
 
@@ -4733,7 +4778,8 @@ test_peer_links_other_session_match() {
     run_taw "$repo" --peer -p "$repo"
 
   assert_file_contains "$log" $'link-window\t-d\t-s\t@30\t-t\t$1:'
-  assert_file_contains "$log" $'select-pane\t-t\t%30'
+  assert_file_contains "$log" $'select-window\t-t\t@30'
+  assert_file_not_contains "$log" $'select-pane\t'
   assert_file_not_contains "$log" $'new-window\t'
 }
 
@@ -4919,7 +4965,8 @@ test_peer_links_resolved_bare_worktree() {
     run_taw "$current_repo" --peer project hallamshire-hotel-all-day
 
   assert_file_contains "$log" $'link-window\t-d\t-s\t@20\t-t\t$1:'
-  assert_file_contains "$log" $'select-pane\t-t\t%20'
+  assert_file_contains "$log" $'select-window\t-t\t@20'
+  assert_file_not_contains "$log" $'select-pane\t'
   assert_file_not_contains "$log" $'new-window\t'
   assert_eq "main" "$(git -C "$current_repo" branch --show-current)" \
     "expected the invoking project branch to remain unchanged"
@@ -6217,6 +6264,8 @@ test_case "taw: real tmux uses created session ID after name normalization" \
   test_real_tmux_uses_created_session_id_after_name_normalization
 test_case "taw: real tmux reports normalized session name collisions" \
   test_real_tmux_normalized_session_collision_fails_clearly
+test_case "taw: real tmux preserves active pane when reusing a window" \
+  test_real_tmux_existing_window_preserves_active_pane
 test_case "taw: convert promotes dirty default and moves worktrees" \
   test_convert_bare_project_promotes_dirty_default_and_moves_worktrees
 test_case "taw: convert moves slash and detached worktrees" \

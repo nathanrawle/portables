@@ -2516,7 +2516,7 @@ _taw_existing_tmux_window_for_dir() {
     [[ "$_taw_pane_path" != "$_taw_line" && -n "$_taw_window" && -n "$_taw_pane" && -d "$_taw_pane_path" ]] || continue
     _taw_pane_real="${_taw_pane_path:A}"
     if [[ "$_taw_pane_real" == "$_taw_target_dir" ]]; then
-      print -r -- "$_taw_window	$_taw_pane"
+      print -r -- "$_taw_window"
       return 0
     elif [[ "$_taw_pane_real" == "$_taw_target_dir"/* ]]; then
       [[ -n "$_taw_window_match" ]] || _taw_window_match="$_taw_window"
@@ -2531,7 +2531,7 @@ _taw_existing_tmux_window_for_dir() {
 _taw_peer_tmux_window_for_dir() {
   local _taw_panes _taw_line _taw_session_id _taw_session _taw_window _taw_pane _taw_pane_path
   local _taw_pane_real _taw_rest _taw_rank _taw_best_rank=99 _taw_best_session_id
-  local _taw_best_window _taw_best_pane _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
+  local _taw_best_window _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
 
   _taw_panes="$(tmux list-panes -a \
     -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}	#{pane_current_path}' \
@@ -2571,36 +2571,22 @@ _taw_peer_tmux_window_for_dir() {
     _taw_best_rank="$_taw_rank"
     _taw_best_session_id="$_taw_session_id"
     _taw_best_window="$_taw_window"
-    if (( _taw_rank % 2 == 0 )); then
-      _taw_best_pane="$_taw_pane"
-    else
-      _taw_best_pane=
-    fi
   done
 
   [[ -n "$_taw_best_window" ]] || return 1
-  print -r -- "$_taw_best_session_id	$_taw_best_window	$_taw_best_pane"
+  print -r -- "$_taw_best_session_id	$_taw_best_window"
 }
 
 _taw_switch_to_tmux_window() {
-  local _taw_window_id="$1" _taw_pane_id="${2:-}"
+  local _taw_window_id="$1"
 
   if [[ "$_taw_peer" == true ]]; then
     tmux select-window -t "$_taw_window_id" || return 1
-    if [[ -n "$_taw_pane_id" ]]; then
-      tmux select-pane -t "$_taw_pane_id" || return 1
-    fi
   elif [[ -n "${TMUX:-}" ]]; then
     tmux switch-client -t "$_taw_session_target" || return 1
     tmux select-window -t "$_taw_window_id" || return 1
-    if [[ -n "$_taw_pane_id" ]]; then
-      tmux select-pane -t "$_taw_pane_id" || return 1
-    fi
   else
     tmux select-window -t "$_taw_window_id" || return 1
-    if [[ -n "$_taw_pane_id" ]]; then
-      tmux select-pane -t "$_taw_pane_id" || return 1
-    fi
     tmux attach-session -t "$_taw_session_target" || return 1
   fi
 }
@@ -2665,7 +2651,7 @@ _taw_create_tmux_window() {
   local _taw_created_session_id _taw_created_session_name _taw_session_status
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
   local _taw_shell_anchor_pane
-  local _taw_existing_session_id _taw_existing_window_id _taw_existing_pane_id _taw_existing_rest
+  local _taw_existing_session_id _taw_existing_window_id
   local -a _taw_initial_cmd_args
 
   if [[ "$_taw_editor_enabled" == true ]]; then
@@ -2689,10 +2675,7 @@ _taw_create_tmux_window() {
     fi
     if [[ -n "$_taw_existing_window" ]]; then
       _taw_existing_session_id="${_taw_existing_window%%$'\t'*}"
-      _taw_existing_rest="${_taw_existing_window#*$'\t'}"
-      _taw_existing_window_id="${_taw_existing_rest%%$'\t'*}"
-      _taw_existing_pane_id="${_taw_existing_rest#*$'\t'}"
-      [[ "$_taw_existing_pane_id" == "$_taw_existing_rest" ]] && _taw_existing_pane_id=
+      _taw_existing_window_id="${_taw_existing_window#*$'\t'}"
 
       if ! _taw_can_reuse_existing_window; then
         _taw_die "matching tmux window already exists; use --force to create a fresh layout"
@@ -2703,7 +2686,7 @@ _taw_create_tmux_window() {
         tmux link-window -d -s "$_taw_existing_window_id" \
           -t "$_taw_current_session_id:" || return 1
       fi
-      _taw_switch_to_tmux_window "$_taw_existing_window_id" "$_taw_existing_pane_id"
+      _taw_switch_to_tmux_window "$_taw_existing_window_id"
       return
     fi
 
@@ -2716,13 +2699,7 @@ _taw_create_tmux_window() {
     if (( _taw_session_status == 0 )); then
       if _taw_can_reuse_existing_window \
         && _taw_existing_window="$(_taw_existing_tmux_window_for_dir)"; then
-        _taw_existing_window_id="${_taw_existing_window%%$'\t'*}"
-        if [[ "$_taw_existing_window" == *$'\t'* ]]; then
-          _taw_existing_pane_id="${_taw_existing_window#*$'\t'}"
-        else
-          _taw_existing_pane_id=
-        fi
-        _taw_switch_to_tmux_window "$_taw_existing_window_id" "$_taw_existing_pane_id"
+        _taw_switch_to_tmux_window "$_taw_existing_window"
         return
       fi
 
