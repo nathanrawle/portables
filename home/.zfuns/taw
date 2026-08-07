@@ -839,6 +839,37 @@ _taw_picker_producer_status() {
   print -r -- "$_taw_status_value"
 }
 
+_taw_fzf_supports_picker_transforms() {
+  local _taw_version_output _taw_version
+  local -a _taw_version_parts
+
+  _taw_version_output="$(fzf --version 2>/dev/null)" || return 1
+  _taw_version="${_taw_version_output%%[[:space:]]*}"
+  _taw_version_parts=( "${(@s:.:)_taw_version}" )
+  (( ${#_taw_version_parts[@]} >= 2 )) || return 1
+  [[ "${_taw_version_parts[1]}" == <-> \
+    && "${_taw_version_parts[2]}" == <-> ]] || return 1
+  (( _taw_version_parts[1] > 0 || _taw_version_parts[2] >= 53 ))
+}
+
+_taw_wait_picker_producer() {
+  local _taw_mode="$1" _taw_producer_status _taw_errors
+
+  while true; do
+    _taw_producer_status="$(_taw_picker_producer_status "$_taw_mode")"
+    case $? in
+      0) break ;;
+      2) zselect -t 1 >/dev/null 2>&1 ;;
+      *) return 1 ;;
+    esac
+  done
+  if [[ "$_taw_producer_status" != 0 ]]; then
+    _taw_errors="$_taw_picker_cache_dir/$_taw_mode.errors"
+    [[ ! -s "$_taw_errors" ]] || command cat -- "$_taw_errors" >&2
+    return 1
+  fi
+}
+
 _taw_cleanup_picker_cache() {
   local _taw_mode _taw_pid
 
@@ -873,8 +904,9 @@ _taw_cleanup_picker_cache() {
 _taw_resolve_explicit_picker() {
   local _taw_output _taw_status _taw_producer_status _taw_query= _taw_key _taw_choice
   local _taw_stream_status _taw_errors
+  local _taw_modern_fzf=false
   local _taw_status_line _taw_status_marker=$'\x1e__taw_picker_status__'
-  local -a _taw_output_lines _taw_fields _taw_pipeline_status
+  local -a _taw_output_lines _taw_fields _taw_pipeline_status _taw_fzf_args
 
   command -v fzf >/dev/null 2>&1 || {
     _taw_die "picker mode requires fzf"
@@ -887,19 +919,37 @@ _taw_resolve_explicit_picker() {
     return 1
   }
 
+  _taw_fzf_supports_picker_transforms && _taw_modern_fzf=true
+
   {
     while true; do
-      _taw_output="$(_taw_stream_picker_cache "$_taw_picker_mode" | fzf \
-        --delimiter=$'\t' --with-nth=1 --prompt="$_taw_picker_mode> " \
-        --header='Enter: default | C-S: shell | C-A: agent | Opt-Z: editor+shell | Opt-A: editor+agent | Opt-Enter: all | Tab: mode' \
-        --print-query --expect=tab --query="$_taw_query" \
-        --bind='enter:transform:[[ -n {2} && {2} != message ]] && printf "print()+accept"' \
-        --bind='ctrl-s:transform:[[ -n {2} && {2} != message ]] && printf "print(ctrl-s)+accept"' \
-        --bind='ctrl-a:transform:[[ -n {2} && {2} != message ]] && printf "print(ctrl-a)+accept"' \
-        --bind='alt-z:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-z)+accept"' \
-        --bind='alt-a:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-a)+accept"' \
-        --bind='alt-enter:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-enter)+accept"' \
-        --bind='load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'
+      if [[ "$_taw_modern_fzf" != true ]]; then
+        _taw_wait_picker_producer "$_taw_picker_mode" || return 1
+      fi
+      _taw_fzf_args=(
+        --delimiter=$'\t'
+        --with-nth=1
+        "--prompt=$_taw_picker_mode> "
+        '--header=Enter: default | C-S: shell | C-A: agent | Opt-Z: editor+shell | Opt-A: editor+agent | Opt-Enter: all | Tab: mode'
+        --print-query
+        "--query=$_taw_query"
+      )
+      if [[ "$_taw_modern_fzf" == true ]]; then
+        _taw_fzf_args+=(
+          --expect=tab
+          '--bind=enter:transform:[[ -n {2} && {2} != message ]] && printf "print()+accept"'
+          '--bind=ctrl-s:transform:[[ -n {2} && {2} != message ]] && printf "print(ctrl-s)+accept"'
+          '--bind=ctrl-a:transform:[[ -n {2} && {2} != message ]] && printf "print(ctrl-a)+accept"'
+          '--bind=alt-z:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-z)+accept"'
+          '--bind=alt-a:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-a)+accept"'
+          '--bind=alt-enter:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-enter)+accept"'
+          '--bind=load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'
+        )
+      else
+        _taw_fzf_args+=(--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter)
+      fi
+      _taw_output="$(_taw_stream_picker_cache "$_taw_picker_mode" | \
+        fzf "${_taw_fzf_args[@]}"
         _taw_pipeline_status=( "${pipestatus[@]}" )
         print -r -- "$_taw_status_marker"$'\t'"${_taw_pipeline_status[1]}"$'\t'"${_taw_pipeline_status[2]}"
       )"

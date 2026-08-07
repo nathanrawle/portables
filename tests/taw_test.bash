@@ -382,6 +382,14 @@ make_fake_fzf() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" = --version ]]; then
+  if [[ -n "${TAW_FZF_VERSION_LOG:-}" ]]; then
+    printf '%s\n' version >>"$TAW_FZF_VERSION_LOG"
+  fi
+  printf '%s\n' "${TAW_FAKE_FZF_VERSION:-0.74.2}"
+  exit "${TAW_FAKE_FZF_VERSION_STATUS:-0}"
+fi
+
 print_query=0
 expects_key=0
 initial_query=""
@@ -3039,7 +3047,7 @@ test_project_picker_batches_tmux_session_metadata() {
 
 test_explicit_picker_prefetches_mode_snapshots() {
   local xdg projects_home target repo repo_real fake_bin no_fzf_path
-  local log git_log marker picker_tmp args_log metadata_call
+  local log git_log marker picker_tmp args_log version_log metadata_call
   local worktree_call branch_call
   local -a fzf_args
 
@@ -3061,6 +3069,7 @@ test_explicit_picker_prefetches_mode_snapshots() {
   marker="$TEST_TMPDIR/worktree-prefetch-started"
   picker_tmp="$TEST_TMPDIR/picker-tmp"
   args_log="$TEST_TMPDIR/fzf-args.log"
+  version_log="$TEST_TMPDIR/fzf-version.log"
   mkdir -p "$picker_tmp"
   export TAW_GIT_LOG="$git_log"
   export TAW_GIT_MARKER="$marker"
@@ -3068,7 +3077,8 @@ test_explicit_picker_prefetches_mode_snapshots() {
   XDG_CONFIG_HOME="$xdg" TMPDIR="$picker_tmp" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
     TAW_FAKE_FZF_KEYS=$'tab\ntab\ntab\ntab\nnone' \
     TAW_FAKE_FZF_MATCH='main [worktree]' TAW_FAKE_FZF_WAIT_FOR_FILE="$marker" \
-    TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_FZF_ARGS_LOG="$args_log" TAW_FZF_VERSION_LOG="$version_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" --mode=session
   unset TAW_GIT_LOG TAW_GIT_MARKER TAW_REAL_GIT
 
@@ -3084,6 +3094,8 @@ test_explicit_picker_prefetches_mode_snapshots() {
   metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}__taw_picker_end__'
   assert_eq "1" "$(grep -Fxc -- "$metadata_call" "$log")" \
     "expected one session snapshot"
+  assert_eq "1" "$(wc -l <"$version_log" | tr -d ' ')" \
+    "expected one fzf version check"
   if compgen -G "$picker_tmp/taw-picker.*" >/dev/null; then
     fail "expected picker snapshot files to be cleaned up"
   fi
@@ -4057,6 +4069,92 @@ test_branch_mode_creates_unassigned_bare_worktree() {
   assert_file_contains "$log" $'-c\t'"$(cd "$worktree" && pwd -P)"$'\tvim'
 }
 
+test_picker_selects_fzf_bindings_by_version() {
+  local repo fake_bin no_fzf_path version version_name log args_log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+
+  for version in 0.53.0 1.0.0; do
+    version_name="${version//[^[:alnum:]]/_}"
+    log="$TEST_TMPDIR/tmux-modern-$version_name.log"
+    args_log="$TEST_TMPDIR/fzf-modern-$version_name.log"
+    EDITOR=vim TAW_FAKE_FZF_VERSION="$version" \
+      TAW_FAKE_FZF_MATCH='main [worktree]' TAW_FZF_ARGS_LOG="$args_log" \
+      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$repo" --mode=worktree
+
+    assert_file_contains "$args_log" '--expect=tab'
+    assert_file_contains "$args_log" 'enter:transform:'
+    assert_file_contains "$args_log" 'print()+accept'
+    assert_file_not_contains "$args_log" '--expect=tab,ctrl-s'
+  done
+
+  for version in 0.52.1 unknown; do
+    version_name="${version//[^[:alnum:]]/_}"
+    log="$TEST_TMPDIR/tmux-legacy-$version_name.log"
+    args_log="$TEST_TMPDIR/fzf-legacy-$version_name.log"
+    EDITOR=vim TAW_FAKE_FZF_VERSION="$version" \
+      TAW_FAKE_FZF_MATCH='main [worktree]' TAW_FZF_ARGS_LOG="$args_log" \
+      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$repo" --mode=worktree
+
+    assert_file_contains "$args_log" \
+      '--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter'
+    assert_file_not_contains "$args_log" ':transform:'
+    assert_file_not_contains "$args_log" 'print('
+  done
+
+  log="$TEST_TMPDIR/tmux-version-failure.log"
+  args_log="$TEST_TMPDIR/fzf-version-failure.log"
+  EDITOR=vim TAW_FAKE_FZF_VERSION_STATUS=1 \
+    TAW_FAKE_FZF_MATCH='main [worktree]' TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=worktree
+  assert_file_contains "$args_log" \
+    '--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter'
+  assert_file_not_contains "$args_log" ':transform:'
+}
+
+test_legacy_picker_reports_producer_failure_before_fzf() {
+  local xdg empty_search session_path elsewhere fake_bin no_fzf_path
+  local sessions log args_log picker_tmp output
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  session_path="$TEST_TMPDIR/session-path"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  picker_tmp="$TEST_TMPDIR/picker-tmp"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$session_path" \
+    "$elsewhere" "$picker_tmp"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$7\tunsafe\tname\t'"$session_path"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+
+  if output="$(XDG_CONFIG_HOME="$xdg" TMPDIR="$picker_tmp" EDITOR=vim \
+    TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --mode=session 2>&1)"; then
+    fail "expected a legacy picker producer failure to fail"
+  fi
+
+  assert_string_contains "$output" \
+    "tmux session contains control characters and cannot be used by the picker"
+  assert_not_exists "$args_log"
+  assert_no_tmux_work_window "$log"
+  if compgen -G "$picker_tmp/taw-picker.*" >/dev/null; then
+    fail "expected legacy picker snapshot files to be cleaned up after failure"
+  fi
+}
+
 test_picker_accept_keys_select_layouts() {
   local xdg projects_home target target_real elsewhere fake_bin no_fzf_path log args_log
 
@@ -4328,7 +4426,9 @@ test_project_scoped_modes_remain_cycleable_outside_git() {
   args_log="$TEST_TMPDIR/fzf-args.log"
 
   XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT=ignored \
+    TAW_FAKE_FZF_VERSION=0.52.1 \
     TAW_FAKE_FZF_KEYS=$'ctrl-s\ntab\nalt-enter\ntab\nnone' \
+    TAW_FAKE_FZF_OUTPUT_QUERIES=$'needle\nneedle\nneedle\nneedle\nneedle' \
     TAW_FAKE_TMUX_SESSIONS= TAW_FZF_INPUT_LOG="$fzf_log" \
     TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
@@ -4342,8 +4442,11 @@ test_project_scoped_modes_remain_cycleable_outside_git() {
   assert_string_contains "${fzf_args[2]}" '--prompt=branch> '
   assert_string_contains "${fzf_args[3]}" '--prompt=branch> '
   assert_string_contains "${fzf_args[4]}" '--prompt=session> '
-  assert_string_contains "${fzf_args[0]}" 'enter:transform:[[ -n {2} && {2} != message ]]'
-  assert_string_contains "${fzf_args[0]}" 'alt-enter:transform:[[ -n {2} && {2} != message ]]'
+  assert_string_contains "${fzf_args[0]}" \
+    '--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter'
+  assert_string_contains "${fzf_args[1]}" '--query=needle'
+  assert_file_not_contains "$args_log" ':transform:'
+  assert_file_not_contains "$args_log" 'print('
   assert_file_contains "$log" $'-s\ttarget\t-n\ttarget\t-c\t'"$target_real"$'\tvim'
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_not_contains "$log" 'ignored'
@@ -6425,6 +6528,10 @@ test_case "taw: branch mode checks out unassigned normal branch" \
   test_branch_mode_checks_out_unassigned_normal_branch
 test_case "taw: branch mode creates unassigned bare worktree" \
   test_branch_mode_creates_unassigned_bare_worktree
+test_case "taw: picker selects fzf bindings by version" \
+  test_picker_selects_fzf_bindings_by_version
+test_case "taw: legacy picker reports producer failure before fzf" \
+  test_legacy_picker_reports_producer_failure_before_fzf
 test_case "taw: picker acceptance keys select layouts" \
   test_picker_accept_keys_select_layouts
 test_case "taw: picker layout keys apply to worktree and branch modes" \
