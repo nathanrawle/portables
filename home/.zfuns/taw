@@ -2993,21 +2993,7 @@ fi
 
 _taw_classify_operands || return 1
 
-if [[ "$_taw_project_kind" == normal \
-  && "$_taw_explicit_picker_requested" == true \
-  && "$_taw_picker_mode" == branch ]]; then
-  local _taw_existing_worktree
-
-  _taw_existing_worktree="$(_taw_existing_worktree_for_branch "$_taw_picker_branch")" \
-    || _taw_existing_worktree=
-  if [[ -n "$_taw_existing_worktree" ]]; then
-    _taw_window_dir="${_taw_existing_worktree:A}"
-  else
-    _taw_window_dir="$_taw_project_dir"
-    _taw_checkout_existing_worktree_branch \
-      "$_taw_project_dir" "$_taw_picker_branch" "$_taw_picker_ref" false || return 1
-  fi
-elif [[ "$_taw_project_kind" != plain && -n "$_taw_worktree_arg" ]]; then
+if [[ "$_taw_project_kind" != plain && -n "$_taw_worktree_arg" ]]; then
   local _taw_worktree_target _taw_worktree_branch
 
   _taw_worktree_target="$(_taw_resolve_bare_worktree_arg "$_taw_worktree_arg")" || return 1

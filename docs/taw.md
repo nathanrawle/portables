@@ -85,8 +85,8 @@ Worktree rows include every non-bare entry from `git worktree list`, including
 detached worktrees. Selecting one opens its registered path without changing
 Git state. Branch rows include local and deduplicated remote branches, even
 when a branch already has a worktree. Selecting an assigned branch opens that
-worktree directly. Otherwise, normal repositories use their existing checkout
-behavior and bare repositories create or open the branch's canonical worktree.
+worktree directly. Selecting an unassigned branch creates its canonical
+`.worktrees/<branch>` worktree without changing the primary checkout.
 
 Explicit picker invocations:
 

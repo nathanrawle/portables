@@ -4112,35 +4112,66 @@ test_worktree_picker_preserves_spaces_and_unicode_in_paths() {
 }
 
 test_branch_mode_opens_existing_worktree_without_checkout() {
-  local repo linked linked_real fake_bin no_fzf_path log fzf_log
+  local repo repo_real linked linked_real fake_bin no_fzf_path log fzf_log sessions
 
   repo="$TEST_TMPDIR/repo"
   linked="$TEST_TMPDIR/develop-worktree"
   make_git_repo "$repo"
   git -C "$repo" worktree add "$linked" develop >/dev/null 2>&1
+  repo_real="$(cd "$repo" && pwd -P)"
   linked_real="$(cd "$linked" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
   fzf_log="$TEST_TMPDIR/fzf.log"
+  sessions=$'repo\t'"$repo_real"$'\n'
 
   EDITOR=vim TAW_FAKE_FZF_MATCH=develop TAW_FZF_INPUT_LOG="$fzf_log" \
-    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$repo" --mode=b
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" --mode=b
 
   assert_file_contains "$fzf_log" $'develop\tbranch\tdevelop\tdevelop\t'
+  assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}'
   assert_file_contains "$log" $'-c\t'"$linked_real"$'\tvim'
+  assert_file_not_contains "$log" $'new-session\t'
   assert_eq main "$(git -C "$repo" branch --show-current)" \
     "expected assigned branch selection not to switch the primary worktree"
 }
 
-test_branch_mode_checks_out_unassigned_normal_branch() {
-  local repo repo_real fake_bin no_fzf_path log
+test_branch_mode_reuses_window_for_assigned_worktree() {
+  local repo repo_real linked linked_real fake_bin no_fzf_path log sessions panes
 
   repo="$TEST_TMPDIR/repo"
+  linked="$TEST_TMPDIR/develop-worktree"
   make_git_repo "$repo"
+  git -C "$repo" worktree add "$linked" develop >/dev/null 2>&1
   repo_real="$(cd "$repo" && pwd -P)"
+  linked_real="$(cd "$linked" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  sessions=$'repo\t'"$repo_real"$'\n'
+  panes=$'@8\t%8\t'"$linked_real"$'\n'
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=develop TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+
+  assert_file_contains "$log" $'select-window\t-t\t@8'
+  assert_file_not_contains "$log" $'select-pane\t'
+  assert_file_not_contains "$log" $'new-window\t'
+  assert_file_not_contains "$log" $'new-session\t'
+}
+
+test_branch_mode_creates_unassigned_normal_worktree() {
+  local repo worktree worktree_real fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  worktree="$repo/.worktrees/develop"
+  make_git_repo "$repo"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
@@ -4150,9 +4181,69 @@ test_branch_mode_checks_out_unassigned_normal_branch() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" --mode=branch
 
-  assert_eq develop "$(git -C "$repo" branch --show-current)" \
-    "expected branch mode to preserve normal checkout behavior"
-  assert_file_contains "$log" $'-c\t'"$repo_real"$'\tvim'
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq develop "$(git -C "$worktree" branch --show-current)" \
+    "expected branch mode to create a managed worktree"
+  assert_eq main "$(git -C "$repo" branch --show-current)" \
+    "expected branch mode not to switch the primary worktree"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_branch_mode_creates_worktree_with_dirty_primary_checkout() {
+  local repo worktree fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  worktree="$repo/.worktrees/develop"
+  make_git_repo "$repo"
+  git -C "$repo" checkout -q develop
+  printf 'develop branch\n' >"$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm "change shared file"
+  git -C "$repo" checkout -q main
+  printf 'dirty primary\n' >"$repo/README.md"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=develop \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+
+  assert_eq main "$(git -C "$repo" branch --show-current)" \
+    "expected the dirty primary worktree to remain on its branch"
+  assert_eq "dirty primary" "$(cat "$repo/README.md")" \
+    "expected the dirty primary worktree to remain unchanged"
+  assert_eq develop "$(git -C "$worktree" branch --show-current)" \
+    "expected the selected branch to open in a managed worktree"
+  assert_eq "develop branch" "$(cat "$worktree/README.md")" \
+    "expected the managed worktree to use the selected branch"
+}
+
+test_branch_mode_creates_tracking_worktree_for_remote_branch() {
+  local repo worktree fake_bin no_fzf_path log upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  worktree="$repo/.worktrees/feature/remote"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/remote refs/heads/develop
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=$'feature/remote\tbranch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+
+  upstream_ref="$(git -C "$worktree" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq feature/remote "$(git -C "$worktree" branch --show-current)" \
+    "expected a local branch in the managed worktree"
+  assert_eq origin/feature/remote "$upstream_ref" \
+    "expected the managed worktree branch to track its selected remote"
+  assert_eq main "$(git -C "$repo" branch --show-current)" \
+    "expected the primary worktree branch to remain unchanged"
 }
 
 test_branch_mode_creates_unassigned_bare_worktree() {
@@ -6636,8 +6727,14 @@ test_case "taw: worktree picker preserves spaces and Unicode in paths" \
   test_worktree_picker_preserves_spaces_and_unicode_in_paths
 test_case "taw: branch mode opens existing worktree without checkout" \
   test_branch_mode_opens_existing_worktree_without_checkout
-test_case "taw: branch mode checks out unassigned normal branch" \
-  test_branch_mode_checks_out_unassigned_normal_branch
+test_case "taw: branch mode reuses window for assigned worktree" \
+  test_branch_mode_reuses_window_for_assigned_worktree
+test_case "taw: branch mode creates unassigned normal worktree" \
+  test_branch_mode_creates_unassigned_normal_worktree
+test_case "taw: branch mode tolerates dirty primary checkout" \
+  test_branch_mode_creates_worktree_with_dirty_primary_checkout
+test_case "taw: branch mode creates tracking remote worktree" \
+  test_branch_mode_creates_tracking_worktree_for_remote_branch
 test_case "taw: branch mode creates unassigned bare worktree" \
   test_branch_mode_creates_unassigned_bare_worktree
 test_case "taw: picker selects fzf bindings by version" \
