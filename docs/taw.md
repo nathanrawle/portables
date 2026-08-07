@@ -73,19 +73,22 @@ Explicit picker modes:
 - the fzf query is preserved while cycling
 
 The session picker keeps the existing tmux-sessionizer scope: it lists tmux
-sessions and projects found under the configured search paths. Branch mode uses
-the Git project containing the directory where `taw` was invoked. Outside a Git
-project, it shows `Not in a Git project` instead of exiting. A mode with no
-discovered targets shows `Picker has no targets`.
+sessions and projects found under the configured search paths. Visible project
+paths use zsh named-directory abbreviations such as `~`, `~code`, and
+`~portables/subdirectory`; target resolution still uses their absolute paths.
+Branch mode uses the Git project containing the directory where `taw` was
+invoked. Outside a Git project, it shows `Not in a Git project` instead of
+exiting. A mode with no discovered targets shows `Picker has no targets`.
 These informational rows cannot be selected, and Tab can still cycle to the
 other modes.
 
 Branch rows include local and deduplicated remote branches, except for the
-branch checked out in the invoking worktree. A cyan `+` marks a branch assigned
-to another worktree; unmarked branches are unassigned. Selecting an assigned
-branch opens its registered worktree directly. Selecting an unassigned branch
-creates its canonical `.worktrees/<branch>` worktree without changing the
-primary checkout. Detached worktrees are not listed separately.
+branch checked out in the invoking worktree. A cyan row beginning with `+`
+marks a branch assigned to another worktree; unmarked branches are unassigned.
+Selecting an assigned branch opens its registered worktree directly. Selecting
+an unassigned branch creates its canonical `.worktrees/<branch>` worktree
+without changing the primary checkout. Detached worktrees are not listed
+separately.
 
 Explicit picker invocations:
 

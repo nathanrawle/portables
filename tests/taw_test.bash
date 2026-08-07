@@ -1969,7 +1969,7 @@ test_bare_default_worktree_window_is_reused() {
     run_taw "$TEST_TMPDIR" -p "$project"
 
   display="$(grep -F $'\tbranch\tmain\tmain\t' "$fzf_log" | cut -f1)"
-  assert_eq $'\e[36m+\e[0m main' "$display" \
+  assert_eq $'\e[36m+ main\e[0m' "$display" \
     "expected fzf to mark a branch assigned to a worktree"
   branch="$(git -C "$project/.worktrees/main" branch --show-current)"
   assert_eq "main" "$branch" "expected bare project default branch worktree"
@@ -3027,6 +3027,70 @@ EOF
   assert_not_exists "$find_log"
 }
 
+test_session_picker_abbreviates_named_directory_paths() {
+  local xdg homes test_home external_root target target_real elsewhere fake_bin
+  local log fzf_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  homes="$TEST_TMPDIR/homes"
+  test_home="$homes/nathan"
+  external_root="$TEST_TMPDIR/external"
+  target="$test_home/code/portables"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$target/nested" \
+    "$external_root/plain" "$elsewhere"
+  printf '%s\n' \
+    'hash -d code="$HOME/code"' \
+    'hash -d portables="$HOME/code/portables"' >"$test_home/.named-dirs.zsh"
+  {
+    printf 'TS_SEARCH_PATHS=("%s:4")\n' "$homes"
+    printf 'TS_EXTRA_SEARCH_PATHS=("%s:1")\n' "$external_root"
+  } >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  target_real="$(cd "$target" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+
+  HOME="$test_home" XDG_CONFIG_HOME="$xdg" EDITOR=vim \
+    TAW_FAKE_TMUX_SESSIONS= TAW_FAKE_FZF_MATCH=$'~portables\tpath' \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" run_taw "$elsewhere" --mode=session
+
+  assert_file_contains "$fzf_log" $'~\tpath\t'"$test_home"
+  assert_file_contains "$fzf_log" $'~code\tpath\t'"$test_home/code"
+  assert_file_contains "$fzf_log" $'~portables\tpath\t'"$target"
+  assert_file_contains "$fzf_log" $'~portables/nested\tpath\t'"$target/nested"
+  assert_file_contains "$fzf_log" "$external_root/plain"$'\tpath\t'"$external_root/plain"
+  assert_file_not_contains "$fzf_log" "$target"$'\tpath\t'
+  assert_file_contains "$log" $'-c\t'"$target_real"$'\tvim'
+}
+
+test_session_picker_works_without_named_directory_file() {
+  local xdg test_home search_root target elsewhere fake_bin log fzf_log
+
+  xdg="$TEST_TMPDIR/xdg"
+  test_home="$TEST_TMPDIR/home"
+  search_root="$TEST_TMPDIR/search"
+  target="$search_root/target"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$test_home" "$target" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s:1")\n' "$search_root" \
+    >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+
+  HOME="$test_home" XDG_CONFIG_HOME="$xdg" EDITOR=vim \
+    TAW_FAKE_TMUX_SESSIONS= TAW_FAKE_FZF_CANCEL=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" run_taw "$elsewhere" --mode=session
+
+  assert_file_contains "$fzf_log" "$target"$'\tpath\t'"$target"
+  assert_no_tmux_work_window "$log"
+}
+
 test_project_picker_skips_control_characters_in_discovered_paths() {
   local xdg projects_home unsafe_project safe_project safe_real elsewhere
   local fake_bin no_fzf_path log fzf_log
@@ -4057,7 +4121,7 @@ test_branch_picker_marks_assigned_and_omits_current_worktree() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" --mode=branch
 
-  assert_file_contains "$fzf_log" $'\e[36m+\e[0m develop\tbranch\tdevelop\tdevelop\t'"$linked_real"
+  assert_file_contains "$fzf_log" $'\e[36m+ develop\e[0m\tbranch\tdevelop\tdevelop\t'"$linked_real"
   assert_file_not_contains "$fzf_log" $'\tbranch\tmain\t'
   assert_file_not_contains "$fzf_log" detached-worktree
   assert_file_contains "$args_log" '--ansi'
@@ -4072,7 +4136,7 @@ test_branch_picker_marks_assigned_and_omits_current_worktree() {
   EDITOR=vim TAW_FAKE_FZF_MATCH=main TAW_FZF_INPUT_LOG="$fzf_log" \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$linked" --mode=branch
-  assert_file_contains "$fzf_log" $'\e[36m+\e[0m main\tbranch\tmain\tmain\t'"$repo_real"
+  assert_file_contains "$fzf_log" $'\e[36m+ main\e[0m\tbranch\tmain\tmain\t'"$repo_real"
   assert_file_not_contains "$fzf_log" $'\tbranch\tdevelop\t'
   assert_file_contains "$log" $'-c\t'"$repo_real"$'\tvim'
 }
@@ -4139,7 +4203,8 @@ test_branch_mode_opens_existing_worktree_without_checkout() {
     TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" --mode=b
 
-  assert_file_contains "$fzf_log" $'develop\tbranch\tdevelop\tdevelop\t'
+  assert_file_contains "$fzf_log" \
+    $'\e[36m+ develop\e[0m\tbranch\tdevelop\tdevelop\t'"$linked_real"
   assert_file_contains "$log" $'new-window\t-d\t-P\t-F\t#{window_id} #{pane_id}'
   assert_file_contains "$log" $'-c\t'"$linked_real"$'\tvim'
   assert_file_not_contains "$log" $'new-session\t'
@@ -6658,6 +6723,10 @@ test_case "taw: empty project prompt mentions fzf" \
   test_empty_project_prompt_mentions_fzf
 test_case "taw: project picker uses Zsh directory traversal" \
   test_project_picker_uses_zsh_directory_traversal
+test_case "taw: session picker abbreviates named directory paths" \
+  test_session_picker_abbreviates_named_directory_paths
+test_case "taw: session picker works without named directory file" \
+  test_session_picker_works_without_named_directory_file
 test_case "taw: project picker skips control characters in paths" \
   test_project_picker_skips_control_characters_in_discovered_paths
 test_case "taw: project picker rejects control characters in tmux sessions" \

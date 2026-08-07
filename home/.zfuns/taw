@@ -557,7 +557,7 @@ _taw_resolve_project_from_tmux() {
 }
 
 _taw_tmux_sessionizer_project_rows() {
-  local _taw_root="$1" _taw_depth="$2" _taw_found_path
+  local _taw_root="$1" _taw_depth="$2" _taw_found_path _taw_display_path
   local -a _taw_directories
 
   (( _taw_depth > 0 )) || return 0
@@ -565,7 +565,8 @@ _taw_tmux_sessionizer_project_rows() {
   for _taw_found_path in "${_taw_directories[@]}"; do
     [[ "${_taw_found_path:t}" == .git ]] && continue
     _taw_picker_safe "$_taw_found_path" || continue
-    _taw_emit_picker_row "$_taw_found_path"$'\t'"path"$'\t'"$_taw_found_path" || return 1
+    _taw_display_path="${(D)_taw_found_path}"
+    _taw_emit_picker_row "$_taw_display_path"$'\t'"path"$'\t'"$_taw_found_path" || return 1
     _taw_tmux_sessionizer_project_rows \
       "$_taw_found_path" "$((_taw_depth - 1))" || return 1
   done
@@ -583,6 +584,10 @@ _taw_tmux_sessionizer_picker_rows() {
   local _taw_entry _taw_path _taw_depth
   local _taw_marker=__taw_picker_end__ _taw_session_format
   local _taw_tab=$'\t'
+
+  if [[ -r "$HOME/.named-dirs.zsh" ]]; then
+    source "$HOME/.named-dirs.zsh"
+  fi
 
   if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
@@ -1435,7 +1440,7 @@ _taw_picker_branch_rows() {
       || "${_taw_worktree_path:A}" != "$_taw_current_worktree" ]] || continue
     _taw_picker_safe "$_taw_worktree_path" || continue
     if [[ -n "$_taw_worktree_path" ]]; then
-      _taw_display=$'\e[36m+\e[0m '"$_taw_branch"
+      _taw_display=$'\e[36m+ '"$_taw_branch"$'\e[0m'
     else
       _taw_display="  $_taw_branch"
     fi
