@@ -23,7 +23,7 @@ local _taw_picker_cache_dir
 
 _taw_shell_cmds=()
 _taw_positionals=()
-_taw_picker_modes=(session worktree branch)
+_taw_picker_modes=(session branch)
 _taw_picker_producer_pids=()
 _taw_project_arg=
 _taw_project_picker_requested=false
@@ -723,8 +723,7 @@ _taw_resolve_project_from_picker() {
 
 _taw_next_picker_mode() {
   case "$1" in
-    session) print -r -- worktree ;;
-    worktree) print -r -- branch ;;
+    session) print -r -- branch ;;
     branch) print -r -- session ;;
     *) return 1 ;;
   esac
@@ -752,9 +751,6 @@ _taw_explicit_picker_rows() {
   case "$_taw_mode" in
     session)
       _taw_tmux_sessionizer_picker_rows
-      ;;
-    worktree)
-      _taw_worktree_picker_rows
       ;;
     branch)
       _taw_picker_branch_rows
@@ -894,10 +890,6 @@ _taw_cleanup_picker_cache() {
     "$_taw_picker_cache_dir/session.errors" \
     "$_taw_picker_cache_dir/session.status" \
     "$_taw_picker_cache_dir/session.status.tmp" \
-    "$_taw_picker_cache_dir/worktree.rows" \
-    "$_taw_picker_cache_dir/worktree.errors" \
-    "$_taw_picker_cache_dir/worktree.status" \
-    "$_taw_picker_cache_dir/worktree.status.tmp" \
     "$_taw_picker_cache_dir/branch.rows" \
     "$_taw_picker_cache_dir/branch.errors" \
     "$_taw_picker_cache_dir/branch.status" \
@@ -941,6 +933,7 @@ _taw_resolve_explicit_picker() {
         --print-query
         "--query=$_taw_query"
       )
+      [[ "$_taw_picker_mode" != branch ]] || _taw_fzf_args+=(--ansi)
       if [[ "$_taw_modern_fzf" == true ]]; then
         _taw_fzf_args+=(
           '--bind=tab:print(tab)+accept'
@@ -1041,16 +1034,8 @@ _taw_resolve_explicit_picker() {
       _taw_picker_branch="${_taw_fields[3]}"
       _taw_picker_ref="${_taw_fields[4]}"
       _taw_picker_path="${_taw_fields[5]}"
-      case "$_taw_picker_mode" in
-        worktree)
-          [[ "$_taw_picker_kind" == worktree && -n "$_taw_picker_path" ]] || return 1
-          _taw_selected_worktree_dir="${_taw_picker_path:A}"
-          ;;
-        branch)
-          [[ "$_taw_picker_kind" == branch && -n "$_taw_picker_branch" \
-            && -n "$_taw_picker_ref" ]] || return 1
-          ;;
-      esac
+      [[ "$_taw_picker_kind" == branch && -n "$_taw_picker_branch" \
+        && -n "$_taw_picker_ref" ]] || return 1
       return 0
     done
   } always {
@@ -1424,19 +1409,37 @@ _taw_resolve_branch_target() {
 }
 
 _taw_picker_branch_rows() {
-  local _taw_local_refs _taw_remote_refs _taw_ref _taw_branch
+  local _taw_local_refs _taw_remote_refs _taw_ref _taw_branch _taw_worktree_path
+  local _taw_current_worktree _taw_display
   local _taw_remote_name _taw_remote_branch _taw_remote_path _taw_row_remote
   local _taw_remote_candidate _taw_remote_prefix
   local -a _taw_remote_names
   local -A _taw_seen_by_branch _taw_remote_by_ref _taw_branch_by_ref
 
-  _taw_local_refs="$(_taw_git for-each-ref --sort=refname --format='%(refname)' refs/heads 2>/dev/null)" \
+  if [[ -n "$_taw_selected_worktree_dir" ]]; then
+    _taw_current_worktree="${_taw_selected_worktree_dir:A}"
+  elif [[ "$_taw_project_kind" == normal ]]; then
+    _taw_current_worktree="${_taw_project_dir:A}"
+  fi
+
+  _taw_local_refs="$(_taw_git for-each-ref --sort=refname \
+    --format='%(refname)%09%(worktreepath)' refs/heads 2>/dev/null)" \
     || return 1
   for _taw_ref in "${(@f)_taw_local_refs}"; do
+    _taw_worktree_path="${_taw_ref#*$'\t'}"
+    _taw_ref="${_taw_ref%%$'\t'*}"
     _taw_branch="${_taw_ref#refs/heads/}"
     [[ -n "$_taw_branch" && -z "${_taw_seen_by_branch[$_taw_branch]-}" ]] || continue
     _taw_seen_by_branch[$_taw_branch]=local
-    _taw_emit_picker_row "$_taw_branch"$'\t'"branch"$'\t'"$_taw_branch"$'\t'"$_taw_branch"$'\t' || return 1
+    [[ -z "$_taw_worktree_path" || -z "$_taw_current_worktree" \
+      || "${_taw_worktree_path:A}" != "$_taw_current_worktree" ]] || continue
+    _taw_picker_safe "$_taw_worktree_path" || continue
+    if [[ -n "$_taw_worktree_path" ]]; then
+      _taw_display=$'\e[36m+\e[0m '"$_taw_branch"
+    else
+      _taw_display="  $_taw_branch"
+    fi
+    _taw_emit_picker_row "$_taw_display"$'\t'"branch"$'\t'"$_taw_branch"$'\t'"$_taw_branch"$'\t'"$_taw_worktree_path" || return 1
   done
 
   _taw_remote_refs="$(_taw_git for-each-ref --sort=refname --format='%(refname)' refs/remotes 2>/dev/null)" \
@@ -1468,7 +1471,7 @@ _taw_picker_branch_rows() {
       _taw_remote_branch="${_taw_branch_by_ref[$_taw_ref]-}"
       [[ "$_taw_row_remote" == "$_taw_remote_name" && -n "$_taw_remote_branch" && -z "${_taw_seen_by_branch[$_taw_remote_branch]-}" ]] || continue
       _taw_seen_by_branch[$_taw_remote_branch]=remote
-      _taw_emit_picker_row "$_taw_remote_branch"$'\t'"branch"$'\t'"$_taw_remote_branch"$'\t'"$_taw_remote_name/$_taw_remote_branch"$'\t' || return 1
+      _taw_emit_picker_row "  $_taw_remote_branch"$'\t'"branch"$'\t'"$_taw_remote_branch"$'\t'"$_taw_remote_name/$_taw_remote_branch"$'\t' || return 1
     done
   done
 }
@@ -2144,83 +2147,14 @@ _taw_convert_project() {
   done
 }
 
-_taw_worktree_picker_rows() {
-  local _taw_line _taw_path _taw_branch_ref _taw_branch
-  local _taw_is_bare_entry _taw_is_detached_entry
-  local -a _taw_worktree_fields
-
-  _taw_worktree_fields=( "${(@0)$(_taw_git worktree list --porcelain -z 2>/dev/null)}" ) \
-    || return 1
-  for _taw_line in "${_taw_worktree_fields[@]}"; do
-    case "$_taw_line" in
-      worktree\ *)
-        _taw_path="${_taw_line#worktree }"
-        _taw_branch_ref=
-        _taw_is_bare_entry=false
-        _taw_is_detached_entry=false
-        _taw_picker_safe "$_taw_path" || _taw_path=
-        ;;
-      branch\ *)
-        _taw_branch_ref="${_taw_line#branch }"
-        ;;
-      bare)
-        _taw_is_bare_entry=true
-        ;;
-      detached)
-        _taw_is_detached_entry=true
-        ;;
-      "")
-        if [[ -n "$_taw_path" && "$_taw_is_bare_entry" != true ]]; then
-          if [[ "$_taw_branch_ref" == refs/heads/* ]]; then
-            _taw_branch="${_taw_branch_ref#refs/heads/}"
-            _taw_emit_picker_row "${_taw_branch} [worktree]"$'\t'"worktree"$'\t'"$_taw_branch"$'\t'"$_taw_branch"$'\t'"$_taw_path" || return 1
-          elif [[ "$_taw_is_detached_entry" == true ]]; then
-            _taw_emit_picker_row "${_taw_path:t} [detached]"$'\t'"worktree"$'\t\t\t'"$_taw_path" || return 1
-          fi
-        fi
-        _taw_path=
-        ;;
-    esac
-  done
-
-}
-
-_taw_bare_picker_rows() {
-  local _taw_worktree_rows _taw_branch_rows _taw_branch
-  local _taw_rows="" _taw_row
-  local -a _taw_fields
-  local -A _taw_seen_by_branch
-
-  _taw_worktree_rows="$(_taw_worktree_picker_rows)" || return 1
-  _taw_rows="$_taw_worktree_rows"
-  [[ -z "$_taw_rows" ]] || _taw_rows+=$'\n'
-  for _taw_row in "${(@f)_taw_worktree_rows}"; do
-    [[ -n "$_taw_row" ]] || continue
-    _taw_fields=( "${(@ps:\t:)_taw_row}" )
-    _taw_branch="${_taw_fields[3]}"
-    [[ -n "$_taw_branch" ]] && _taw_seen_by_branch[$_taw_branch]=1
-  done
-
-  _taw_branch_rows="$(_taw_picker_branch_rows)" || return 1
-  for _taw_row in "${(@f)_taw_branch_rows}"; do
-    [[ -n "$_taw_row" ]] || continue
-    _taw_fields=( "${(@ps:\t:)_taw_row}" )
-    _taw_branch="${_taw_fields[3]}"
-    [[ -n "$_taw_branch" && -z "${_taw_seen_by_branch[$_taw_branch]-}" ]] || continue
-    _taw_rows+="$_taw_row"$'\n'
-  done
-
-  print -r -- "$_taw_rows"
-}
-
-_taw_select_bare_target_with_fzf() {
+_taw_select_branch_target_with_fzf() {
   local _taw_rows _taw_choice _taw_status
   local -a _taw_fields
 
   command -v fzf >/dev/null 2>&1 || return 2
-  _taw_rows="$(_taw_bare_picker_rows)" || return 1
+  _taw_rows="$(_taw_picker_branch_rows)" || return 1
   [[ -n "$_taw_rows" ]] || return 2
-  _taw_choice="$(print -r -- "$_taw_rows" | fzf --delimiter=$'\t' --with-nth=1 --prompt='taw> ')" || _taw_status=$?
+  _taw_choice="$(print -r -- "$_taw_rows" | fzf --ansi --delimiter=$'\t' --with-nth=1 --prompt='branch> ')" || _taw_status=$?
   _taw_status=${_taw_status:-0}
   case "$_taw_status" in
     0) ;;
@@ -2800,7 +2734,6 @@ _taw_request_picker_mode() {
   }
   case "$_taw_requested_mode" in
     ts|session) _taw_picker_mode=session ;;
-    wt|worktree) _taw_picker_mode=worktree ;;
     b|branch) _taw_picker_mode=branch ;;
     *)
       _taw_die "unknown picker mode: $1"
@@ -3024,22 +2957,13 @@ if [[ "$_taw_project_kind" != plain && -n "$_taw_worktree_arg" ]]; then
     _taw_prepare_orphan_worktree "$_taw_window_dir" "$_taw_worktree_branch" || return 1
   fi
 elif [[ "$_taw_project_kind" == normal || "$_taw_is_bare" == true ]]; then
-  local _taw_branch_worktree _taw_branch_ref _taw_existing_worktree _taw_skip_prepare_worktree
+  local _taw_branch_worktree _taw_branch_ref _taw_skip_prepare_worktree
   local _taw_nonbare_worktree_count
 
   _taw_skip_prepare_worktree=false
-  if [[ "$_taw_explicit_picker_requested" == true && "$_taw_picker_mode" == worktree ]]; then
-    [[ -n "$_taw_selected_worktree_dir" ]] || {
-      _taw_die "selected worktree is missing a path"
-      return 1
-    }
-    _taw_window_dir="$_taw_selected_worktree_dir"
-    _taw_skip_prepare_worktree=true
-  elif [[ "$_taw_explicit_picker_requested" == true && "$_taw_picker_mode" == branch ]]; then
-    _taw_existing_worktree="$(_taw_existing_worktree_for_branch "$_taw_picker_branch")" \
-      || _taw_existing_worktree=
-    if [[ -n "$_taw_existing_worktree" ]]; then
-      _taw_window_dir="${_taw_existing_worktree:A}"
+  if [[ "$_taw_explicit_picker_requested" == true && "$_taw_picker_mode" == branch ]]; then
+    if [[ -n "$_taw_picker_path" ]]; then
+      _taw_window_dir="${_taw_picker_path:A}"
       _taw_skip_prepare_worktree=true
     else
       _taw_branch_worktree="$_taw_picker_branch"
@@ -3061,31 +2985,21 @@ elif [[ "$_taw_project_kind" == normal || "$_taw_is_bare" == true ]]; then
     if [[ "$_taw_project_picker_requested" != true ]] \
       && (( _taw_nonbare_worktree_count > 0 )) \
       && command -v fzf >/dev/null 2>&1; then
-      _taw_select_bare_target_with_fzf
+      _taw_select_branch_target_with_fzf
       case $? in
         0)
-          case "$_taw_picker_kind" in
-            worktree)
-              [[ -n "$_taw_picker_path" ]] || {
-                _taw_die "selected worktree is missing a path"
-                return 1
-              }
-              _taw_window_dir="${_taw_picker_path:A}"
-              _taw_skip_prepare_worktree=true
-              ;;
-            branch)
-              [[ -n "$_taw_picker_branch" && -n "$_taw_picker_ref" ]] || {
-                _taw_die "selected branch is incomplete"
-                return 1
-              }
-              _taw_branch_worktree="$_taw_picker_branch"
-              _taw_branch_ref="$_taw_picker_ref"
-              ;;
-            *)
-              _taw_die "unknown picker selection: $_taw_picker_kind"
-              return 1
-              ;;
-          esac
+          [[ "$_taw_picker_kind" == branch && -n "$_taw_picker_branch" \
+            && -n "$_taw_picker_ref" ]] || {
+            _taw_die "selected branch is incomplete"
+            return 1
+          }
+          if [[ -n "$_taw_picker_path" ]]; then
+            _taw_window_dir="${_taw_picker_path:A}"
+            _taw_skip_prepare_worktree=true
+          else
+            _taw_branch_worktree="$_taw_picker_branch"
+            _taw_branch_ref="$_taw_picker_ref"
+          fi
           ;;
         2)
           if [[ "$_taw_project_kind" == normal ]]; then
@@ -3104,7 +3018,7 @@ elif [[ "$_taw_project_kind" == normal || "$_taw_is_bare" == true ]]; then
           return 0
           ;;
         *)
-          _taw_die "worktree selection failed"
+          _taw_die "branch selection failed"
           return 1
           ;;
       esac

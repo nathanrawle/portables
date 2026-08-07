@@ -20,7 +20,7 @@ Relevant options:
 - `--peer`
 - `--force` (peer only)
 - `--convert`
-- `--mode=<ts|session|wt|worktree|b|branch>`
+- `--mode=<ts|session|b|branch>`
 - project picker aliases: `-ts`, `--ts`, `-picker`, `--picker`, `-pick-project`, `--pick-project`
 
 ## Project Kinds
@@ -66,27 +66,26 @@ If no project is supplied and `taw` is not already inside a project:
 Explicit picker modes:
 
 - `--mode=ts` and `--mode=session` open the session picker
-- `--mode=wt` and `--mode=worktree` open the worktree picker
 - `--mode=b` and `--mode=branch` open the branch picker
 - `--mode value` and `--mode=value` are equivalent
 - project picker aliases open the session picker
-- Tab cycles `session -> worktree -> branch -> session` from every explicit mode
+- Tab cycles `session -> branch -> session` from every explicit mode
 - the fzf query is preserved while cycling
 
 The session picker keeps the existing tmux-sessionizer scope: it lists tmux
-sessions and projects found under the configured search paths. Worktree and
-branch modes use the Git project containing the directory where `taw` was
-invoked. Outside a Git project, those modes show `Not in a Git project` instead
-of exiting. A mode with no discovered targets shows `Picker has no targets`.
+sessions and projects found under the configured search paths. Branch mode uses
+the Git project containing the directory where `taw` was invoked. Outside a Git
+project, it shows `Not in a Git project` instead of exiting. A mode with no
+discovered targets shows `Picker has no targets`.
 These informational rows cannot be selected, and Tab can still cycle to the
 other modes.
 
-Worktree rows include every non-bare entry from `git worktree list`, including
-detached worktrees. Selecting one opens its registered path without changing
-Git state. Branch rows include local and deduplicated remote branches, even
-when a branch already has a worktree. Selecting an assigned branch opens that
-worktree directly. Selecting an unassigned branch creates its canonical
-`.worktrees/<branch>` worktree without changing the primary checkout.
+Branch rows include local and deduplicated remote branches, except for the
+branch checked out in the invoking worktree. A cyan `+` marks a branch assigned
+to another worktree; unmarked branches are unassigned. Selecting an assigned
+branch opens its registered worktree directly. Selecting an unassigned branch
+creates its canonical `.worktrees/<branch>` worktree without changing the
+primary checkout. Detached worktrees are not listed separately.
 
 Explicit picker invocations:
 
@@ -135,7 +134,7 @@ Informational rows do not exit the picker.
 
 | Inputs | Result |
 | --- | --- |
-| zero operands, no `-b` | worktree/branch picker; if `fzf` is missing or returns no rows, open the primary worktree unchanged |
+| zero operands, no `-b` | branch picker; if `fzf` is missing or returns no rows, open the primary worktree unchanged |
 | zero operands, `-b` | create or open `.worktrees/<branch>` |
 | one positional, no `-b` | create or open `.worktrees/<path>` with the same branch name |
 | two positionals, no `-b` | create or open `.worktrees/<path>` using the second positional as its base ref |
@@ -145,7 +144,7 @@ Informational rows do not exit the picker.
 
 | Inputs | Result |
 | --- | --- |
-| zero operands, no `-b` | if there are no non-bare worktrees, open the default worktree; otherwise use the picker when available, falling back to the default worktree when it is not |
+| zero operands, no `-b` | if there are no non-bare worktrees, open the default worktree; otherwise use the branch picker when available, falling back to the default worktree when it is not |
 | zero operands, `-b` | create or open a branch worktree under `.worktrees` |
 | one positional, no `-b` | treat it as a path under `.worktrees`; the branch name is the same relative path |
 | two positionals, no `-b` | treat them as managed worktree path plus base ref |
@@ -317,6 +316,5 @@ taw --convert ~/src/legacy-bare
 taw --peer sheffield-live hallamshire-hotel-all-day
 taw --peer --force -p ~/src/repo -agent "claude --resume"
 taw --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
-taw --mode=wt
 taw --mode=branch
 ```
