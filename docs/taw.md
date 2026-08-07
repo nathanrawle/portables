@@ -76,8 +76,10 @@ Explicit picker modes:
 The session picker keeps the existing tmux-sessionizer scope: it lists tmux
 sessions and projects found under the configured search paths. Worktree and
 branch modes use the Git project containing the directory where `taw` was
-invoked. They fail without opening a tmux window when there is no current Git
-project.
+invoked. Outside a Git project, those modes show `Not in a Git project` instead
+of exiting. A mode with no discovered targets shows `Picker has no targets`.
+These informational rows cannot be selected, and Tab can still cycle to the
+other modes.
 
 Worktree rows include every non-bare entry from `git worktree list`, including
 detached worktrees. Selecting one opens its registered path without changing
@@ -91,23 +93,41 @@ Explicit picker invocations:
 - reject `-p`, `-b`, and positionals
 - allow `-agent`, `-ed`, and `-sh`
 - session mode bypasses current-project target selection
-- ignore `TAW_AGENT`
-- create an agent only when `-agent` is given explicitly
+
+Acceptance keys choose the layout for a newly created target:
+
+| Key | Layout |
+| --- | --- |
+| Enter | default layout; editor only when no explicit layout options were supplied |
+| Ctrl-S | shell only |
+| Ctrl-A | agent only |
+| Opt-Z | editor and shell |
+| Opt-A | editor and agent |
+| Opt-Enter | editor, agent, and shell |
+
+An explicit `-agent` supplies the agent command. Otherwise, an agent-containing
+acceptance layout uses trimmed `TAW_AGENT` when set and falls back to `codex`.
+Plain Enter does not enable an agent from `TAW_AGENT`. Acceptance modifiers are
+ignored for a selected `[TMUX]` session or an exact matching worktree window.
 
 Session picker result handling:
 
 - `[TMUX]` rows switch or attach directly by tmux session identity, preserving the session's active window
 - with `--peer`, a `[TMUX]` row links that active window into the invoking session and selects it there
-- layout options apply to project rows; `[TMUX]` rows do not create layouts
+- layout options and acceptance modifiers apply to project rows; `[TMUX]` rows do not create layouts
 - `normal` and `plain` projects open directly
 - `bare` projects open their default worktree directly
 
-Picker return behavior:
+Each mode is generated once into a per-invocation snapshot and reused while
+cycling. With fzf 0.53 or newer, the active snapshot streams into fzf and
+informational rows remain in place when an acceptance key is pressed. Older or
+unrecognized fzf versions wait for the active snapshot, use compatible
+`--expect` bindings, and may briefly redraw an informational row. Inactive modes
+are still prefetched.
 
-- `0`: selection resolved
-- `130`: user cancelled
-- `2`: picker unavailable or had no rows
-- any other nonzero status: failure
+Cancelling an explicit picker exits `taw` successfully without opening a tmux
+window. Failure to start fzf or generate a picker snapshot returns nonzero.
+Informational rows do not exit the picker.
 
 ## Invocation Matrix
 
@@ -244,7 +264,7 @@ location.
 - Non-empty trimmed `TAW_AGENT` replaces the default `codex` agent when no explicit `-agent` is supplied.
 - unset, empty, or whitespace-only values are ignored.
 - explicit `-agent` always wins over the environment.
-- picker mode ignores `TAW_AGENT`; only an explicit `-agent` changes the agent command there.
+- plain picker acceptance ignores `TAW_AGENT`; picker layouts containing an agent use it when `-agent` was not supplied.
 
 ## tmux Reuse And Layout
 
