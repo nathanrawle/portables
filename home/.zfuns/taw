@@ -3,7 +3,8 @@
 emulate -L zsh
 setopt pipefail
 
-local -a _taw_shell_cmds _taw_positionals
+local -a _taw_shell_cmds _taw_positionals _taw_picker_modes
+local -A _taw_picker_producer_pids
 local _taw_project_arg _taw_project_picker_requested _taw_explicit_picker_requested _taw_picker_mode
 local _taw_picker_context_resolved _taw_picker_layout _taw_agent_cmd _taw_editor_cmd _taw_named_branch
 local _taw_agent_arg_provided _taw_editor_arg_provided _taw_agent_enabled _taw_created_repo_branch_applied _taw_debug
@@ -18,9 +19,12 @@ local _taw_selected_tmux_session_name _taw_selected_tmux_session_target
 local _taw_default_branch_result _taw_default_base_ref
 local _taw_branch_target_name _taw_branch_target_ref
 local _taw_picker_kind _taw_picker_branch _taw_picker_ref _taw_picker_path
+local _taw_picker_cache_dir
 
 _taw_shell_cmds=()
 _taw_positionals=()
+_taw_picker_modes=(session worktree branch)
+_taw_picker_producer_pids=()
 _taw_project_arg=
 _taw_project_picker_requested=false
 _taw_explicit_picker_requested=false
@@ -42,6 +46,7 @@ _taw_peer=false
 _taw_force=false
 _taw_current_session_id=
 _taw_convert=false
+_taw_picker_cache_dir=
 
 _taw_die() {
   print -u2 -- "taw: $*"
@@ -735,10 +740,16 @@ _taw_ensure_picker_project_context() {
 }
 
 _taw_explicit_picker_rows() {
+  local _taw_mode="${1:-$_taw_picker_mode}"
   local _taw_status
   local -i _taw_picker_row_count=0
 
-  case "$_taw_picker_mode" in
+  if [[ "$_taw_mode" != session ]] && ! _taw_detect_current_project; then
+    _taw_emit_picker_row $'Not in a Git project\tmessage\t\t\t'
+    return
+  fi
+
+  case "$_taw_mode" in
     session)
       _taw_tmux_sessionizer_picker_rows
       ;;
@@ -754,11 +765,114 @@ _taw_explicit_picker_rows() {
   esac
   _taw_status=$?
   (( _taw_status == 0 )) || return "$_taw_status"
-  (( _taw_picker_row_count > 0 )) || return 3
+  (( _taw_picker_row_count > 0 )) \
+    || _taw_emit_picker_row $'Picker has no targets\tmessage\t\t\t'
+}
+
+_taw_start_picker_producer() {
+  local _taw_mode="$1"
+  local _taw_rows="$_taw_picker_cache_dir/$_taw_mode.rows"
+  local _taw_errors="$_taw_picker_cache_dir/$_taw_mode.errors"
+  local _taw_status="$_taw_picker_cache_dir/$_taw_mode.status"
+  local _taw_status_tmp="$_taw_status.tmp"
+
+  : >"$_taw_rows" || return 1
+  : >"$_taw_errors" || return 1
+  (
+    local _taw_producer_status
+
+    _taw_explicit_picker_rows "$_taw_mode" >"$_taw_rows" 2>"$_taw_errors"
+    _taw_producer_status=$?
+    print -r -- "$_taw_producer_status" >"$_taw_status_tmp" || return 1
+    command mv -f -- "$_taw_status_tmp" "$_taw_status"
+  ) &
+  _taw_picker_producer_pids[$_taw_mode]=$!
+}
+
+_taw_init_picker_cache() {
+  local _taw_mode
+
+  zmodload zsh/zselect || return 1
+  _taw_picker_cache_dir="$(mktemp -d "${TMPDIR:-/tmp}/taw-picker.XXXXXX")" || return 1
+  for _taw_mode in "${_taw_picker_modes[@]}"; do
+    _taw_start_picker_producer "$_taw_mode" || return 1
+  done
+}
+
+_taw_stream_picker_cache() {
+  local _taw_mode="$1" _taw_line
+  local _taw_rows="$_taw_picker_cache_dir/$_taw_mode.rows"
+  local _taw_status="$_taw_picker_cache_dir/$_taw_mode.status"
+  local -i _taw_fd
+
+  exec {_taw_fd}<"$_taw_rows" || return 1
+  while true; do
+    if IFS= read -r -u $_taw_fd _taw_line; then
+      print -r -- "$_taw_line" || {
+        exec {_taw_fd}<&-
+        return 141
+      }
+      continue
+    fi
+    if [[ -f "$_taw_status" ]]; then
+      if IFS= read -r -u $_taw_fd _taw_line; then
+        print -r -- "$_taw_line" || {
+          exec {_taw_fd}<&-
+          return 141
+        }
+        continue
+      fi
+      break
+    fi
+    zselect -t 1 >/dev/null 2>&1
+  done
+  exec {_taw_fd}<&-
+}
+
+_taw_picker_producer_status() {
+  local _taw_mode="$1" _taw_status_value
+  local _taw_status="$_taw_picker_cache_dir/$_taw_mode.status"
+
+  [[ -f "$_taw_status" ]] || return 2
+  IFS= read -r _taw_status_value <"$_taw_status" || return 1
+  [[ "$_taw_status_value" == <-> ]] || return 1
+  print -r -- "$_taw_status_value"
+}
+
+_taw_cleanup_picker_cache() {
+  local _taw_mode _taw_pid
+
+  [[ -n "$_taw_picker_cache_dir" ]] || return 0
+  for _taw_mode in "${_taw_picker_modes[@]}"; do
+    _taw_pid="${_taw_picker_producer_pids[$_taw_mode]-}"
+    [[ -n "$_taw_pid" ]] || continue
+    kill "$_taw_pid" 2>/dev/null || true
+  done
+  for _taw_mode in "${_taw_picker_modes[@]}"; do
+    _taw_pid="${_taw_picker_producer_pids[$_taw_mode]-}"
+    [[ -n "$_taw_pid" ]] || continue
+    wait "$_taw_pid" 2>/dev/null || true
+  done
+  command rm -f -- \
+    "$_taw_picker_cache_dir/session.rows" \
+    "$_taw_picker_cache_dir/session.errors" \
+    "$_taw_picker_cache_dir/session.status" \
+    "$_taw_picker_cache_dir/session.status.tmp" \
+    "$_taw_picker_cache_dir/worktree.rows" \
+    "$_taw_picker_cache_dir/worktree.errors" \
+    "$_taw_picker_cache_dir/worktree.status" \
+    "$_taw_picker_cache_dir/worktree.status.tmp" \
+    "$_taw_picker_cache_dir/branch.rows" \
+    "$_taw_picker_cache_dir/branch.errors" \
+    "$_taw_picker_cache_dir/branch.status" \
+    "$_taw_picker_cache_dir/branch.status.tmp"
+  command rmdir -- "$_taw_picker_cache_dir" 2>/dev/null || true
+  _taw_picker_cache_dir=
 }
 
 _taw_resolve_explicit_picker() {
   local _taw_output _taw_status _taw_producer_status _taw_query= _taw_key _taw_choice
+  local _taw_stream_status _taw_errors
   local _taw_status_line _taw_status_marker=$'\x1e__taw_picker_status__'
   local -a _taw_output_lines _taw_fields _taw_pipeline_status
 
@@ -767,91 +881,118 @@ _taw_resolve_explicit_picker() {
     return 1
   }
 
-  while true; do
-    if [[ "$_taw_picker_mode" != session ]]; then
+  _taw_init_picker_cache || {
+    _taw_cleanup_picker_cache
+    _taw_die "could not initialize picker cache"
+    return 1
+  }
+
+  {
+    while true; do
+      _taw_output="$(_taw_stream_picker_cache "$_taw_picker_mode" | fzf \
+        --delimiter=$'\t' --with-nth=1 --prompt="$_taw_picker_mode> " \
+        --header='Enter: default | C-S: shell | C-A: agent | Opt-Z: editor+shell | Opt-A: editor+agent | Opt-Enter: all | Tab: mode' \
+        --print-query --expect=tab --query="$_taw_query" \
+        --bind='enter:transform:[[ -n {2} && {2} != message ]] && printf "print()+accept"' \
+        --bind='ctrl-s:transform:[[ -n {2} && {2} != message ]] && printf "print(ctrl-s)+accept"' \
+        --bind='ctrl-a:transform:[[ -n {2} && {2} != message ]] && printf "print(ctrl-a)+accept"' \
+        --bind='alt-z:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-z)+accept"' \
+        --bind='alt-a:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-a)+accept"' \
+        --bind='alt-enter:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-enter)+accept"' \
+        --bind='load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'
+        _taw_pipeline_status=( "${pipestatus[@]}" )
+        print -r -- "$_taw_status_marker"$'\t'"${_taw_pipeline_status[1]}"$'\t'"${_taw_pipeline_status[2]}"
+      )"
+      _taw_status_line="${_taw_output##*$'\n'}"
+      _taw_fields=( "${(@ps:\t:)_taw_status_line}" )
+      (( ${#_taw_fields[@]} == 3 )) \
+        && [[ "${_taw_fields[1]}" == "$_taw_status_marker" \
+          && "${_taw_fields[2]}" == <-> && "${_taw_fields[3]}" == <-> ]] || return 1
+      _taw_stream_status="${_taw_fields[2]}"
+      _taw_status="${_taw_fields[3]}"
+      if [[ "$_taw_output" == "$_taw_status_line" ]]; then
+        _taw_output=
+      else
+        _taw_output="${_taw_output%$'\n'$_taw_status_line}"
+      fi
+
+      case "$_taw_stream_status" in
+        0|141) ;;
+        *) return 1 ;;
+      esac
+      _taw_producer_status="$(_taw_picker_producer_status "$_taw_picker_mode")"
+      case $? in
+        0)
+          if [[ "$_taw_producer_status" != 0 ]]; then
+            _taw_errors="$_taw_picker_cache_dir/$_taw_picker_mode.errors"
+            [[ ! -s "$_taw_errors" ]] || command cat -- "$_taw_errors" >&2
+            return 1
+          fi
+          ;;
+        2) ;;
+        *) return 1 ;;
+      esac
+      case "$_taw_status" in
+        0) ;;
+        130) return 130 ;;
+        *) return 1 ;;
+      esac
+
+      _taw_output_lines=( "${(@f)_taw_output}" )
+      (( ${#_taw_output_lines[@]} >= 2 )) || return 1
+      _taw_query="${_taw_output_lines[1]}"
+      _taw_key="${_taw_output_lines[2]}"
+      if [[ "$_taw_key" == tab ]]; then
+        _taw_picker_mode="$(_taw_next_picker_mode "$_taw_picker_mode")" || return 1
+        continue
+      fi
+
+      (( ${#_taw_output_lines[@]} >= 3 )) || return 1
+      _taw_choice="${_taw_output_lines[3]}"
+      [[ -n "$_taw_choice" ]] || return 1
+      _taw_fields=( "${(@ps:\t:)_taw_choice}" )
+      if (( ${#_taw_fields[@]} == 5 )) && [[ "${_taw_fields[2]}" == message ]]; then
+        _taw_picker_layout=
+        continue
+      fi
+
+      case "$_taw_key" in
+        "") _taw_picker_layout= ;;
+        ctrl-s) _taw_picker_layout=shell ;;
+        ctrl-a) _taw_picker_layout=agent ;;
+        alt-z) _taw_picker_layout=editor-shell ;;
+        alt-a) _taw_picker_layout=editor-agent ;;
+        alt-enter) _taw_picker_layout=editor-agent-shell ;;
+        *) return 1 ;;
+      esac
+      if [[ "$_taw_picker_mode" == session ]]; then
+        _taw_selected_worktree_dir=
+        _taw_resolve_project_picker_choice "${_taw_choice#*$'\t'}"
+        return $?
+      fi
+
+      (( ${#_taw_fields[@]} == 5 )) || return 1
       _taw_ensure_picker_project_context || return 1
-    fi
-    _taw_output="$(_taw_explicit_picker_rows | fzf \
-      --delimiter=$'\t' --with-nth=1 --prompt="$_taw_picker_mode> " \
-      --header='Enter: default | C-S: shell | C-A: agent | Opt-Z: editor+shell | Opt-A: editor+agent | Opt-Enter: all | Tab: mode' \
-      --print-query --expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter --query="$_taw_query" \
-      --bind='load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'
-      _taw_pipeline_status=( "${pipestatus[@]}" )
-      print -r -- "$_taw_status_marker"$'\t'"${_taw_pipeline_status[1]}"$'\t'"${_taw_pipeline_status[2]}"
-    )"
-    _taw_status_line="${_taw_output##*$'\n'}"
-    _taw_fields=( "${(@ps:\t:)_taw_status_line}" )
-    (( ${#_taw_fields[@]} == 3 )) \
-      && [[ "${_taw_fields[1]}" == "$_taw_status_marker" \
-        && "${_taw_fields[2]}" == <-> && "${_taw_fields[3]}" == <-> ]] || return 1
-    _taw_producer_status="${_taw_fields[2]}"
-    _taw_status="${_taw_fields[3]}"
-    if [[ "$_taw_output" == "$_taw_status_line" ]]; then
-      _taw_output=
-    else
-      _taw_output="${_taw_output%$'\n'$_taw_status_line}"
-    fi
-
-    case "$_taw_producer_status" in
-      0|141) ;;
-      3)
-        _taw_die "$_taw_picker_mode picker has no targets"
-        return 1
-        ;;
-      *) return 1 ;;
-    esac
-    case "$_taw_status" in
-      0) ;;
-      130) return 130 ;;
-      *) return 1 ;;
-    esac
-
-    _taw_output_lines=( "${(@f)_taw_output}" )
-    (( ${#_taw_output_lines[@]} >= 2 )) || return 1
-    _taw_query="${_taw_output_lines[1]}"
-    _taw_key="${_taw_output_lines[2]}"
-    if [[ "$_taw_key" == tab ]]; then
-      _taw_picker_mode="$(_taw_next_picker_mode "$_taw_picker_mode")" || return 1
-      continue
-    fi
-    case "$_taw_key" in
-      "") _taw_picker_layout= ;;
-      ctrl-s) _taw_picker_layout=shell ;;
-      ctrl-a) _taw_picker_layout=agent ;;
-      alt-z) _taw_picker_layout=editor-shell ;;
-      alt-a) _taw_picker_layout=editor-agent ;;
-      alt-enter) _taw_picker_layout=editor-agent-shell ;;
-      *) return 1 ;;
-    esac
-
-    (( ${#_taw_output_lines[@]} >= 3 )) || return 1
-    _taw_choice="${_taw_output_lines[3]}"
-    [[ -n "$_taw_choice" ]] || return 1
-    if [[ "$_taw_picker_mode" == session ]]; then
-      _taw_selected_worktree_dir=
-      _taw_resolve_project_picker_choice "${_taw_choice#*$'\t'}"
-      return $?
-    fi
-
-    _taw_fields=( "${(@ps:\t:)_taw_choice}" )
-    (( ${#_taw_fields[@]} == 5 )) || return 1
-    _taw_require_picker_safe "picker selection" "${_taw_fields[@]}" || return 1
-    _taw_picker_kind="${_taw_fields[2]}"
-    _taw_picker_branch="${_taw_fields[3]}"
-    _taw_picker_ref="${_taw_fields[4]}"
-    _taw_picker_path="${_taw_fields[5]}"
-    case "$_taw_picker_mode" in
-      worktree)
-        [[ "$_taw_picker_kind" == worktree && -n "$_taw_picker_path" ]] || return 1
-        _taw_selected_worktree_dir="${_taw_picker_path:A}"
-        ;;
-      branch)
-        [[ "$_taw_picker_kind" == branch && -n "$_taw_picker_branch" \
-          && -n "$_taw_picker_ref" ]] || return 1
-        ;;
-    esac
-    return 0
-  done
+      _taw_require_picker_safe "picker selection" "${_taw_fields[@]}" || return 1
+      _taw_picker_kind="${_taw_fields[2]}"
+      _taw_picker_branch="${_taw_fields[3]}"
+      _taw_picker_ref="${_taw_fields[4]}"
+      _taw_picker_path="${_taw_fields[5]}"
+      case "$_taw_picker_mode" in
+        worktree)
+          [[ "$_taw_picker_kind" == worktree && -n "$_taw_picker_path" ]] || return 1
+          _taw_selected_worktree_dir="${_taw_picker_path:A}"
+          ;;
+        branch)
+          [[ "$_taw_picker_kind" == branch && -n "$_taw_picker_branch" \
+            && -n "$_taw_picker_ref" ]] || return 1
+          ;;
+      esac
+      return 0
+    done
+  } always {
+    _taw_cleanup_picker_cache
+  }
 }
 
 _taw_resolve_project() {

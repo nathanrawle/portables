@@ -413,6 +413,13 @@ fi
 if [[ -n "${TAW_FAKE_FZF_STARTED_FILE:-}" ]]; then
   : >"$TAW_FAKE_FZF_STARTED_FILE"
 fi
+if [[ -n "${TAW_FAKE_FZF_WAIT_FOR_FILE:-}" ]]; then
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    [[ -f "$TAW_FAKE_FZF_WAIT_FOR_FILE" ]] && break
+    sleep 0.01
+  done
+  [[ -f "$TAW_FAKE_FZF_WAIT_FOR_FILE" ]] || exit 98
+fi
 
 lines=()
 if [[ "${TAW_FAKE_FZF_CLOSE_EARLY:-0}" = 1 ]]; then
@@ -465,6 +472,9 @@ fi
 if [[ "${TAW_FAKE_FZF_CANCEL:-0}" = 1 ]]; then
   exit 130
 fi
+if [[ "$key" = cancel ]]; then
+  exit 130
+fi
 
 if [[ ${#lines[@]} -eq 0 ]]; then
   exit 1
@@ -508,9 +518,15 @@ make_path_without_fzf() {
   local bin="$1"
 
   ln -sf "$(command -v bash)" "$bin/bash"
+  ln -sf "$(command -v cat)" "$bin/cat"
   ln -sf "$(command -v git)" "$bin/git"
   ln -sf "$(command -v find)" "$bin/find"
   ln -sf "$(command -v mkdir)" "$bin/mkdir"
+  ln -sf "$(command -v mktemp)" "$bin/mktemp"
+  ln -sf "$(command -v mv)" "$bin/mv"
+  ln -sf "$(command -v rm)" "$bin/rm"
+  ln -sf "$(command -v rmdir)" "$bin/rmdir"
+  ln -sf "$(command -v sleep)" "$bin/sleep"
   ln -sf "$(command -v zsh)" "$bin/zsh"
   printf '%s\n' "$bin"
 }
@@ -559,6 +575,10 @@ set -euo pipefail
 
 : "${TAW_GIT_LOG:?}"
 : "${TAW_REAL_GIT:?}"
+
+if [[ -n "${TAW_GIT_MARKER:-}" && " $* " = *" worktree list --porcelain -z "* ]]; then
+  : >"$TAW_GIT_MARKER"
+fi
 
 {
   first=1
@@ -3017,6 +3037,58 @@ test_project_picker_batches_tmux_session_metadata() {
   assert_file_not_contains "$log" $'display-message\t-p\t-t\t'
 }
 
+test_explicit_picker_prefetches_mode_snapshots() {
+  local xdg projects_home target repo repo_real fake_bin no_fzf_path
+  local log git_log marker picker_tmp args_log metadata_call
+  local worktree_call branch_call
+  local -a fzf_args
+
+  xdg="$TEST_TMPDIR/xdg"
+  projects_home="$TEST_TMPDIR/projects"
+  target="$projects_home/target"
+  repo="$TEST_TMPDIR/repo"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$target"
+  make_git_repo "$repo"
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  make_logging_git "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  git_log="$TEST_TMPDIR/git.log"
+  marker="$TEST_TMPDIR/worktree-prefetch-started"
+  picker_tmp="$TEST_TMPDIR/picker-tmp"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  mkdir -p "$picker_tmp"
+  export TAW_GIT_LOG="$git_log"
+  export TAW_GIT_MARKER="$marker"
+
+  XDG_CONFIG_HOME="$xdg" TMPDIR="$picker_tmp" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FAKE_FZF_KEYS=$'tab\ntab\ntab\ntab\nnone' \
+    TAW_FAKE_FZF_MATCH='main [worktree]' TAW_FAKE_FZF_WAIT_FOR_FILE="$marker" \
+    TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" --mode=session
+  unset TAW_GIT_LOG TAW_GIT_MARKER TAW_REAL_GIT
+
+  assert_exists "$marker"
+  mapfile -t fzf_args <"$args_log"
+  assert_eq "5" "${#fzf_args[@]}" "expected repeated cycling through cached modes"
+  worktree_call=$'-C\t'"$repo_real"$'\tworktree\tlist\t--porcelain\t-z'
+  branch_call=$'-C\t'"$repo_real"$'\tfor-each-ref\t--sort=refname\t--format=%(refname)\trefs/heads'
+  assert_eq "1" "$(grep -Fxc -- "$worktree_call" "$git_log")" \
+    "expected one worktree snapshot"
+  assert_eq "1" "$(grep -Fxc -- "$branch_call" "$git_log")" \
+    "expected one branch snapshot"
+  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}__taw_picker_end__'
+  assert_eq "1" "$(grep -Fxc -- "$metadata_call" "$log")" \
+    "expected one session snapshot"
+  if compgen -G "$picker_tmp/taw-picker.*" >/dev/null; then
+    fail "expected picker snapshot files to be cleaned up"
+  fi
+}
+
 test_explicit_picker_starts_fzf_before_rows_finish() {
   local xdg projects_home target target_real elsewhere fake_bin no_fzf_path
   local log fzf_log started
@@ -3049,7 +3121,7 @@ test_explicit_picker_starts_fzf_before_rows_finish() {
 
 test_explicit_picker_handles_early_fzf_exit() {
   local xdg projects_home target elsewhere fake_bin no_fzf_path
-  local log cancel_log directory_name i rc
+  local log cancel_log picker_tmp directory_name i rc
 
   xdg="$TEST_TMPDIR/xdg"
   projects_home="$TEST_TMPDIR/projects"
@@ -3066,8 +3138,10 @@ test_explicit_picker_handles_early_fzf_exit() {
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
   log="$TEST_TMPDIR/tmux.log"
+  picker_tmp="$TEST_TMPDIR/picker-tmp"
+  mkdir -p "$picker_tmp"
 
-  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+  XDG_CONFIG_HOME="$xdg" TMPDIR="$picker_tmp" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
     TAW_FAKE_FZF_CLOSE_EARLY=1 TAW_FAKE_TMUX_BIN="$fake_bin" \
     TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$elsewhere" --mode=session
@@ -3077,7 +3151,7 @@ test_explicit_picker_handles_early_fzf_exit() {
 
   cancel_log="$TEST_TMPDIR/tmux-cancel.log"
   set +e
-  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+  XDG_CONFIG_HOME="$xdg" TMPDIR="$picker_tmp" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
     TAW_FAKE_FZF_CLOSE_EARLY=1 TAW_FAKE_FZF_CANCEL=1 \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$cancel_log" \
     TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" --mode=session
@@ -3086,6 +3160,9 @@ test_explicit_picker_handles_early_fzf_exit() {
 
   assert_eq "0" "$rc" "expected early fzf cancellation to return successfully"
   assert_no_tmux_work_window "$cancel_log"
+  if compgen -G "$picker_tmp/taw-picker.*" >/dev/null; then
+    fail "expected picker snapshot files to be cleaned up after fzf exits"
+  fi
 }
 
 test_project_picker_skips_unsafe_current_tmux_session() {
@@ -4020,7 +4097,9 @@ test_picker_accept_keys_select_layouts() {
     TAW_FAKE_FZF_MATCH="$target" TAW_FZF_ARGS_LOG="$args_log" \
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$elsewhere" -ts -sh "npm test" -sh "echo later"
-  assert_file_contains "$args_log" '--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter'
+  assert_file_contains "$args_log" '--expect=tab'
+  assert_file_contains "$args_log" 'ctrl-s:transform:[[ -n {2} && {2} != message ]]'
+  assert_file_contains "$args_log" 'print(ctrl-s)+accept'
   assert_file_contains "$args_log" 'Opt-Z: editor+shell'
   assert_file_not_contains "$args_log" 'Opt-S:'
   assert_file_contains "$log" $'-s\ttarget\t-n\ttarget\t-c\t'"$target_real"$'\tvim'
@@ -4228,44 +4307,50 @@ test_session_selection_after_project_mode_replaces_context() {
   assert_file_not_contains "$log" $'-c\t'"$launch_worktree"$'\tvim'
 }
 
-test_project_scoped_modes_require_current_git_project() {
-  local xdg empty_search elsewhere fake_bin mode log output
+test_project_scoped_modes_remain_cycleable_outside_git() {
+  local xdg projects_home target target_real elsewhere fake_bin no_fzf_path
+  local log fzf_log args_log
+  local -a fzf_args
 
   xdg="$TEST_TMPDIR/xdg"
-  empty_search="$TEST_TMPDIR/empty"
+  projects_home="$TEST_TMPDIR/projects"
+  target="$projects_home/target"
   elsewhere="$TEST_TMPDIR/elsewhere"
-  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
-  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  make_git_repo "$target"
+  target_real="$(cd "$target" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
 
-  for mode in wt b; do
-    log="$TEST_TMPDIR/tmux-$mode.log"
-    if output="$(
-      EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-        run_taw "$elsewhere" --mode="$mode" 2>&1
-    )"; then
-      fail "expected --mode=$mode outside Git to fail"
-    fi
-    assert_string_contains "$output" "picker requires a current Git project"
-    assert_no_tmux_work_window "$log"
-  done
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT=ignored \
+    TAW_FAKE_FZF_KEYS=$'ctrl-s\ntab\nalt-enter\ntab\nnone' \
+    TAW_FAKE_TMUX_SESSIONS= TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --mode=worktree
 
-  log="$TEST_TMPDIR/tmux-cycle.log"
-  if output="$(
-    XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_KEYS=tab \
-      TAW_FAKE_TMUX_SESSIONS=$'target\t'"$elsewhere" \
-      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-      run_taw "$elsewhere" -ts 2>&1
-  )"; then
-    fail "expected cycling to worktree mode outside Git to fail"
-  fi
-  assert_string_contains "$output" "worktree picker requires a current Git project"
-  assert_no_tmux_work_window "$log"
+  assert_file_contains "$fzf_log" $'Not in a Git project\tmessage\t\t\t'
+  mapfile -t fzf_args <"$args_log"
+  assert_eq "5" "${#fzf_args[@]}" "expected informational rows to remain in their modes"
+  assert_string_contains "${fzf_args[0]}" '--prompt=worktree> '
+  assert_string_contains "${fzf_args[1]}" '--prompt=worktree> '
+  assert_string_contains "${fzf_args[2]}" '--prompt=branch> '
+  assert_string_contains "${fzf_args[3]}" '--prompt=branch> '
+  assert_string_contains "${fzf_args[4]}" '--prompt=session> '
+  assert_string_contains "${fzf_args[0]}" 'enter:transform:[[ -n {2} && {2} != message ]]'
+  assert_string_contains "${fzf_args[0]}" 'alt-enter:transform:[[ -n {2} && {2} != message ]]'
+  assert_file_contains "$log" $'-s\ttarget\t-n\ttarget\t-c\t'"$target_real"$'\tvim'
+  assert_file_not_contains "$log" $'split-window\t'
+  assert_file_not_contains "$log" 'ignored'
 }
 
-test_explicit_picker_reports_empty_modes() {
-  local xdg empty_search elsewhere unborn bare fake_bin log args_log output
+test_explicit_picker_keeps_empty_modes_cycleable() {
+  local xdg empty_search elsewhere unborn bare fake_bin log args_log fzf_log
 
   xdg="$TEST_TMPDIR/xdg"
   empty_search="$TEST_TMPDIR/empty"
@@ -4280,29 +4365,31 @@ test_explicit_picker_reports_empty_modes() {
   args_log="$TEST_TMPDIR/fzf-args.log"
 
   log="$TEST_TMPDIR/tmux-session.log"
-  if output="$(XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+  fzf_log="$TEST_TMPDIR/fzf-session.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FAKE_FZF_KEYS=$'ctrl-s\ntab\ncancel' TAW_FZF_INPUT_LOG="$fzf_log" \
     TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
-    TAW_TMUX_LOG="$log" run_taw "$elsewhere" --mode=session 2>&1)"; then
-    fail "expected an empty session picker to fail"
-  fi
-  assert_string_contains "$output" "session picker has no targets"
+    TAW_TMUX_LOG="$log" run_taw "$elsewhere" --mode=session
+  assert_file_contains "$fzf_log" $'Picker has no targets\tmessage\t\t\t'
   assert_file_contains "$args_log" 'load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'
   assert_no_tmux_work_window "$log"
 
   log="$TEST_TMPDIR/tmux-branch.log"
-  if output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$unborn" --mode=branch 2>&1)"; then
-    fail "expected an empty branch picker to fail"
-  fi
-  assert_string_contains "$output" "branch picker has no targets"
+  fzf_log="$TEST_TMPDIR/fzf-branch.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FAKE_FZF_KEYS=$'ctrl-s\ntab\ncancel' TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$unborn" --mode=branch
+  assert_file_contains "$fzf_log" $'Picker has no targets\tmessage\t\t\t'
   assert_no_tmux_work_window "$log"
 
   log="$TEST_TMPDIR/tmux-worktree.log"
-  if output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-    run_taw "$bare" --mode=worktree 2>&1)"; then
-    fail "expected an empty worktree picker to fail"
-  fi
-  assert_string_contains "$output" "worktree picker has no targets"
+  fzf_log="$TEST_TMPDIR/fzf-worktree.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FAKE_FZF_KEYS=$'ctrl-s\ntab\ncancel' TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$bare" --mode=worktree
+  assert_file_contains "$fzf_log" $'Picker has no targets\tmessage\t\t\t'
   assert_no_tmux_work_window "$log"
 }
 
@@ -6276,6 +6363,8 @@ test_case "taw: project picker rejects control characters in tmux sessions" \
   test_project_picker_rejects_control_characters_in_tmux_sessions
 test_case "taw: project picker batches tmux session metadata" \
   test_project_picker_batches_tmux_session_metadata
+test_case "taw: explicit picker prefetches mode snapshots" \
+  test_explicit_picker_prefetches_mode_snapshots
 test_case "taw: explicit picker starts fzf before rows finish" \
   test_explicit_picker_starts_fzf_before_rows_finish
 test_case "taw: explicit picker handles early fzf exit" \
@@ -6350,9 +6439,9 @@ test_case "taw: each explicit mode can cycle from its start" \
   test_each_explicit_mode_can_cycle_from_its_start
 test_case "taw: session selection after project mode replaces context" \
   test_session_selection_after_project_mode_replaces_context
-test_case "taw: project-scoped modes require current git project" \
-  test_project_scoped_modes_require_current_git_project
-test_case "taw: explicit picker reports empty modes" \
-  test_explicit_picker_reports_empty_modes
+test_case "taw: project-scoped modes remain cycleable outside git" \
+  test_project_scoped_modes_remain_cycleable_outside_git
+test_case "taw: explicit picker keeps empty modes cycleable" \
+  test_explicit_picker_keeps_empty_modes_cycleable
 test_case "taw: invalid picker modes and combinations are rejected" \
   test_invalid_picker_modes_and_combinations_are_rejected
