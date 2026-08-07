@@ -428,6 +428,9 @@ if [[ -n "${TAW_FAKE_FZF_WAIT_FOR_FILE:-}" ]]; then
   done
   [[ -f "$TAW_FAKE_FZF_WAIT_FOR_FILE" ]] || exit 98
 fi
+if [[ "${TAW_FAKE_FZF_CANCEL_BEFORE_READ:-0}" = 1 ]]; then
+  exit 130
+fi
 
 lines=()
 if [[ "${TAW_FAKE_FZF_CLOSE_EARLY:-0}" = 1 ]]; then
@@ -3172,6 +3175,57 @@ test_explicit_picker_handles_early_fzf_exit() {
 
   assert_eq "0" "$rc" "expected early fzf cancellation to return successfully"
   assert_no_tmux_work_window "$cancel_log"
+  if compgen -G "$picker_tmp/taw-picker.*" >/dev/null; then
+    fail "expected picker snapshot files to be cleaned up after fzf exits"
+  fi
+}
+
+test_explicit_picker_cancels_while_active_producer_is_idle() {
+  local xdg elsewhere fake_bin no_fzf_path log picker_tmp config_fifo
+  local completed started runner_pid writer_pid i rc
+
+  xdg="$TEST_TMPDIR/xdg"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$elsewhere"
+  config_fifo="$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  mkfifo "$config_fifo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  picker_tmp="$TEST_TMPDIR/picker-tmp"
+  completed="$TEST_TMPDIR/taw-completed"
+  started="$TEST_TMPDIR/fzf-started"
+  mkdir -p "$picker_tmp"
+
+  (
+    set +e
+    XDG_CONFIG_HOME="$xdg" TMPDIR="$picker_tmp" EDITOR=vim \
+      TAW_FAKE_FZF_CANCEL_BEFORE_READ=1 TAW_FAKE_FZF_STARTED_FILE="$started" \
+      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" --mode=session
+    rc=$?
+    printf '%s\n' "$rc" >"$completed"
+  ) &
+  runner_pid=$!
+
+  for ((i = 0; i < 200; i++)); do
+    [[ -f "$completed" ]] && break
+    sleep 0.01
+  done
+  if [[ ! -f "$completed" ]]; then
+    printf 'TS_SEARCH_PATHS=("%s")\n' "$elsewhere" >"$config_fifo" &
+    writer_pid=$!
+    wait "$runner_pid" 2>/dev/null || true
+    wait "$writer_pid" 2>/dev/null || true
+    fail "expected picker cancellation to stop an idle stream promptly"
+  fi
+  wait "$runner_pid"
+
+  rc="$(<"$completed")"
+  assert_eq "0" "$rc" "expected idle-stream cancellation to return successfully"
+  assert_exists "$started"
+  assert_no_tmux_work_window "$log"
   if compgen -G "$picker_tmp/taw-picker.*" >/dev/null; then
     fail "expected picker snapshot files to be cleaned up after fzf exits"
   fi
@@ -6472,6 +6526,8 @@ test_case "taw: explicit picker starts fzf before rows finish" \
   test_explicit_picker_starts_fzf_before_rows_finish
 test_case "taw: explicit picker handles early fzf exit" \
   test_explicit_picker_handles_early_fzf_exit
+test_case "taw: explicit picker cancels while active producer is idle" \
+  test_explicit_picker_cancels_while_active_producer_is_idle
 test_case "taw: project picker skips unsafe current tmux session" \
   test_project_picker_skips_unsafe_current_tmux_session
 test_case "taw: empty project prompt picker resolves tmux session rows" \

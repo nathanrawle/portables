@@ -803,6 +803,7 @@ _taw_stream_picker_cache() {
   local _taw_mode="$1" _taw_line
   local _taw_rows="$_taw_picker_cache_dir/$_taw_mode.rows"
   local _taw_status="$_taw_picker_cache_dir/$_taw_mode.status"
+  local _taw_fzf_exit_marker="$_taw_picker_cache_dir/fzf.exited"
   local -i _taw_fd
 
   exec {_taw_fd}<"$_taw_rows" || return 1
@@ -813,6 +814,10 @@ _taw_stream_picker_cache() {
         return 141
       }
       continue
+    fi
+    if [[ -f "$_taw_fzf_exit_marker" ]]; then
+      exec {_taw_fd}<&-
+      return 141
     fi
     if [[ -f "$_taw_status" ]]; then
       if IFS= read -r -u $_taw_fd _taw_line; then
@@ -896,14 +901,15 @@ _taw_cleanup_picker_cache() {
     "$_taw_picker_cache_dir/branch.rows" \
     "$_taw_picker_cache_dir/branch.errors" \
     "$_taw_picker_cache_dir/branch.status" \
-    "$_taw_picker_cache_dir/branch.status.tmp"
+    "$_taw_picker_cache_dir/branch.status.tmp" \
+    "$_taw_picker_cache_dir/fzf.exited"
   command rmdir -- "$_taw_picker_cache_dir" 2>/dev/null || true
   _taw_picker_cache_dir=
 }
 
 _taw_resolve_explicit_picker() {
   local _taw_output _taw_status _taw_producer_status _taw_query= _taw_key _taw_choice
-  local _taw_stream_status _taw_errors
+  local _taw_stream_status _taw_errors _taw_fzf_exit_marker _taw_fzf_status
   local _taw_modern_fzf=false
   local _taw_status_line _taw_status_marker=$'\x1e__taw_picker_status__'
   local -a _taw_output_lines _taw_fields _taw_pipeline_status _taw_fzf_args
@@ -920,6 +926,7 @@ _taw_resolve_explicit_picker() {
   }
 
   _taw_fzf_supports_picker_transforms && _taw_modern_fzf=true
+  _taw_fzf_exit_marker="$_taw_picker_cache_dir/fzf.exited"
 
   {
     while true; do
@@ -948,8 +955,14 @@ _taw_resolve_explicit_picker() {
       else
         _taw_fzf_args+=(--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter)
       fi
+      command rm -f -- "$_taw_fzf_exit_marker" || return 1
       _taw_output="$(_taw_stream_picker_cache "$_taw_picker_mode" | \
-        fzf "${_taw_fzf_args[@]}"
+        (
+          fzf "${_taw_fzf_args[@]}"
+          _taw_fzf_status=$?
+          : >"$_taw_fzf_exit_marker" || exit 1
+          exit "$_taw_fzf_status"
+        )
         _taw_pipeline_status=( "${pipestatus[@]}" )
         print -r -- "$_taw_status_marker"$'\t'"${_taw_pipeline_status[1]}"$'\t'"${_taw_pipeline_status[2]}"
       )"
