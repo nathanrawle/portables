@@ -63,7 +63,6 @@ cmd-alt-l = 'focus right --boundaries-action wrap-around-the-workspace'
 
 cmd-shift-minus = 'resize smart -50'
 cmd-shift-equal = 'resize smart +50'
-alt-enter = 'fullscreen'
 
 alt-tab = 'workspace-back-and-forth'
 alt-shift-tab = 'move-workspace-to-monitor --wrap-around next'
@@ -77,7 +76,7 @@ alt-6 = 'workspace 6'
 alt-7 = 'workspace 7'
 alt-8 = 'workspace 8'
 alt-9 = 'workspace 9'
-alt-a = 'workspace A'
+cmd-alt-a = 'workspace A' # taw picker accept to layout
 alt-b = 'workspace B'
 alt-c = 'workspace C'
 alt-d = 'workspace D'
