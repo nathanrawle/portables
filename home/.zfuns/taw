@@ -565,7 +565,7 @@ _taw_tmux_sessionizer_project_rows() {
   for _taw_found_path in "${_taw_directories[@]}"; do
     [[ "${_taw_found_path:t}" == .git ]] && continue
     _taw_picker_safe "$_taw_found_path" || continue
-    _taw_display_path="${(D)_taw_found_path}"
+    _taw_display_path="  ${(Q)${(D)_taw_found_path}}"
     _taw_emit_picker_row "$_taw_display_path"$'\t'"path"$'\t'"$_taw_found_path" || return 1
     _taw_tmux_sessionizer_project_rows \
       "$_taw_found_path" "$((_taw_depth - 1))" || return 1
@@ -637,7 +637,7 @@ _taw_tmux_sessionizer_picker_rows() {
     }
     _taw_require_picker_safe "tmux session" \
       "$_taw_session_id" "$_taw_session_name" "$_taw_session_path" || return 1
-    _taw_tmux_rows+=("[TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path")
+    _taw_tmux_rows+=("  [TMUX] $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path")
   done
   for _taw_session_line in "${_taw_tmux_rows[@]}"; do
     _taw_emit_picker_row "$_taw_session_line" || return 1
