@@ -20,7 +20,7 @@ Relevant options:
 - `--peer`
 - `--force` (peer only)
 - `--convert`
-- `--mode=<ts|session|wt|worktree|b|branch>`
+- `--mode=<ts|session|b|branch>`
 - project picker aliases: `-ts`, `--ts`, `-picker`, `--picker`, `-pick-project`, `--pick-project`
 
 ## Project Kinds
@@ -66,48 +66,70 @@ If no project is supplied and `taw` is not already inside a project:
 Explicit picker modes:
 
 - `--mode=ts` and `--mode=session` open the session picker
-- `--mode=wt` and `--mode=worktree` open the worktree picker
 - `--mode=b` and `--mode=branch` open the branch picker
 - `--mode value` and `--mode=value` are equivalent
 - project picker aliases open the session picker
-- Tab cycles `session -> worktree -> branch -> session` from every explicit mode
+- Tab cycles `session -> branch -> session` from every explicit mode
 - the fzf query is preserved while cycling
 
 The session picker keeps the existing tmux-sessionizer scope: it lists tmux
-sessions and projects found under the configured search paths. Worktree and
-branch modes use the Git project containing the directory where `taw` was
-invoked. They fail without opening a tmux window when there is no current Git
-project.
+sessions and projects found under the configured search paths. Visible project
+paths use zsh named-directory abbreviations such as `~`, `~code`, and
+`~portables/subdirectory`; target resolution still uses their absolute paths.
+Branch mode uses the Git project containing the directory where `taw` was
+invoked. Outside a Git project, it shows `Not in a Git project` instead of
+exiting. A mode with no discovered targets shows `Picker has no targets`.
+These informational rows cannot be selected, and Tab can still cycle to the
+other modes.
 
-Worktree rows include every non-bare entry from `git worktree list`, including
-detached worktrees. Selecting one opens its registered path without changing
-Git state. Branch rows include local and deduplicated remote branches, even
-when a branch already has a worktree. Selecting an assigned branch opens that
-worktree directly. Otherwise, normal repositories use their existing checkout
-behavior and bare repositories create or open the branch's canonical worktree.
+Branch rows include local and deduplicated remote branches, except for the
+branch checked out in the invoking worktree. A cyan row beginning with `+`
+marks a branch assigned to another worktree; unmarked branches are unassigned.
+Selecting an assigned branch opens its registered worktree directly. Selecting
+an unassigned branch creates its canonical `.worktrees/<branch>` worktree
+without changing the primary checkout. Detached worktrees are not listed
+separately.
 
 Explicit picker invocations:
 
 - reject `-p`, `-b`, and positionals
 - allow `-agent`, `-ed`, and `-sh`
 - session mode bypasses current-project target selection
-- ignore `TAW_AGENT`
-- create an agent only when `-agent` is given explicitly
+
+Acceptance keys choose the layout for a newly created target:
+
+| Key | Layout |
+| --- | --- |
+| Enter | default layout; editor only when no explicit layout options were supplied |
+| Ctrl-S | shell only |
+| Ctrl-A | agent only |
+| Opt-Z | editor and shell |
+| Opt-A | editor and agent |
+| Opt-Enter | editor, agent, and shell |
+
+An explicit `-agent` supplies the agent command. Otherwise, an agent-containing
+acceptance layout uses trimmed `TAW_AGENT` when set and falls back to `codex`.
+Plain Enter does not enable an agent from `TAW_AGENT`. Acceptance modifiers are
+ignored for a selected `[TMUX]` session or an exact matching worktree window.
 
 Session picker result handling:
 
 - `[TMUX]` rows switch or attach directly by tmux session identity, preserving the session's active window
 - with `--peer`, a `[TMUX]` row links that active window into the invoking session and selects it there
-- layout options apply to project rows; `[TMUX]` rows do not create layouts
+- layout options and acceptance modifiers apply to project rows; `[TMUX]` rows do not create layouts
 - `normal` and `plain` projects open directly
 - `bare` projects open their default worktree directly
 
-Picker return behavior:
+Each mode is generated once into a per-invocation snapshot and reused while
+cycling. With fzf 0.53 or newer, the active snapshot streams into fzf and
+informational rows remain in place when an acceptance key is pressed. Older or
+unrecognized fzf versions wait for the active snapshot, use compatible
+`--expect` bindings, and may briefly redraw an informational row. Inactive modes
+are still prefetched.
 
-- `0`: selection resolved
-- `130`: user cancelled
-- `2`: picker unavailable or had no rows
-- any other nonzero status: failure
+Cancelling an explicit picker exits `taw` successfully without opening a tmux
+window. Failure to start fzf or generate a picker snapshot returns nonzero.
+Informational rows do not exit the picker.
 
 ## Invocation Matrix
 
@@ -115,7 +137,7 @@ Picker return behavior:
 
 | Inputs | Result |
 | --- | --- |
-| zero operands, no `-b` | worktree/branch picker; if `fzf` is missing or returns no rows, open the primary worktree unchanged |
+| zero operands, no `-b` | branch picker; if `fzf` is missing or returns no rows, open the primary worktree unchanged |
 | zero operands, `-b` | create or open `.worktrees/<branch>` |
 | one positional, no `-b` | create or open `.worktrees/<path>` with the same branch name |
 | two positionals, no `-b` | create or open `.worktrees/<path>` using the second positional as its base ref |
@@ -125,7 +147,7 @@ Picker return behavior:
 
 | Inputs | Result |
 | --- | --- |
-| zero operands, no `-b` | if there are no non-bare worktrees, open the default worktree; otherwise use the picker when available, falling back to the default worktree when it is not |
+| zero operands, no `-b` | if there are no non-bare worktrees, open the default worktree; otherwise use the branch picker when available, falling back to the default worktree when it is not |
 | zero operands, `-b` | create or open a branch worktree under `.worktrees` |
 | one positional, no `-b` | treat it as a path under `.worktrees`; the branch name is the same relative path |
 | two positionals, no `-b` | treat them as managed worktree path plus base ref |
@@ -244,11 +266,12 @@ location.
 - Non-empty trimmed `TAW_AGENT` replaces the default `codex` agent when no explicit `-agent` is supplied.
 - unset, empty, or whitespace-only values are ignored.
 - explicit `-agent` always wins over the environment.
-- picker mode ignores `TAW_AGENT`; only an explicit `-agent` changes the agent command there.
+- plain picker acceptance ignores `TAW_AGENT`; picker layouts containing an agent use it when `-agent` was not supplied.
 
 ## tmux Reuse And Layout
 
 Reuse is limited to sessions where no explicit `-agent`, `-ed`, or `-sh` arguments were supplied and `TAW_AGENT` trims to empty. A non-empty trimmed `TAW_AGENT` disables reuse.
+When reusing an existing window, taw preserves that window's active pane.
 
 Layout on a new window:
 
@@ -296,6 +319,5 @@ taw --convert ~/src/legacy-bare
 taw --peer sheffield-live hallamshire-hotel-all-day
 taw --peer --force -p ~/src/repo -agent "claude --resume"
 taw --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
-taw --mode=wt
 taw --mode=branch
 ```
