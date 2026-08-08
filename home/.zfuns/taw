@@ -1476,7 +1476,7 @@ _taw_picker_branch_rows() {
       _taw_remote_branch="${_taw_branch_by_ref[$_taw_ref]-}"
       [[ "$_taw_row_remote" == "$_taw_remote_name" && -n "$_taw_remote_branch" && -z "${_taw_seen_by_branch[$_taw_remote_branch]-}" ]] || continue
       _taw_seen_by_branch[$_taw_remote_branch]=remote
-      _taw_emit_picker_row "  $_taw_remote_branch"$'\t'"branch"$'\t'"$_taw_remote_branch"$'\t'"$_taw_remote_name/$_taw_remote_branch"$'\t' || return 1
+      _taw_emit_picker_row $'  \e[31m'"$_taw_remote_branch"$'\e[0m'$'\t'"branch"$'\t'"$_taw_remote_branch"$'\t'"$_taw_remote_name/$_taw_remote_branch"$'\t' || return 1
     done
   done
 }
