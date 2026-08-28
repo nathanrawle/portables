@@ -5,8 +5,17 @@ bindkey ^U                backward-kill-line
 bindkey ^Z                kill-whole-line
 
 ### tab to cycle through menu completions
-bindkey                            '^I' menu-select
-bindkey               "$terminfo[kcbt]" menu-select
+_clear_postdisplay_then_menu_select() {
+  POSTDISPLAY=
+  zle menu-select -w
+}
+zle -N clear-postdisplay-then-menu-select _clear_postdisplay_then_menu_select
+
+# Autosuggestions must not wrap this widget or the completion style is lost.
+ZSH_AUTOSUGGEST_IGNORE_WIDGETS+=( clear-postdisplay-then-menu-select )
+
+bindkey                            '^I' clear-postdisplay-then-menu-select
+bindkey               "$terminfo[kcbt]" clear-postdisplay-then-menu-select
 bindkey -M menuselect              '^I' menu-complete
 bindkey -M menuselect "$terminfo[kcbt]" reverse-menu-complete
 
