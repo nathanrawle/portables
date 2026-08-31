@@ -28,6 +28,9 @@ fi
 # Add path for zsh-completions
 fpath+=( ${ZSH_CUSTOM:-$ZSH/custom}/plugins/zsh-completions/src )
 
+# zsh-autocomplete's path-based zasync autoload is ineffective on Zsh 5.9.
+fpath+=( "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zasync" )
+
 # Set to this value to manual rebind keys for zsh-autosuggestions
 ZSH_AUTOSUGGEST_MANUAL_REBIND=1
 
