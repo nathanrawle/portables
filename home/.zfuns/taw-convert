@@ -1,0 +1,972 @@
+#!/usr/bin/env zsh
+
+emulate -L zsh
+setopt pipefail
+
+local -a _taw_convert_positionals
+local _taw_convert_debug _taw_convert_project_dir _taw_convert_git_dir
+local _taw_convert_project_kind _taw_convert_is_bare _taw_convert_selected_worktree_dir
+local _taw_convert_project_session_name _taw_convert_project_session_target
+local _taw_convert_resolved_tmux_session_id _taw_convert_resolved_tmux_session_name
+local _taw_convert_resolved_tmux_session_path
+local _taw_convert_default_branch_result _taw_convert_default_base_ref
+
+_taw_convert_positionals=()
+_taw_convert_debug=false
+_taw_convert_project_dir=
+_taw_convert_git_dir=
+_taw_convert_project_kind=
+_taw_convert_is_bare=false
+_taw_convert_selected_worktree_dir=
+_taw_convert_project_session_name=
+_taw_convert_project_session_target=
+_taw_convert_resolved_tmux_session_id=
+_taw_convert_resolved_tmux_session_name=
+_taw_convert_resolved_tmux_session_path=
+_taw_convert_default_branch_result=
+_taw_convert_default_base_ref=
+
+_taw_convert_die() {
+  print -u2 -- "taw-convert: $*"
+  return 1
+}
+
+_taw_convert_debug_dump() {
+  [[ "$_taw_convert_debug" == true ]] || return 0
+
+  print -u2 -r -- "taw-convert debug: resolved project"
+  print -u2 -r -- "_taw_convert_project_dir=$_taw_convert_project_dir"
+  print -u2 -r -- "_taw_convert_git_dir=$_taw_convert_git_dir"
+  print -u2 -r -- "_taw_convert_project_kind=$_taw_convert_project_kind"
+  print -u2 -r -- "_taw_convert_is_bare=$_taw_convert_is_bare"
+  print -u2 -r -- "_taw_convert_selected_worktree_dir='$_taw_convert_selected_worktree_dir'"
+}
+
+_taw_convert_is_url() {
+  [[ "$1" == http://* || "$1" == https://* || "$1" == git@*:* || "$1" == ssh://* ]]
+}
+
+_taw_convert_is_bare_git_dir() {
+  local _taw_convert_candidate="$1" _taw_convert_bare _taw_convert_git
+
+  [[ -d "$_taw_convert_candidate" ]] || return 1
+  _taw_convert_candidate="${_taw_convert_candidate:A}"
+  _taw_convert_bare="$(git -C "$_taw_convert_candidate" rev-parse --is-bare-repository 2>/dev/null)" || return 1
+  [[ "$_taw_convert_bare" == true ]] || return 1
+  _taw_convert_git="$(git -C "$_taw_convert_candidate" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  [[ "${_taw_convert_git:A}" == "$_taw_convert_candidate" ]]
+}
+
+_taw_convert_set_normal_project() {
+  local _taw_convert_project_root="$1" _taw_convert_git_root="$2"
+
+  _taw_convert_project_dir="${_taw_convert_project_root:A}"
+  _taw_convert_git_dir="${_taw_convert_git_root:A}"
+  _taw_convert_project_kind=normal
+  _taw_convert_is_bare=false
+}
+
+_taw_convert_primary_worktree_for_common_dir() {
+  local _taw_convert_common_dir="$1" _taw_convert_output _taw_convert_line
+
+  _taw_convert_output="$(git --git-dir "$_taw_convert_common_dir" worktree list --porcelain 2>/dev/null)" \
+    || return 1
+  for _taw_convert_line in "${(@f)_taw_convert_output}"; do
+    if [[ "$_taw_convert_line" == worktree\ * ]]; then
+      print -r -- "${_taw_convert_line#worktree }"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+_taw_convert_project_dir_for_bare_git_dir() {
+  local _taw_convert_bare_git_dir="${1:A}" _taw_convert_fallback="${2:-}" _taw_convert_name
+
+  _taw_convert_name="${_taw_convert_bare_git_dir:t}"
+  if [[ "$_taw_convert_name" == .* ]]; then
+    print -r -- "${_taw_convert_bare_git_dir:h}"
+  elif [[ "$_taw_convert_name" == *.git ]]; then
+    print -r -- "${_taw_convert_bare_git_dir:h}/${_taw_convert_name%.git}"
+  elif [[ -n "$_taw_convert_fallback" ]]; then
+    print -r -- "${_taw_convert_fallback:A}"
+  else
+    print -r -- "$_taw_convert_bare_git_dir"
+  fi
+}
+
+_taw_convert_set_bare_project() {
+  local _taw_convert_bare_git_dir="$1" _taw_convert_fallback="${2:-}"
+
+  _taw_convert_git_dir="${_taw_convert_bare_git_dir:A}"
+  _taw_convert_project_dir="$(_taw_convert_project_dir_for_bare_git_dir "$_taw_convert_git_dir" "$_taw_convert_fallback")" || return 1
+  _taw_convert_project_kind=bare
+  _taw_convert_is_bare=true
+}
+
+_taw_convert_set_plain_project() {
+  local _taw_convert_project_root="$1"
+
+  _taw_convert_project_dir="${_taw_convert_project_root:A}"
+  _taw_convert_git_dir=
+  _taw_convert_project_kind=plain
+  _taw_convert_is_bare=false
+}
+_taw_convert_classify_existing_path() {
+  local _taw_convert_start="$1" _taw_convert_inside _taw_convert_top _taw_convert_common _taw_convert_actual _taw_convert_primary _taw_convert_child
+
+  [[ -d "$_taw_convert_start" ]] || return 1
+  _taw_convert_start="${_taw_convert_start:A}"
+
+  _taw_convert_inside="$(git -C "$_taw_convert_start" rev-parse --is-inside-work-tree 2>/dev/null)" || _taw_convert_inside=
+  if [[ "$_taw_convert_inside" == true ]]; then
+    _taw_convert_top="$(git -C "$_taw_convert_start" rev-parse --show-toplevel 2>/dev/null)" || return 1
+    _taw_convert_top="${_taw_convert_top:A}"
+    _taw_convert_common="$(git -C "$_taw_convert_top" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+    _taw_convert_common="${_taw_convert_common:A}"
+    _taw_convert_actual="$(git -C "$_taw_convert_top" rev-parse --path-format=absolute --git-dir 2>/dev/null)" \
+      || return 1
+    _taw_convert_actual="${_taw_convert_actual:A}"
+
+    if _taw_convert_is_bare_git_dir "$_taw_convert_common"; then
+      _taw_convert_set_bare_project "$_taw_convert_common" "${_taw_convert_common:h}"
+      _taw_convert_selected_worktree_dir="$_taw_convert_top"
+    elif [[ "$_taw_convert_actual" != "$_taw_convert_common" ]]; then
+      _taw_convert_primary="$(_taw_convert_primary_worktree_for_common_dir "$_taw_convert_common")" || return 1
+      _taw_convert_set_normal_project "$_taw_convert_primary" "$_taw_convert_common"
+      _taw_convert_selected_worktree_dir="$_taw_convert_top"
+    else
+      _taw_convert_set_normal_project "$_taw_convert_top" "$_taw_convert_common"
+    fi
+    return 0
+  fi
+
+  if _taw_convert_is_bare_git_dir "$_taw_convert_start"; then
+    _taw_convert_set_bare_project "$_taw_convert_start" "${_taw_convert_start:h}"
+    return 0
+  fi
+
+  for _taw_convert_child in "$_taw_convert_start"/.git "$_taw_convert_start"/.bare; do
+    if _taw_convert_is_bare_git_dir "$_taw_convert_child"; then
+      _taw_convert_set_bare_project "$_taw_convert_child" "$_taw_convert_start"
+      return 0
+    fi
+  done
+
+  _taw_convert_set_plain_project "$_taw_convert_start"
+  return 0
+}
+_taw_convert_use_project_path() {
+  local _taw_convert_path="$1" _taw_convert_label="$2" _taw_convert_session_name="${3:-}" _taw_convert_session_target="${4:-}" _taw_convert_abs
+
+  [[ -d "$_taw_convert_path" ]] || {
+    _taw_convert_die "could not cd to project: $_taw_convert_label"
+    return 1
+  }
+  _taw_convert_abs="${_taw_convert_path:A}"
+  _taw_convert_classify_existing_path "$_taw_convert_abs" || return 1
+  [[ -z "$_taw_convert_session_name" ]] || _taw_convert_project_session_name="$_taw_convert_session_name"
+  [[ -z "$_taw_convert_session_target" ]] || _taw_convert_project_session_target="$_taw_convert_session_target"
+}
+
+_taw_convert_resolve_tmux_session_exact() {
+  local _taw_convert_query="$1" _taw_convert_expected_path="${2:-}" _taw_convert_expected_id="${3:-}"
+  local _taw_convert_sessions _taw_convert_line _taw_convert_session_id _taw_convert_session _taw_convert_path _taw_convert_rest
+  local _taw_convert_tab=$'\t'
+
+  _taw_convert_sessions="$(tmux list-sessions -F '#{session_id}	#{session_name}	#{session_path}' 2>/dev/null)" || return 1
+
+  for _taw_convert_line in "${(@f)_taw_convert_sessions}"; do
+    _taw_convert_session_id="${_taw_convert_line%%${_taw_convert_tab}*}"
+    _taw_convert_rest="${_taw_convert_line#*${_taw_convert_tab}}"
+    [[ "$_taw_convert_rest" == "$_taw_convert_line" ]] && _taw_convert_rest=
+    _taw_convert_session="${_taw_convert_rest%%${_taw_convert_tab}*}"
+    _taw_convert_path="${_taw_convert_rest#*${_taw_convert_tab}}"
+    [[ "$_taw_convert_path" == "$_taw_convert_rest" ]] && _taw_convert_path=
+    [[ "$_taw_convert_session" == "$_taw_convert_query" ]] || continue
+    if [[ -n "$_taw_convert_expected_id" && "$_taw_convert_session_id" != "$_taw_convert_expected_id" ]]; then
+      return 2
+    fi
+    [[ -n "$_taw_convert_path" ]] || return 2
+    if [[ -n "$_taw_convert_expected_path" && "${_taw_convert_path:A}" != "${_taw_convert_expected_path:A}" ]]; then
+      return 2
+    fi
+    _taw_convert_resolved_tmux_session_id="$_taw_convert_session_id"
+    _taw_convert_resolved_tmux_session_name="$_taw_convert_session"
+    _taw_convert_resolved_tmux_session_path="$_taw_convert_path"
+    return 0
+  done
+
+  return 1
+}
+
+_taw_convert_resolve_project_from_tmux_exact() {
+  _taw_convert_resolve_tmux_session_exact "$@" || return
+  _taw_convert_use_project_path "$_taw_convert_resolved_tmux_session_path" \
+    "$_taw_convert_resolved_tmux_session_path" "$_taw_convert_resolved_tmux_session_name" \
+    "$_taw_convert_resolved_tmux_session_id" || return 2
+}
+
+_taw_convert_resolve_project_from_tmux() {
+  local _taw_convert_query="$1" _taw_convert_sessions _taw_convert_line _taw_convert_session_id _taw_convert_session _taw_convert_path _taw_convert_rest
+  local _taw_convert_tab=$'\t'
+
+  _taw_convert_resolve_project_from_tmux_exact "$_taw_convert_query"
+  case $? in
+    0) return 0 ;;
+    2) return 2 ;;
+  esac
+
+  _taw_convert_sessions="$(tmux list-sessions -F '#{session_id}	#{session_name}	#{session_path}' 2>/dev/null)" || return 1
+
+  for _taw_convert_line in "${(@f)_taw_convert_sessions}"; do
+    _taw_convert_session_id="${_taw_convert_line%%${_taw_convert_tab}*}"
+    _taw_convert_rest="${_taw_convert_line#*${_taw_convert_tab}}"
+    [[ "$_taw_convert_rest" == "$_taw_convert_line" ]] && _taw_convert_rest=
+    _taw_convert_session="${_taw_convert_rest%%${_taw_convert_tab}*}"
+    _taw_convert_path="${_taw_convert_rest#*${_taw_convert_tab}}"
+    [[ "$_taw_convert_path" == "$_taw_convert_rest" ]] && _taw_convert_path=
+    [[ -n "$_taw_convert_path" && "${_taw_convert_path:t}" == "$_taw_convert_query" ]] || continue
+    _taw_convert_use_project_path "$_taw_convert_path" "$_taw_convert_path" "$_taw_convert_session" "$_taw_convert_session_id"
+    return
+  done
+
+  return 1
+}
+_taw_convert_resolve_project() {
+  local _taw_convert_arg="$1" _taw_convert_projects_candidate
+
+  if _taw_convert_is_url "$_taw_convert_arg"; then
+    _taw_convert_die "conversion requires an existing project"
+    return 1
+  fi
+
+  if [[ -d "$_taw_convert_arg" ]]; then
+    _taw_convert_use_project_path "$_taw_convert_arg" "$_taw_convert_arg"
+    return
+  fi
+  [[ ! -e "$_taw_convert_arg" && ! -L "$_taw_convert_arg" ]] || {
+    _taw_convert_die "could not resolve project: $_taw_convert_arg"
+    return 1
+  }
+
+  if [[ "$_taw_convert_arg" != /* && "$_taw_convert_arg" != */* && -n "${PROJECTS_HOME:-}" ]]; then
+    _taw_convert_projects_candidate="${PROJECTS_HOME:A}/$_taw_convert_arg"
+    if [[ -d "$_taw_convert_projects_candidate" ]]; then
+      _taw_convert_use_project_path "$_taw_convert_projects_candidate" "$_taw_convert_projects_candidate"
+      return
+    fi
+  fi
+
+  _taw_convert_resolve_project_from_tmux "$_taw_convert_arg"
+  case $? in
+    0) return 0 ;;
+    2) return 1 ;;
+  esac
+
+  _taw_convert_die "could not resolve existing project: $_taw_convert_arg"
+  return 1
+}
+_taw_convert_git() {
+  if [[ "$_taw_convert_is_bare" == true ]]; then
+    git --git-dir "$_taw_convert_git_dir" "$@"
+  else
+    git -C "$_taw_convert_project_dir" "$@"
+  fi
+}
+_taw_convert_branch_exists() {
+  _taw_convert_git show-ref --verify --quiet "refs/heads/$1"
+}
+_taw_convert_local_branch_for_commit() {
+  local _taw_convert_commit="$1" _taw_convert_line _taw_convert_branch _taw_convert_branch_commit
+  local _taw_convert_output
+
+  _taw_convert_output="$(_taw_convert_git for-each-ref --sort=refname --format='%(refname:short) %(objectname)' refs/heads 2>/dev/null)" || return 1
+  for _taw_convert_line in "${(@f)_taw_convert_output}"; do
+    _taw_convert_branch="${_taw_convert_line%% *}"
+    _taw_convert_branch_commit="${_taw_convert_line#* }"
+    [[ "$_taw_convert_branch_commit" == "$_taw_convert_commit" ]] || continue
+    print -r -- "$_taw_convert_branch"
+    return 0
+  done
+
+  return 1
+}
+_taw_convert_default_bare_target() {
+  local _taw_convert_head_branch _taw_convert_refs
+
+  if _taw_convert_default_branch; then
+    return 0
+  fi
+
+  _taw_convert_refs="$(_taw_convert_git for-each-ref --count=1 --format='%(refname)' 2>/dev/null)" || return 1
+  [[ -n "$_taw_convert_refs" ]] && return 1
+
+  if _taw_convert_head_branch="$(_taw_convert_git symbolic-ref --quiet --short HEAD 2>/dev/null)"; then
+    _taw_convert_default_branch_result="$_taw_convert_head_branch"
+    _taw_convert_default_base_ref=
+    return 0
+  fi
+
+  return 1
+}
+
+_taw_convert_default_branch() {
+  local _taw_convert_branch _taw_convert_remote_head _taw_convert_head_commit
+
+  _taw_convert_default_branch_result=
+  _taw_convert_default_base_ref=
+
+  if _taw_convert_branch="$(_taw_convert_git symbolic-ref --quiet --short HEAD 2>/dev/null)"; then
+    _taw_convert_branch="${_taw_convert_branch#refs/heads/}"
+    _taw_convert_branch="${_taw_convert_branch#heads/}"
+    _taw_convert_branch="${_taw_convert_branch#origin/}"
+    if _taw_convert_branch_exists "$_taw_convert_branch"; then
+      _taw_convert_default_branch_result="$_taw_convert_branch"
+      _taw_convert_default_base_ref="$_taw_convert_branch"
+      return 0
+    fi
+  fi
+
+  if _taw_convert_head_commit="$(_taw_convert_git rev-parse --verify --quiet HEAD^{commit} 2>/dev/null)"; then
+    if _taw_convert_branch="$(_taw_convert_local_branch_for_commit "$_taw_convert_head_commit")"; then
+      _taw_convert_default_branch_result="$_taw_convert_branch"
+      _taw_convert_default_base_ref="$_taw_convert_branch"
+      return 0
+    fi
+  fi
+
+  if _taw_convert_remote_head="$(_taw_convert_git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
+    _taw_convert_branch="${_taw_convert_remote_head#origin/}"
+    if _taw_convert_branch_exists "$_taw_convert_branch"; then
+      _taw_convert_default_branch_result="$_taw_convert_branch"
+      _taw_convert_default_base_ref="$_taw_convert_branch"
+      return 0
+    fi
+    if _taw_convert_git rev-parse --verify --quiet "refs/remotes/origin/$_taw_convert_branch^{commit}" >/dev/null; then
+      _taw_convert_default_branch_result="$_taw_convert_branch"
+      _taw_convert_default_base_ref="origin/$_taw_convert_branch"
+      return 0
+    fi
+  fi
+
+  for _taw_convert_branch in main master; do
+    _taw_convert_branch_exists "$_taw_convert_branch" || continue
+    _taw_convert_default_branch_result="$_taw_convert_branch"
+    _taw_convert_default_base_ref="$_taw_convert_branch"
+    return 0
+  done
+
+  return 1
+}
+_taw_convert_move_worktree_entries() {
+  local _taw_convert_source="$1" _taw_convert_dest="$2" _taw_convert_entry _taw_convert_target
+  local -a _taw_convert_entries
+
+  mkdir -p -- "$_taw_convert_dest" || return 1
+  _taw_convert_entries=( "$_taw_convert_source"/*(N) "$_taw_convert_source"/.[!.]*(N) "$_taw_convert_source"/..?*(N) )
+  for _taw_convert_entry in "${_taw_convert_entries[@]}"; do
+    [[ "${_taw_convert_entry:t}" == .git ]] && continue
+    _taw_convert_target="$_taw_convert_dest/${_taw_convert_entry:t}"
+    [[ ! -e "$_taw_convert_target" && ! -L "$_taw_convert_target" ]] || return 1
+    mv -n -- "$_taw_convert_entry" "$_taw_convert_target" || return 1
+    [[ ! -e "$_taw_convert_entry" && ! -L "$_taw_convert_entry" ]] || return 1
+  done
+}
+
+_taw_convert_move_primary_entries() {
+  local _taw_convert_source="$1" _taw_convert_dest="$2" _taw_convert_protected="${3:-}"
+  local _taw_convert_entry _taw_convert_target
+  local -a _taw_convert_entries
+
+  [[ -z "$_taw_convert_protected" ]] || _taw_convert_protected="${_taw_convert_protected:A}"
+  mkdir -p -- "$_taw_convert_dest" || return 1
+  _taw_convert_entries=( "$_taw_convert_source"/*(N) "$_taw_convert_source"/.[!.]*(N) "$_taw_convert_source"/..?*(N) )
+  for _taw_convert_entry in "${_taw_convert_entries[@]}"; do
+    [[ "${_taw_convert_entry:t}" == .git || "${_taw_convert_entry:t}" == .worktrees ]] && continue
+    [[ -z "$_taw_convert_protected" || "${_taw_convert_entry:A}" != "$_taw_convert_protected" ]] || continue
+    _taw_convert_target="$_taw_convert_dest/${_taw_convert_entry:t}"
+    [[ ! -e "$_taw_convert_target" && ! -L "$_taw_convert_target" ]] || return 1
+    mv -n -- "$_taw_convert_entry" "$_taw_convert_target" || return 1
+    [[ ! -e "$_taw_convert_entry" && ! -L "$_taw_convert_entry" ]] || return 1
+  done
+}
+
+_taw_convert_prune_empty_worktree_parents() {
+  local _taw_convert_source="${1:A}" _taw_convert_root="${2:A}" _taw_convert_parent
+
+  _taw_convert_parent="${_taw_convert_source:h}"
+  while [[ "$_taw_convert_parent" == "$_taw_convert_root"/* ]]; do
+    rmdir -- "$_taw_convert_parent" 2>/dev/null || break
+    _taw_convert_parent="${_taw_convert_parent:h}"
+  done
+}
+
+_taw_convert_status_records_preserved() {
+  local _taw_convert_before="$1" _taw_convert_after="$2" _taw_convert_record
+  local -A _taw_convert_after_records
+
+  for _taw_convert_record in "${(@f)_taw_convert_after}"; do
+    [[ -n "$_taw_convert_record" ]] || continue
+    _taw_convert_after_records[$_taw_convert_record]=1
+  done
+  for _taw_convert_record in "${(@f)_taw_convert_before}"; do
+    [[ -n "$_taw_convert_record" ]] || continue
+    [[ -n "${_taw_convert_after_records[$_taw_convert_record]-}" ]] || return 1
+  done
+}
+
+_taw_convert_project() {
+  local _taw_convert_project_root="${_taw_convert_project_dir:A}" _taw_convert_original_git_dir="${_taw_convert_git_dir:A}"
+  local _taw_convert_original_git_name="${_taw_convert_original_git_dir:t}"
+  local _taw_convert_active_git_dir="${_taw_convert_original_git_dir:A}" _taw_convert_default_branch
+  local _taw_convert_default_ref _taw_convert_default_commit _taw_convert_default_created=false
+  local _taw_convert_output _taw_convert_line _taw_convert_path _taw_convert_branch_ref _taw_convert_branch _taw_convert_dest_name
+  local _taw_convert_existing_destination _taw_convert_other_path
+  local _taw_convert_default_path= _taw_convert_default_count=0 _taw_convert_locked=false
+  local _taw_convert_is_bare_entry=false _taw_convert_backup _taw_convert_failure= _taw_convert_actual_git_dir
+  local _taw_convert_before_default_status= _taw_convert_after_default_status _taw_convert_saved_pwd
+  local _taw_convert_caller_target=outside _taw_convert_caller_relative= _taw_convert_caller_original_path=
+  local _taw_convert_caller_relocated=false _taw_convert_default_git_dir
+  local _taw_convert_common_moved=false _taw_convert_default_staged=false _taw_convert_default_removed=false
+  local _taw_convert_config_changed=false _taw_convert_rollback_ok=true
+  local _taw_convert_wrapper_staged=false _taw_convert_wrapper_entry _taw_convert_default_entry
+  local _taw_convert_index_present=false _taw_convert_i _taw_convert_operation_path _taw_convert_lock_file
+  local _taw_convert_shared_index
+  local -a _taw_convert_paths _taw_convert_destinations
+  local -a _taw_convert_statuses _taw_convert_moved_flags _taw_convert_operation_names _taw_convert_modules
+  local -a _taw_convert_wrapper_entries _taw_convert_default_entries
+
+  [[ "$_taw_convert_project_kind" == bare && "$_taw_convert_is_bare" == true ]] || {
+    _taw_convert_die "conversion requires a bare git project"
+    return 1
+  }
+  if [[ "$_taw_convert_original_git_name" != .* && "$_taw_convert_original_git_name" != *.git ]]; then
+    _taw_convert_die "conversion does not support suffixless bare repositories: $_taw_convert_original_git_dir"
+    return 1
+  fi
+
+  _taw_convert_default_bare_target || {
+    _taw_convert_die "could not determine the bare repository's default branch"
+    return 1
+  }
+  _taw_convert_default_branch="$_taw_convert_default_branch_result"
+  _taw_convert_default_ref="$_taw_convert_default_base_ref"
+  git check-ref-format --branch "$_taw_convert_default_branch" >/dev/null 2>&1 || {
+    _taw_convert_die "invalid default branch: $_taw_convert_default_branch"
+    return 1
+  }
+
+  _taw_convert_operation_names=(
+    MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-apply
+    rebase-merge sequencer BISECT_START
+  )
+  for _taw_convert_operation_path in "${_taw_convert_operation_names[@]}"; do
+    _taw_convert_operation_path="$(git --git-dir "$_taw_convert_original_git_dir" rev-parse \
+      --path-format=absolute --git-path "$_taw_convert_operation_path" 2>/dev/null)" \
+      || return 1
+    if [[ -e "$_taw_convert_operation_path" ]]; then
+      _taw_convert_die "conversion does not support an active git operation"
+      return 1
+    fi
+  done
+  _taw_convert_lock_file="$(find "$_taw_convert_original_git_dir" -name '*.lock' -print -quit 2>/dev/null)" \
+    || return 1
+  [[ -z "$_taw_convert_lock_file" ]] || {
+    _taw_convert_die "conversion cannot run while git lock files exist"
+    return 1
+  }
+  _taw_convert_modules=( "$_taw_convert_original_git_dir/modules"/*(ND) )
+  (( ${#_taw_convert_modules[@]} == 0 )) || {
+    _taw_convert_die "conversion does not support initialized submodules"
+    return 1
+  }
+  if [[ "$(git --git-dir "$_taw_convert_original_git_dir" config \
+    --bool extensions.worktreeConfig 2>/dev/null)" == true ]]; then
+    _taw_convert_die "conversion does not support worktree-specific config"
+    return 1
+  fi
+
+  _taw_convert_output="$(git --git-dir "$_taw_convert_original_git_dir" \
+    worktree list --porcelain 2>/dev/null)" || return 1
+  for _taw_convert_line in "${(@f)_taw_convert_output}" ""; do
+    case "$_taw_convert_line" in
+      worktree\ *)
+        _taw_convert_path="${_taw_convert_line#worktree }"
+        _taw_convert_branch_ref=
+        _taw_convert_locked=false
+        _taw_convert_is_bare_entry=false
+        ;;
+      branch\ *)
+        _taw_convert_branch_ref="${_taw_convert_line#branch }"
+        ;;
+      detached) ;;
+      locked*)
+        _taw_convert_locked=true
+        ;;
+      bare)
+        _taw_convert_is_bare_entry=true
+        ;;
+      "")
+        if [[ "$_taw_convert_is_bare_entry" != true && -n "$_taw_convert_path" ]]; then
+          [[ "$_taw_convert_locked" != true ]] || {
+            _taw_convert_die "conversion does not support locked worktrees: $_taw_convert_path"
+            return 1
+          }
+          for _taw_convert_operation_path in "${_taw_convert_operation_names[@]}"; do
+            _taw_convert_operation_path="$(git -C "$_taw_convert_path" rev-parse \
+              --path-format=absolute --git-path "$_taw_convert_operation_path" 2>/dev/null)" \
+              || return 1
+            if [[ -e "$_taw_convert_operation_path" ]]; then
+              _taw_convert_die "conversion does not support an active Git operation: $_taw_convert_path"
+              return 1
+            fi
+          done
+          if [[ -n "$(git -C "$_taw_convert_path" ls-files -u 2>/dev/null)" ]]; then
+            _taw_convert_die "conversion does not support unmerged entries: $_taw_convert_path"
+            return 1
+          fi
+          if [[ "$(git -C "$_taw_convert_path" config --bool core.sparseCheckout \
+            2>/dev/null)" == true ]]; then
+            _taw_convert_die "conversion does not support sparse worktrees: $_taw_convert_path"
+            return 1
+          fi
+          _taw_convert_shared_index="$(git -C "$_taw_convert_path" rev-parse \
+            --shared-index-path 2>/dev/null)" || _taw_convert_shared_index=
+          if [[ -n "$_taw_convert_shared_index" ]]; then
+            _taw_convert_die "conversion does not support split indexes: $_taw_convert_path"
+            return 1
+          fi
+          if [[ -n "$_taw_convert_branch_ref" ]]; then
+            _taw_convert_branch="${_taw_convert_branch_ref#refs/heads/}"
+            _taw_convert_dest_name="$_taw_convert_branch"
+          else
+            _taw_convert_branch=
+            _taw_convert_dest_name="${_taw_convert_path:t}"
+            [[ -n "$_taw_convert_dest_name" ]] || {
+              _taw_convert_die "could not name detached worktree: $_taw_convert_path"
+              return 1
+            }
+          fi
+          if [[ "$_taw_convert_branch" == "$_taw_convert_default_branch" ]]; then
+            _taw_convert_default_count=$((_taw_convert_default_count + 1))
+            _taw_convert_default_path="${_taw_convert_path:A}"
+          else
+            local _taw_convert_destination="${_taw_convert_project_root:A}/.worktrees/$_taw_convert_dest_name"
+            for _taw_convert_existing_destination in "${_taw_convert_destinations[@]}"; do
+              if [[ "${_taw_convert_destination:A}" == "${_taw_convert_existing_destination:A}" \
+                || "${_taw_convert_destination:A}" == "${_taw_convert_existing_destination:A}"/* \
+                || "${_taw_convert_existing_destination:A}" == "${_taw_convert_destination:A}"/* ]]; then
+                _taw_convert_die "worktree destination collision: $_taw_convert_destination"
+                return 1
+              fi
+            done
+            if [[ "${_taw_convert_path:A}" != "${_taw_convert_destination:A}" \
+              && ( -e "$_taw_convert_destination" || -L "$_taw_convert_destination" ) ]]; then
+              _taw_convert_die "worktree destination already exists: $_taw_convert_destination"
+              return 1
+            fi
+            _taw_convert_paths+=( "${_taw_convert_path:A}" )
+            _taw_convert_destinations+=( "${_taw_convert_destination:A}" )
+            _taw_convert_moved_flags+=( false )
+            _taw_convert_statuses+=( "$(git -C "$_taw_convert_path" status \
+              --porcelain=v2 --branch --untracked-files=all)" ) || return 1
+          fi
+        fi
+        _taw_convert_path=
+        ;;
+    esac
+  done
+
+  (( _taw_convert_default_count <= 1 )) || {
+    _taw_convert_die "multiple worktrees use the default branch: $_taw_convert_default_branch"
+    return 1
+  }
+  for _taw_convert_path in "${_taw_convert_paths[@]}"; do
+    if [[ -n "$_taw_convert_default_path" && "$_taw_convert_default_path" == "$_taw_convert_path"/* ]]; then
+      _taw_convert_die "conversion cannot move a worktree that contains another registered worktree: $_taw_convert_path"
+      return 1
+    fi
+    for _taw_convert_other_path in "${_taw_convert_paths[@]}"; do
+      if [[ "$_taw_convert_other_path" == "$_taw_convert_path"/* ]]; then
+        _taw_convert_die "conversion cannot move a worktree that contains another registered worktree: $_taw_convert_path"
+        return 1
+      fi
+    done
+  done
+  if [[ -n "$_taw_convert_default_path" ]]; then
+    _taw_convert_before_default_status="$(git -C "$_taw_convert_default_path" status \
+      --porcelain=v2 --branch --untracked-files=all)" || return 1
+    if git -C "$_taw_convert_default_path" ls-files --error-unmatch .worktrees \
+      >/dev/null 2>&1; then
+      _taw_convert_die "conversion cannot promote a worktree that tracks .worktrees"
+      return 1
+    fi
+  elif [[ -n "$_taw_convert_default_ref" ]]; then
+    _taw_convert_output="$(git --git-dir "$_taw_convert_original_git_dir" ls-tree \
+      --name-only "$_taw_convert_default_ref" -- .worktrees 2>/dev/null)" || return 1
+    if [[ -n "$_taw_convert_output" ]]; then
+      _taw_convert_die "conversion cannot check out a default branch that tracks .worktrees"
+      return 1
+    fi
+  fi
+
+  if [[ "$_taw_convert_original_git_dir" != "$_taw_convert_project_root/.git" ]]; then
+    if [[ -e "$_taw_convert_project_root/.git" || -L "$_taw_convert_project_root/.git" ]]; then
+      _taw_convert_die "conversion target already has .git: $_taw_convert_project_root"
+      return 1
+    fi
+  fi
+
+  _taw_convert_saved_pwd="$(pwd -P)" || return 1
+  for (( _taw_convert_i = 1; _taw_convert_i <= ${#_taw_convert_paths[@]}; _taw_convert_i++ )); do
+    if [[ "$_taw_convert_saved_pwd" == "${_taw_convert_paths[_taw_convert_i]}" \
+      || "$_taw_convert_saved_pwd" == "${_taw_convert_paths[_taw_convert_i]}"/* ]]; then
+      _taw_convert_caller_target="worktree:$_taw_convert_i"
+      _taw_convert_caller_relative="${_taw_convert_saved_pwd#${_taw_convert_paths[_taw_convert_i]}}"
+      _taw_convert_caller_original_path="${_taw_convert_paths[_taw_convert_i]}$_taw_convert_caller_relative"
+      break
+    fi
+  done
+  if [[ "$_taw_convert_caller_target" == outside && -n "$_taw_convert_default_path" \
+    && ( "$_taw_convert_saved_pwd" == "$_taw_convert_default_path" \
+      || "$_taw_convert_saved_pwd" == "$_taw_convert_default_path"/* ) ]]; then
+    _taw_convert_caller_target=default
+    _taw_convert_caller_relative="${_taw_convert_saved_pwd#$_taw_convert_default_path}"
+    _taw_convert_caller_original_path="$_taw_convert_default_path$_taw_convert_caller_relative"
+  fi
+
+  _taw_convert_backup="$(mktemp -d \
+    "${_taw_convert_project_root:h}/.${_taw_convert_project_root:t}.taw-convert.XXXXXX")" \
+    || return 1
+  mkdir -p -- "$_taw_convert_backup/meta" "$_taw_convert_backup/tree" || {
+    rm -rf -- "$_taw_convert_backup"
+    return 1
+  }
+  cp -p -- "$_taw_convert_original_git_dir/config" "$_taw_convert_backup/meta/config" \
+    && cp -p -- "$_taw_convert_original_git_dir/HEAD" "$_taw_convert_backup/meta/HEAD" \
+    || _taw_convert_failure="could not preserve bare repository metadata"
+
+  if [[ -z "$_taw_convert_failure" && "$_taw_convert_caller_target" != outside ]]; then
+    # Git refuses to run after the caller's worktree directory is removed.
+    if builtin cd -q -- "${_taw_convert_project_root:h}"; then
+      _taw_convert_caller_relocated=true
+    else
+      _taw_convert_failure="could not move the invoking shell to a stable directory"
+    fi
+  fi
+
+  if [[ -z "$_taw_convert_failure" && "$_taw_convert_default_ref" != "$_taw_convert_default_branch" \
+    && -n "$_taw_convert_default_ref" ]]; then
+    _taw_convert_default_commit="$(git --git-dir "$_taw_convert_active_git_dir" rev-parse \
+      --verify "$_taw_convert_default_ref^{commit}" 2>/dev/null)" \
+      || _taw_convert_failure="could not resolve the remote default branch"
+    if [[ -z "$_taw_convert_failure" ]] && git --git-dir "$_taw_convert_active_git_dir" update-ref \
+      "refs/heads/$_taw_convert_default_branch" "$_taw_convert_default_commit" ""; then
+      _taw_convert_default_created=true
+    elif [[ -z "$_taw_convert_failure" ]]; then
+      _taw_convert_failure="could not create the default tracking branch"
+    fi
+    if [[ -z "$_taw_convert_failure" ]]; then
+      git --git-dir "$_taw_convert_active_git_dir" config \
+        "branch.$_taw_convert_default_branch.remote" origin \
+        && git --git-dir "$_taw_convert_active_git_dir" config \
+          "branch.$_taw_convert_default_branch.merge" "refs/heads/$_taw_convert_default_branch" \
+        || _taw_convert_failure="could not configure the default tracking branch"
+    fi
+    if [[ -z "$_taw_convert_failure" ]] \
+      && ! git --git-dir "$_taw_convert_active_git_dir" config --get-all \
+        remote.origin.fetch >/dev/null 2>&1; then
+      git --git-dir "$_taw_convert_active_git_dir" config --add \
+        remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" \
+        || _taw_convert_failure="could not configure the default tracking branch"
+    fi
+  fi
+
+  for (( _taw_convert_i = 1; _taw_convert_i <= ${#_taw_convert_paths[@]}; _taw_convert_i++ )); do
+    [[ -z "$_taw_convert_failure" ]] || break
+    if [[ "${_taw_convert_paths[_taw_convert_i]}" != "${_taw_convert_destinations[_taw_convert_i]}" ]]; then
+      mkdir -p -- "${_taw_convert_destinations[_taw_convert_i]:h}" \
+        || _taw_convert_failure="could not create .worktrees destination"
+      if [[ -z "$_taw_convert_failure" ]] && git --git-dir "$_taw_convert_active_git_dir" worktree move \
+        "${_taw_convert_paths[_taw_convert_i]}" "${_taw_convert_destinations[_taw_convert_i]}"; then
+        _taw_convert_moved_flags[_taw_convert_i]=true
+        _taw_convert_prune_empty_worktree_parents \
+          "${_taw_convert_paths[_taw_convert_i]}" "$_taw_convert_project_root"
+      elif [[ -z "$_taw_convert_failure" ]]; then
+        _taw_convert_failure="could not move worktree: ${_taw_convert_paths[_taw_convert_i]}"
+      fi
+    fi
+  done
+
+  if [[ -z "$_taw_convert_failure" && -n "$_taw_convert_default_path" ]]; then
+    if git --git-dir "$_taw_convert_active_git_dir" worktree move \
+      "$_taw_convert_default_path" "$_taw_convert_backup/default"; then
+      _taw_convert_default_staged=true
+      _taw_convert_prune_empty_worktree_parents \
+        "$_taw_convert_default_path" "$_taw_convert_project_root"
+    else
+      _taw_convert_failure="could not stage the default worktree"
+    fi
+  fi
+
+  if [[ -z "$_taw_convert_failure" && -d "$_taw_convert_project_root" ]]; then
+    mkdir -p -- "$_taw_convert_backup/wrapper" \
+      || _taw_convert_failure="could not preserve wrapper entries"
+    if [[ -z "$_taw_convert_failure" ]]; then
+      _taw_convert_move_primary_entries "$_taw_convert_project_root" "$_taw_convert_backup/wrapper" \
+        "$_taw_convert_original_git_dir" \
+        || _taw_convert_failure="could not preserve wrapper entries"
+      _taw_convert_wrapper_entries=( "$_taw_convert_backup/wrapper"/*(ND) )
+      (( ${#_taw_convert_wrapper_entries[@]} == 0 )) || _taw_convert_wrapper_staged=true
+    fi
+    if [[ -z "$_taw_convert_failure" && "$_taw_convert_wrapper_staged" == true ]]; then
+      if [[ "$_taw_convert_default_staged" == true ]]; then
+        _taw_convert_default_entries=(
+          "$_taw_convert_backup/default"/*(N)
+          "$_taw_convert_backup/default"/.[!.]*(N)
+          "$_taw_convert_backup/default"/..?*(N)
+        )
+        _taw_convert_output="$(git -C "$_taw_convert_backup/default" ls-files --cached 2>/dev/null)" \
+          || _taw_convert_failure="could not inspect the default worktree index"
+        if [[ -z "$_taw_convert_failure" ]]; then
+          for _taw_convert_line in "${(@f)_taw_convert_output}"; do
+            [[ -n "$_taw_convert_line" ]] || continue
+            _taw_convert_default_entries+=( "${_taw_convert_line%%/*}" )
+          done
+        fi
+      elif [[ -n "$_taw_convert_default_ref" ]]; then
+        _taw_convert_output="$(git --git-dir "$_taw_convert_active_git_dir" ls-tree \
+          --name-only "$_taw_convert_default_ref" 2>/dev/null)" \
+          || _taw_convert_failure="could not inspect the default checkout"
+        [[ -n "$_taw_convert_failure" ]] \
+          || _taw_convert_default_entries=( "${(@f)_taw_convert_output}" )
+      fi
+      if [[ -z "$_taw_convert_failure" ]]; then
+        for _taw_convert_wrapper_entry in "${_taw_convert_wrapper_entries[@]}"; do
+          for _taw_convert_default_entry in "${_taw_convert_default_entries[@]}"; do
+            [[ "${_taw_convert_default_entry:t}" == .git ]] && continue
+            if [[ "${_taw_convert_wrapper_entry:t}" == "${_taw_convert_default_entry:t}" ]]; then
+              _taw_convert_failure="wrapper entry conflicts with default checkout: ${_taw_convert_wrapper_entry:t}"
+              break 2
+            fi
+          done
+        done
+      fi
+    fi
+  fi
+
+  if [[ -z "$_taw_convert_failure" && "$_taw_convert_original_git_dir" != "$_taw_convert_project_root/.git" ]]; then
+    mkdir -p -- "$_taw_convert_project_root" || _taw_convert_failure="could not create normal repository root"
+    if [[ -z "$_taw_convert_failure" ]] && mv -- "$_taw_convert_original_git_dir" "$_taw_convert_project_root/.git"; then
+      _taw_convert_active_git_dir="$_taw_convert_project_root/.git"
+      _taw_convert_common_moved=true
+      local -a _taw_convert_repair_paths=( "${_taw_convert_destinations[@]}" )
+      [[ "$_taw_convert_default_staged" != true ]] || _taw_convert_repair_paths+=( "$_taw_convert_backup/default" )
+      git --git-dir "$_taw_convert_active_git_dir" worktree repair "${_taw_convert_repair_paths[@]}" \
+        >/dev/null 2>&1 || _taw_convert_failure="could not repair moved worktree metadata"
+    elif [[ -z "$_taw_convert_failure" ]]; then
+      _taw_convert_failure="could not move the bare Git directory"
+    fi
+  fi
+
+  if [[ -z "$_taw_convert_failure" && "$_taw_convert_default_staged" == true ]]; then
+    _taw_convert_default_git_dir="$(git -C "$_taw_convert_backup/default" rev-parse \
+      --path-format=absolute --git-dir 2>/dev/null)" \
+      || _taw_convert_failure="could not resolve the default worktree index"
+    if [[ -z "$_taw_convert_failure" && -f "$_taw_convert_default_git_dir/index" ]]; then
+      cp -p -- "$_taw_convert_default_git_dir/index" "$_taw_convert_backup/meta/index" \
+        && _taw_convert_index_present=true \
+        || _taw_convert_failure="could not preserve the default worktree index"
+    fi
+    if [[ -z "$_taw_convert_failure" ]]; then
+      _taw_convert_move_worktree_entries "$_taw_convert_backup/default" "$_taw_convert_backup/tree" \
+        || _taw_convert_failure="could not preserve the default working tree"
+    fi
+    if [[ -z "$_taw_convert_failure" ]]; then
+      if git --git-dir "$_taw_convert_active_git_dir" worktree remove --force \
+        "$_taw_convert_backup/default"; then
+        _taw_convert_default_removed=true
+      else
+        _taw_convert_failure="could not remove the staged default worktree"
+      fi
+    fi
+  fi
+
+  if [[ -z "$_taw_convert_failure" ]]; then
+    git --git-dir "$_taw_convert_active_git_dir" config core.bare false \
+      && git --git-dir "$_taw_convert_active_git_dir" config --unset-all core.worktree \
+        >/dev/null 2>&1 || true
+    if [[ "$(git --git-dir "$_taw_convert_active_git_dir" config --bool core.bare)" == false ]]; then
+      _taw_convert_config_changed=true
+    else
+      _taw_convert_failure="could not make the repository non-bare"
+    fi
+  fi
+  if [[ -z "$_taw_convert_failure" ]]; then
+    git --git-dir "$_taw_convert_active_git_dir" symbolic-ref \
+      HEAD "refs/heads/$_taw_convert_default_branch" \
+      || _taw_convert_failure="could not set the normal repository default branch"
+  fi
+  if [[ -z "$_taw_convert_failure" && "$_taw_convert_index_present" == true ]]; then
+    cp -p -- "$_taw_convert_backup/meta/index" "$_taw_convert_active_git_dir/index" \
+      || _taw_convert_failure="could not restore the default worktree index"
+  fi
+  if [[ -z "$_taw_convert_failure" && "$_taw_convert_default_staged" == true ]]; then
+    _taw_convert_move_worktree_entries "$_taw_convert_backup/tree" "$_taw_convert_project_root" \
+      || _taw_convert_failure="could not promote the default working tree"
+  elif [[ -z "$_taw_convert_failure" ]] \
+    && git --git-dir "$_taw_convert_active_git_dir" rev-parse --verify \
+      --quiet HEAD^{commit} >/dev/null 2>&1; then
+    git -C "$_taw_convert_project_root" reset --hard HEAD \
+      || _taw_convert_failure="could not check out the default branch"
+  fi
+  if [[ -z "$_taw_convert_failure" && "$_taw_convert_wrapper_staged" == true ]]; then
+    _taw_convert_move_worktree_entries "$_taw_convert_backup/wrapper" "$_taw_convert_project_root" \
+      || _taw_convert_failure="could not restore wrapper entries"
+  fi
+
+  if [[ -z "$_taw_convert_failure" ]]; then
+    [[ "$(git -C "$_taw_convert_project_root" rev-parse \
+      --is-bare-repository 2>/dev/null)" == false ]] \
+      || _taw_convert_failure="converted repository is still bare"
+  fi
+  if [[ -z "$_taw_convert_failure" ]]; then
+    [[ "$(git -C "$_taw_convert_project_root" symbolic-ref \
+      --quiet --short HEAD 2>/dev/null)" == "$_taw_convert_default_branch" ]] \
+      || _taw_convert_failure="normal repository HEAD does not name the default branch"
+  fi
+  if [[ -z "$_taw_convert_failure" && -n "$_taw_convert_default_path" ]]; then
+    _taw_convert_after_default_status="$(git -C "$_taw_convert_project_root" status \
+      --porcelain=v2 --branch --untracked-files=all)" \
+      || _taw_convert_failure="could not verify the promoted default worktree"
+    [[ -n "$_taw_convert_failure" ]] \
+      || _taw_convert_status_records_preserved \
+        "$_taw_convert_before_default_status" "$_taw_convert_after_default_status" \
+      || _taw_convert_failure="default worktree status changed during conversion"
+  fi
+  for (( _taw_convert_i = 1; _taw_convert_i <= ${#_taw_convert_destinations[@]}; _taw_convert_i++ )); do
+    [[ -z "$_taw_convert_failure" ]] || break
+    [[ "$(git -C "${_taw_convert_destinations[_taw_convert_i]}" status \
+      --porcelain=v2 --branch --untracked-files=all)" == "${_taw_convert_statuses[_taw_convert_i]}" ]] \
+      || _taw_convert_failure="worktree status changed during conversion: ${_taw_convert_destinations[_taw_convert_i]}"
+  done
+
+  if [[ -n "$_taw_convert_failure" ]]; then
+    if [[ "$_taw_convert_config_changed" == true ]]; then
+      _taw_convert_move_primary_entries "$_taw_convert_project_root" "$_taw_convert_backup/tree" \
+        || _taw_convert_rollback_ok=false
+      git --git-dir "$_taw_convert_active_git_dir" config core.bare true \
+        || _taw_convert_rollback_ok=false
+    fi
+    if [[ "$_taw_convert_default_removed" == true ]]; then
+      mkdir -p -- "${_taw_convert_default_path:h}" || _taw_convert_rollback_ok=false
+      if git --git-dir "$_taw_convert_active_git_dir" worktree add --no-checkout \
+        "$_taw_convert_default_path" "$_taw_convert_default_branch"; then
+        _taw_convert_actual_git_dir="$(git -C "$_taw_convert_default_path" rev-parse \
+          --path-format=absolute --git-dir 2>/dev/null)" || _taw_convert_rollback_ok=false
+        if [[ "$_taw_convert_index_present" == true ]]; then
+          cp -p -- "$_taw_convert_backup/meta/index" "$_taw_convert_actual_git_dir/index" \
+            || _taw_convert_rollback_ok=false
+        fi
+        _taw_convert_move_worktree_entries "$_taw_convert_backup/tree" "$_taw_convert_default_path" \
+          || _taw_convert_rollback_ok=false
+      else
+        _taw_convert_rollback_ok=false
+      fi
+    elif [[ "$_taw_convert_default_staged" == true && -d "$_taw_convert_backup/default" ]]; then
+      mkdir -p -- "${_taw_convert_default_path:h}" || _taw_convert_rollback_ok=false
+      if ! git --git-dir "$_taw_convert_active_git_dir" worktree move \
+        "$_taw_convert_backup/default" "$_taw_convert_default_path"; then
+        _taw_convert_rollback_ok=false
+      fi
+    fi
+    for (( _taw_convert_i = ${#_taw_convert_paths[@]}; _taw_convert_i >= 1; _taw_convert_i-- )); do
+      if [[ "${_taw_convert_moved_flags[_taw_convert_i]}" == true ]]; then
+        mkdir -p -- "${_taw_convert_paths[_taw_convert_i]:h}" || _taw_convert_rollback_ok=false
+        git --git-dir "$_taw_convert_active_git_dir" worktree move \
+          "${_taw_convert_destinations[_taw_convert_i]}" "${_taw_convert_paths[_taw_convert_i]}" \
+          || _taw_convert_rollback_ok=false
+      fi
+    done
+    if [[ "$_taw_convert_common_moved" == true ]]; then
+      mv -- "$_taw_convert_project_root/.git" "$_taw_convert_original_git_dir" \
+        || _taw_convert_rollback_ok=false
+      _taw_convert_active_git_dir="$_taw_convert_original_git_dir"
+      git --git-dir "$_taw_convert_active_git_dir" worktree repair \
+        "${_taw_convert_paths[@]}" ${_taw_convert_default_path:+"$_taw_convert_default_path"} \
+        >/dev/null 2>&1 || _taw_convert_rollback_ok=false
+    fi
+    cp -p -- "$_taw_convert_backup/meta/config" "$_taw_convert_active_git_dir/config" \
+      && cp -p -- "$_taw_convert_backup/meta/HEAD" "$_taw_convert_active_git_dir/HEAD" \
+      || _taw_convert_rollback_ok=false
+    if [[ "$_taw_convert_default_created" == true ]]; then
+      git --git-dir "$_taw_convert_active_git_dir" update-ref -d \
+        "refs/heads/$_taw_convert_default_branch" || _taw_convert_rollback_ok=false
+    fi
+    if [[ "$_taw_convert_wrapper_staged" == true && -d "$_taw_convert_backup/wrapper" ]]; then
+      _taw_convert_move_worktree_entries "$_taw_convert_backup/wrapper" "$_taw_convert_project_root" \
+        || _taw_convert_rollback_ok=false
+    fi
+    if [[ "$_taw_convert_rollback_ok" == true && "$_taw_convert_caller_relocated" == true ]]; then
+      builtin cd -- "$_taw_convert_caller_original_path" || _taw_convert_rollback_ok=false
+    fi
+    if [[ "$_taw_convert_rollback_ok" == true ]]; then
+      rm -rf -- "$_taw_convert_backup"
+      _taw_convert_die "$_taw_convert_failure; original bare project restored"
+    else
+      _taw_convert_die "$_taw_convert_failure; rollback incomplete; recovery files remain at $_taw_convert_backup"
+    fi
+    return 1
+  fi
+
+  rm -rf -- "$_taw_convert_backup" || return 1
+  case "$_taw_convert_caller_target" in
+    default)
+      builtin cd -- "$_taw_convert_project_root$_taw_convert_caller_relative" || return 1
+      ;;
+    worktree:*)
+      _taw_convert_i="${_taw_convert_caller_target#worktree:}"
+      builtin cd -- "${_taw_convert_destinations[_taw_convert_i]}$_taw_convert_caller_relative" || return 1
+      ;;
+  esac
+
+  print -r -- "taw-convert: converted $_taw_convert_project_root to a normal project"
+  print -r -- "taw-convert: default worktree: $_taw_convert_project_root"
+  for _taw_convert_path in "${_taw_convert_destinations[@]}"; do
+    print -r -- "taw-convert: linked worktree: $_taw_convert_path"
+  done
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --)
+      shift
+      _taw_convert_positionals+=( "$@" )
+      break
+      ;;
+    -debug|--debug)
+      _taw_convert_debug=true
+      shift
+      ;;
+    -*)
+      _taw_convert_die "unknown option: $1"
+      return 1
+      ;;
+    *)
+      _taw_convert_positionals+=( "$1" )
+      shift
+      ;;
+  esac
+done
+
+if (( ${#_taw_convert_positionals[@]} != 1 )); then
+  _taw_convert_die "requires exactly one project"
+  return 1
+fi
+
+_taw_convert_resolve_project "${_taw_convert_positionals[1]}" || return 1
+_taw_convert_debug_dump
+_taw_convert_project
+
