@@ -361,4 +361,3 @@ make_conventional_bare_clone() {
   git clone --bare "$src" "$bare" >/dev/null 2>&1
   printf '%s\n' "$bare"
 }
-

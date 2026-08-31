@@ -63,7 +63,8 @@ bash ./configure
 
 Runs all available tool config hooks.
 
-For the `taw` zsh function, see [docs/taw.md](docs/taw.md).
+For the `taw` and `taw-convert` Zsh functions, see
+[docs/taw.md](docs/taw.md) and [docs/taw-convert.md](docs/taw-convert.md).
 
 ## How Tool Installation Works
 

@@ -19,7 +19,6 @@ Relevant options:
 - `-sh`, `-shell`
 - `--peer`
 - `--force` (peer only)
-- `--convert`
 - `--mode=<ts|session|b|branch>`
 - project picker aliases: `-ts`, `--ts`, `-picker`, `--picker`, `-pick-project`, `--pick-project`
 
@@ -224,43 +223,6 @@ Validation happens before mutation:
 URL clone failures stop the flow; they do not fall through to the create prompt.
 URL cloning prompts for `normal` or `bare`, with `normal` as the default.
 
-## Conversion
-
-```text
-taw --convert <project>
-```
-
-Conversion is an action-only mode. It converts an existing bare repository to
-a normal clone, prints the resulting worktree paths, and exits without creating
-or selecting a tmux window. It accepts taw wrappers containing `.git` or
-`.bare`, and conventional `<name>.git` repositories. Normal and plain projects
-are rejected.
-
-The bare repository's symbolic `HEAD` selects the default branch, followed by
-the normal `origin/HEAD`, `main`, and `master` fallbacks. An existing worktree
-for that branch is promoted to the repository root. If one does not exist, taw
-creates a clean default checkout there.
-
-Every other registered worktree is moved beneath `.worktrees`. Branch
-worktrees use their complete branch names, including slash-separated paths;
-detached worktrees use their previous directory basename. Internal, external,
-dirty, staged, untracked, ignored, and detached worktrees retain their Git
-state.
-
-Conversion validates all destinations before mutation. It rejects collisions,
-duplicate destination names, locked worktrees, active Git operations, Git lock
-files, unmerged entries, initialized submodules, sparse or split indexes,
-worktree-specific config, and a default worktree that tracks `.worktrees`.
-Unmanaged wrapper files are retained at the normal repository root unless
-they conflict with promoted default-worktree content. Failures after mutation
-starts trigger rollback to the original bare layout. If rollback cannot
-finish, taw reports the private recovery directory and leaves it in place.
-
-`--convert` accepts `--debug` but cannot be combined with project, branch,
-picker, peer, agent, editor, or shell options. If the invoking shell is inside
-a converted worktree, taw changes it to the equivalent directory at its new
-location.
-
 ## `TAW_AGENT`
 
 - Non-empty trimmed `TAW_AGENT` replaces the default `codex` agent when no explicit `-agent` is supplied.
@@ -315,7 +277,6 @@ it from every session to which it is linked.
 taw -p ~/src/repo
 taw -p ~/src/repo feature/foo
 taw -p ~/src/repo feature/foo develop
-taw --convert ~/src/legacy-bare
 taw --peer sheffield-live hallamshire-hotel-all-day
 taw --peer --force -p ~/src/repo -agent "claude --resume"
 taw --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
