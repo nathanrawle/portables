@@ -41,6 +41,7 @@ vim.filetype.add({
   extension = {
     tf = "terraform",
     tfvars = "terraform-vars",
+    tfbackend = "terraform-vars",
   },
   filename = {
     ["compose.yaml"] = "yaml.docker-compose",
