@@ -1,0 +1,61 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex idle", "timeout": 3 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex thinking", "timeout": 3 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^request_user_input$",
+        "hooks": [
+          { "type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex waiting", "timeout": 3 }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex waiting", "timeout": 3 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex thinking", "timeout": 3 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex idle", "timeout": 3 }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex idle", "timeout": 3 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.zfuns/taw-agent-status clear", "timeout": 3 }
+        ]
+      }
+    ]
+  }
+}
