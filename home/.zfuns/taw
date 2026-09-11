@@ -2,6 +2,7 @@
 
 emulate -L zsh
 setopt pipefail
+unsetopt bg_nice
 
 local -a _taw_shell_cmds _taw_positionals _taw_picker_modes
 local -A _taw_picker_producer_pids

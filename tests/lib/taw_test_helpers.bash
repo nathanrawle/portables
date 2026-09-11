@@ -183,8 +183,8 @@ case "${1:-}" in
           '#{session_id}')
             printf '%s\n' "$session_id"
             ;;
-          "[TMUX] #{session_name}")
-            printf '[TMUX] %s\n' "$session"
+          "* #{session_name}")
+            printf '* %s\n' "$session"
             ;;
           $'#{session_id}\t#{session_name}\t#{session_path}')
             printf '%s\t%s\t%s\n' "$session_id" "$session" "$path"
