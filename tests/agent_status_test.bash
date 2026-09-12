@@ -25,7 +25,7 @@ EOF
 }
 
 owned_hook_count() {
-  jq '[.hooks[][]?.hooks[]? | select((.command? // "") | startswith("$HOME/.zfuns/taw-agent-status "))] | length' "$1"
+  jq '[.hooks[][]?.hooks[]? | select((.command? // "") | startswith("\"$HOME/.zfuns/taw-agent-status\" "))] | length' "$1"
 }
 
 test_agent_status_sets_pane_options() {
@@ -152,6 +152,25 @@ test_agent_status_config_is_idempotent() {
   assert_eq 8 "$(owned_hook_count "$codex")" "expected no duplicate Codex handlers"
 }
 
+test_agent_status_config_quotes_home_with_spaces() {
+  local home codex bin log command
+
+  home="$TEST_TMPDIR/home with spaces"
+  codex="$home/.codex/hooks.json"
+  bin="$(make_status_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  mkdir -p "$home/.zfuns"
+  ln -s "$AGENT_STATUS" "$home/.zfuns/taw-agent-status"
+
+  HOME="$home" bash "$AGENT_STATUS_CONFIG" config
+  command="$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$codex")"
+  HOME="$home" TMUX=/tmp/tmux TMUX_PANE=%4 PATH="$bin" \
+    TAW_STATUS_TMUX_LOG="$log" bash -c "$command"
+
+  assert_file_contains "$log" 'set-option -p -t %4 @taw_agent codex'
+  assert_file_contains "$log" 'set-option -p -t %4 @taw_agent_state idle'
+}
+
 test_agent_status_config_refuses_malformed_json() {
   local home codex before output
 
@@ -222,6 +241,8 @@ test_case "agent status: rejects invalid arguments" test_agent_status_rejects_in
 test_case "agent status config: creates native hooks" test_agent_status_config_creates_native_hooks
 test_case "agent status config: preserves unrelated settings" test_agent_status_config_preserves_unrelated_settings
 test_case "agent status config: is idempotent" test_agent_status_config_is_idempotent
+test_case "agent status config: quotes HOME paths containing spaces" \
+  test_agent_status_config_quotes_home_with_spaces
 test_case "agent status config: refuses malformed JSON" test_agent_status_config_refuses_malformed_json
 test_case "agent status config: preserves symlinks" test_agent_status_config_preserves_symlink
 test_case "agent status config: prefers GNU stat syntax" \

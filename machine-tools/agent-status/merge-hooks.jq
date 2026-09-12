@@ -1,7 +1,9 @@
 def owned_handler:
   type == "object"
   and .type == "command"
-  and ((.command? // "") | startswith("$HOME/.zfuns/taw-agent-status "));
+  and ((.command? // "") as $command
+    | ($command | startswith("$HOME/.zfuns/taw-agent-status "))
+      or ($command | startswith("\"$HOME/.zfuns/taw-agent-status\" ")));
 
 def without_owned_handlers:
   if ((.hooks? | type) != "array") then
