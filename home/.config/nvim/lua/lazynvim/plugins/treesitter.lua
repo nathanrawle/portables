@@ -111,7 +111,12 @@ return {
 
         vim.treesitter.stop(bufnr)
 
-        local parser_available, parser_error = vim.treesitter.language.add(lang)
+        local load_ok, parser_available, parser_error = pcall(vim.treesitter.language.add, lang)
+        if not load_ok then
+          parser_error = parser_available
+          parser_available = false
+        end
+
         if not parser_available then
           if explicitly_configured then
             fallback_to_regex(bufnr, lang, parser_error)

@@ -32,6 +32,7 @@ vim.g.ts_ensure_installed = {
   "sql",
   "terraform",
   "toml",
+  "tmux",
   "typescript",
   "tsx",
   "vim",
