@@ -75,8 +75,9 @@ The session picker keeps the existing tmux-sessionizer scope: it lists tmux
 sessions and projects found under the configured search paths. Visible project
 paths use zsh named-directory abbreviations such as `~`, `~code`, and
 `~portables/subdirectory`; target resolution still uses their absolute paths.
-Ordinary tmux sessions begin with `*`. Sessions containing Codex or Claude Code
-replace that marker with the agent's state:
+Ordinary tmux sessions begin with `*`. When the lifecycle hooks are installed,
+sessions containing Codex or Claude Code in a tmux pane replace that marker with
+the agent's state:
 
 | State | Nerd Font | Unicode | Meaning |
 | --- | :---: | :---: | --- |
@@ -90,9 +91,10 @@ acknowledged, thinking, then idle. The marker is part of the session snapshot;
 reopen the picker to refresh it.
 
 `TAW_ICONS` controls the icon set. Its values are `auto`, `nerd`, and `unicode`.
-The default, `auto`, uses Nerd Font icons when `fc-list` finds a font covering
-all three glyphs, otherwise it uses Unicode. Set an explicit value when font
-detection does not match the terminal's configured font.
+The default, `auto`, uses Nerd Font icons when `fc-list` finds installed font
+coverage for all three glyphs, otherwise it uses Unicode. This checks system
+fonts, not the font selected by the terminal, so set an explicit value when
+automatic detection does not match the terminal's configured font.
 
 Branch mode uses the Git project containing the directory where `taw` was
 invoked. Outside a Git project, it shows `Not in a Git project` instead of
@@ -299,10 +301,19 @@ bash ./configure agent-status
 ```
 
 The configurator merges its handlers into `~/.codex/hooks.json` and
-`~/.claude/settings.json` without replacing unrelated settings or hooks. It
+`~/.claude/settings.json`. It is safe to rerun: it replaces only its own handlers
+and preserves unrelated settings, file permissions, and symlink targets. It
 requires `jq`, which is already managed by this repository. Restart existing
 agent sessions after configuration. Codex requires reviewing the new handlers
 with `/hooks`; Claude Code requires the workspace to be trusted before hooks run.
+
+The status publisher is a no-op outside tmux. For an existing tmux server,
+reload `~/.config/tmux/tmux.conf` after updating Portables so pane-focus events
+can acknowledge waiting agents:
+
+```bash
+tmux source-file ~/.config/tmux/tmux.conf
+```
 
 Focusing a waiting agent pane changes its marker to `…`. Neither CLI exposes a
 universal event for a permission answer, so `…` means the prompt was seen, not
