@@ -60,24 +60,28 @@ return {
     local function highlighting_strategy(lang)
       local configured = vim.g.syntax_highlight_strategy
       if configured == nil then
-        return "treesitter"
+        return "treesitter", false
       end
 
       if type(configured) ~= "table" then
         vim.notify_once("vim.g.syntax_highlight_strategy must be a table; using treesitter", vim.log.levels.WARN)
-        return "treesitter"
+        return "treesitter", false
       end
 
-      local strategy = configured[lang] or "treesitter"
+      local strategy = configured[lang]
+      if strategy == nil then
+        return "treesitter", false
+      end
+
       if valid_strategies[strategy] then
-        return strategy
+        return strategy, true
       end
 
       vim.notify_once(
         ("Invalid syntax highlighting strategy for %s: %s; using treesitter"):format(lang, vim.inspect(strategy)),
         vim.log.levels.WARN
       )
-      return "treesitter"
+      return "treesitter", true
     end
 
     local function fallback_to_regex(bufnr, lang, reason)
@@ -99,13 +103,23 @@ return {
           return
         end
 
-        local strategy = highlighting_strategy(lang)
+        local strategy, explicitly_configured = highlighting_strategy(lang)
         if strategy == "regex" then
           enable_regex_highlighting(bufnr)
           return
         end
 
         vim.treesitter.stop(bufnr)
+
+        local parser_available, parser_error = vim.treesitter.language.add(lang)
+        if not parser_available then
+          if explicitly_configured then
+            fallback_to_regex(bufnr, lang, parser_error)
+          else
+            enable_regex_highlighting(bufnr)
+          end
+          return
+        end
 
         local query_ok, highlight_query = pcall(vim.treesitter.query.get, lang, "highlights")
         if not query_ok or not highlight_query then
