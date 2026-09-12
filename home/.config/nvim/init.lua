@@ -3,7 +3,7 @@ vim.g.maplocalleader = " "
 vim.g.have_nerd_font = true
 vim.g.default_colorscheme = "tokyonight"
 vim.g.syntax_highlight_strategy = {
-  tmux = "treesitter",
+  tmux = "both",
 }
 vim.g.ts_ensure_installed = {
   "bash",
@@ -32,7 +32,6 @@ vim.g.ts_ensure_installed = {
   "sql",
   "terraform",
   "toml",
-  "tmux",
   "typescript",
   "tsx",
   "vim",
