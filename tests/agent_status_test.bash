@@ -185,6 +185,35 @@ test_agent_status_config_preserves_symlink() {
   assert_eq 8 "$(owned_hook_count "$target")" "expected symlink target updated"
 }
 
+test_agent_status_config_prefers_gnu_stat_syntax() {
+  local home bin stat_log
+
+  home="$TEST_TMPDIR/home"
+  bin="$TEST_TMPDIR/bin"
+  stat_log="$TEST_TMPDIR/stat.log"
+  mkdir -p "$home/.codex" "$home/.claude" "$bin"
+  printf '{}\n' >"$home/.codex/hooks.json"
+  printf '{}\n' >"$home/.claude/settings.json"
+  cat >"$bin/stat" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >>"$TAW_STATUS_STAT_LOG"
+case "${1:-}" in
+  -c) printf '600\n' ;;
+  -f) printf 'unexpected filesystem report\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+  chmod +x "$bin/stat"
+
+  HOME="$home" PATH="$bin:$PATH" TAW_STATUS_STAT_LOG="$stat_log" \
+    bash "$AGENT_STATUS_CONFIG" config
+
+  assert_file_contains "$stat_log" '-c %a'
+  assert_file_not_contains "$stat_log" '-f %Lp'
+}
+
 test_case "agent status: sets pane options" test_agent_status_sets_pane_options
 test_case "agent status: acknowledges only waiting panes" test_agent_status_acknowledges_only_waiting
 test_case "agent status: clears pane options" test_agent_status_clears_pane_options
@@ -195,3 +224,5 @@ test_case "agent status config: preserves unrelated settings" test_agent_status_
 test_case "agent status config: is idempotent" test_agent_status_config_is_idempotent
 test_case "agent status config: refuses malformed JSON" test_agent_status_config_refuses_malformed_json
 test_case "agent status config: preserves symlinks" test_agent_status_config_preserves_symlink
+test_case "agent status config: prefers GNU stat syntax" \
+  test_agent_status_config_prefers_gnu_stat_syntax
