@@ -1,7 +1,21 @@
 vim.keymap.set("n", "<Esc>", "<cmd>nohlsearch<CR>")
 vim.keymap.set("n", "<leader>q", vim.diagnostic.setloclist, { desc = "Open diagnostic qf list" })
 vim.keymap.set("t", "<Esc><Esc>", "<C-\\><C-n>", { desc = "Exit terminal mode" })
-vim.keymap.set("n", "\\", "<cmd>Rexplore<cr>", { desc = "Toggle explorer" })
+vim.keymap.set("n", "\\", function()
+  if vim.bo.filetype ~= "netrw" then
+    vim.w.netrw_previous_alt = vim.fn.bufnr("#")
+    vim.cmd.Rexplore()
+    return
+  end
+
+  -- Rexplore bypasses netrw_altfile when returning from the explorer.
+  local alternate = vim.w.netrw_previous_alt
+  vim.cmd("keepalt Rexplore")
+  if vim.bo.filetype ~= "netrw" and alternate and vim.fn.bufexists(alternate) == 1 then
+    vim.fn.setreg("#", alternate)
+  end
+  vim.w.netrw_previous_alt = nil
+end, { desc = "Toggle explorer" })
 
 -- Move selection
 vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv")
