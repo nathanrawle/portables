@@ -2,6 +2,7 @@
 
 emulate -L zsh
 setopt pipefail
+unsetopt bg_nice
 
 local -a _taw_shell_cmds _taw_positionals _taw_picker_modes
 local -A _taw_picker_producer_pids
@@ -20,6 +21,7 @@ local _taw_default_branch_result _taw_default_base_ref
 local _taw_branch_target_name _taw_branch_target_ref
 local _taw_picker_kind _taw_picker_branch _taw_picker_ref _taw_picker_path
 local _taw_picker_cache_dir
+local _taw_agent_icon_style
 
 _taw_shell_cmds=()
 _taw_positionals=()
@@ -46,6 +48,7 @@ _taw_peer=false
 _taw_force=false
 _taw_current_session_id=
 _taw_picker_cache_dir=
+_taw_agent_icon_style=
 
 _taw_die() {
   print -u2 -- "taw: $*"
@@ -123,6 +126,62 @@ _taw_require_picker_safe() {
 _taw_emit_picker_row() {
   (( ${+_taw_picker_row_count} )) && (( ++_taw_picker_row_count ))
   print -r -- "$1"
+}
+
+_taw_font_has_glyph() {
+  [[ -n "$(fc-list ":charset=$1" 2>/dev/null)" ]]
+}
+
+_taw_resolve_agent_icon_style() {
+  local _taw_requested_style="${TAW_ICONS:-auto}"
+
+  case "$_taw_requested_style" in
+    auto)
+      if command -v fc-list >/dev/null 2>&1 \
+        && _taw_font_has_glyph f06a9 \
+        && _taw_font_has_glyph f051f \
+        && _taw_font_has_glyph f0e47; then
+        _taw_agent_icon_style=nerd
+      else
+        _taw_agent_icon_style=unicode
+      fi
+      ;;
+    nerd|unicode)
+      _taw_agent_icon_style="$_taw_requested_style"
+      ;;
+    *)
+      _taw_die "TAW_ICONS must be auto, nerd, or unicode"
+      return 1
+      ;;
+  esac
+}
+
+_taw_agent_icon() {
+  local _taw_state="$1"
+
+  case "$_taw_agent_icon_style:$_taw_state" in
+    nerd:idle) print -r -- '󰚩' ;;
+    nerd:thinking) print -r -- '󰔟' ;;
+    nerd:waiting) print -r -- '󰹇' ;;
+    nerd:acknowledged) print -r -- '…' ;;
+    unicode:idle) print -r -- '○' ;;
+    unicode:thinking) print -r -- '◐' ;;
+    unicode:waiting) print -r -- '◉' ;;
+    unicode:acknowledged) print -r -- '…' ;;
+    *) return 1 ;;
+  esac
+}
+
+_taw_session_agent_state() {
+  local _taw_metadata="$1"
+
+  case "$_taw_metadata" in
+    *'codex=waiting;'*|*'claude=waiting;'*) print -r -- waiting ;;
+    *'codex=acknowledged;'*|*'claude=acknowledged;'*) print -r -- acknowledged ;;
+    *'codex=thinking;'*|*'claude=thinking;'*) print -r -- thinking ;;
+    *'codex=idle;'*|*'claude=idle;'*) print -r -- idle ;;
+    *) return 1 ;;
+  esac
 }
 
 _taw_debug_dump() {
@@ -580,6 +639,7 @@ _taw_tmux_sessionizer_picker_rows() {
   local -a _taw_tmux_rows
   local _taw_picker_current_session_id _taw_sessions _taw_session_line
   local _taw_session_id _taw_session_name _taw_session_path _taw_session_rest
+  local _taw_session_path_and_metadata _taw_session_metadata _taw_agent_state _taw_icon
   local _taw_entry _taw_path _taw_depth
   local _taw_marker=__taw_picker_end__ _taw_session_format
   local _taw_tab=$'\t'
@@ -596,6 +656,8 @@ _taw_tmux_sessionizer_picker_rows() {
     source "./$CONFIG_FILE_NAME"
   fi
 
+  _taw_resolve_agent_icon_style || return 1
+
   [[ ${#TS_SEARCH_PATHS[@]} -gt 0 ]] || TS_SEARCH_PATHS=(~ ~/personal ~/personal/dev/env/.config)
   if (( ${#TS_EXTRA_SEARCH_PATHS[@]} > 0 )); then
     TS_SEARCH_PATHS+=( "${TS_EXTRA_SEARCH_PATHS[@]}" )
@@ -606,7 +668,7 @@ _taw_tmux_sessionizer_picker_rows() {
       || _taw_picker_current_session_id=
   fi
 
-  _taw_session_format=$'#{session_id}\t#{session_name}\t#{session_path}'"$_taw_marker"
+  _taw_session_format=$'#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}'"$_taw_marker"
   _taw_tmux_list_args=(list-sessions -F "$_taw_session_format")
   if [[ -n "$_taw_picker_current_session_id" ]]; then
     _taw_tmux_list_args+=(
@@ -621,22 +683,30 @@ _taw_tmux_sessionizer_picker_rows() {
       && "$_taw_session_id" == "$_taw_picker_current_session_id" ]] && continue
     _taw_session_rest="${_taw_session_line#*${_taw_tab}}"
     _taw_session_name="${_taw_session_rest%%${_taw_tab}*}"
-    _taw_session_path="${_taw_session_rest#*${_taw_tab}}"
+    _taw_session_path_and_metadata="${_taw_session_rest#*${_taw_tab}}"
+    _taw_session_metadata="${_taw_session_path_and_metadata##*${_taw_tab}}"
+    _taw_session_path="${_taw_session_path_and_metadata%${_taw_tab}*}"
     [[ "$_taw_session_rest" != "$_taw_session_line" \
-      && "$_taw_session_path" != "$_taw_session_rest" \
-      && "$_taw_session_path" == *"$_taw_marker" ]] || {
+      && "$_taw_session_path_and_metadata" != "$_taw_session_rest" \
+      && "$_taw_session_path" != "$_taw_session_path_and_metadata" \
+      && "$_taw_session_metadata" == *"$_taw_marker" ]] || {
       _taw_die "tmux returned invalid session metadata"
       return 1
     }
-    _taw_session_path="${_taw_session_path%$_taw_marker}"
+    _taw_session_metadata="${_taw_session_metadata%$_taw_marker}"
     [[ -n "$_taw_session_id" && -n "$_taw_session_name" \
       && -n "$_taw_session_path" ]] || {
       _taw_die "tmux returned invalid session metadata"
       return 1
     }
     _taw_require_picker_safe "tmux session" \
-      "$_taw_session_id" "$_taw_session_name" "$_taw_session_path" || return 1
-    _taw_tmux_rows+=("* $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path")
+      "$_taw_session_id" "$_taw_session_name" "$_taw_session_path" \
+      "$_taw_session_metadata" || return 1
+    _taw_icon='*'
+    if _taw_agent_state="$(_taw_session_agent_state "$_taw_session_metadata")"; then
+      _taw_icon="$(_taw_agent_icon "$_taw_agent_state")" || return 1
+    fi
+    _taw_tmux_rows+=("$_taw_icon $_taw_session_name"$'\t'"tmux"$'\t'"$_taw_session_id"$'\t'"$_taw_session_name"$'\t'"$_taw_session_path")
   done
   for _taw_session_line in "${_taw_tmux_rows[@]}"; do
     _taw_emit_picker_row "$_taw_session_line" || return 1
@@ -783,8 +853,9 @@ _taw_start_picker_producer() {
 
     _taw_explicit_picker_rows "$_taw_mode" >"$_taw_rows" 2>"$_taw_errors"
     _taw_producer_status=$?
-    print -r -- "$_taw_producer_status" >"$_taw_status_tmp" || return 1
-    command mv -f -- "$_taw_status_tmp" "$_taw_status"
+    [[ ! -f "$_taw_picker_cache_dir/cancelled" ]] || return 0
+    print -r -- "$_taw_producer_status" >"$_taw_status_tmp" 2>/dev/null || return 0
+    command mv -f -- "$_taw_status_tmp" "$_taw_status" 2>/dev/null || return 0
   ) &
   _taw_picker_producer_pids[$_taw_mode]=$!
 }
@@ -879,6 +950,7 @@ _taw_cleanup_picker_cache() {
   local _taw_mode _taw_pid
 
   [[ -n "$_taw_picker_cache_dir" ]] || return 0
+  : >"$_taw_picker_cache_dir/cancelled" 2>/dev/null || true
   for _taw_mode in "${_taw_picker_modes[@]}"; do
     _taw_pid="${_taw_picker_producer_pids[$_taw_mode]-}"
     [[ -n "$_taw_pid" ]] || continue
@@ -889,17 +961,7 @@ _taw_cleanup_picker_cache() {
     [[ -n "$_taw_pid" ]] || continue
     wait "$_taw_pid" 2>/dev/null || true
   done
-  command rm -f -- \
-    "$_taw_picker_cache_dir/session.rows" \
-    "$_taw_picker_cache_dir/session.errors" \
-    "$_taw_picker_cache_dir/session.status" \
-    "$_taw_picker_cache_dir/session.status.tmp" \
-    "$_taw_picker_cache_dir/branch.rows" \
-    "$_taw_picker_cache_dir/branch.errors" \
-    "$_taw_picker_cache_dir/branch.status" \
-    "$_taw_picker_cache_dir/branch.status.tmp" \
-    "$_taw_picker_cache_dir/fzf.exited"
-  command rmdir -- "$_taw_picker_cache_dir" 2>/dev/null || true
+  command rm -rf -- "$_taw_picker_cache_dir"
   _taw_picker_cache_dir=
 }
 

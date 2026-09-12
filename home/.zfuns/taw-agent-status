@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+set -u
+
+usage() {
+  printf 'usage: taw-agent-status set <codex|claude> <idle|thinking|waiting> [pane]\n' >&2
+  printf '       taw-agent-status acknowledge [pane]\n' >&2
+  printf '       taw-agent-status clear [pane]\n' >&2
+}
+
+pane_target() {
+  local explicit_pane="${1:-}"
+
+  [[ -n "${TMUX:-}" ]] || return 1
+  if [[ -n "$explicit_pane" ]]; then
+    printf '%s\n' "$explicit_pane"
+  elif [[ -n "${TMUX_PANE:-}" ]]; then
+    printf '%s\n' "$TMUX_PANE"
+  else
+    return 1
+  fi
+}
+
+tmux_available() {
+  command -v tmux >/dev/null 2>&1
+}
+
+set_status() {
+  local agent="$1"
+  local state="$2"
+  local pane="$3"
+
+  tmux set-option -p -t "$pane" @taw_agent "$agent" >/dev/null 2>&1 || return 0
+  tmux set-option -p -t "$pane" @taw_agent_state "$state" >/dev/null 2>&1 || true
+}
+
+acknowledge_status() {
+  local pane="$1"
+  local state
+
+  state="$(tmux show-option -pqv -t "$pane" @taw_agent_state 2>/dev/null)" || return 0
+  [[ "$state" = waiting ]] || return 0
+  tmux set-option -p -t "$pane" @taw_agent_state acknowledged >/dev/null 2>&1 || true
+}
+
+clear_status() {
+  local pane="$1"
+
+  tmux set-option -pu -t "$pane" @taw_agent_state >/dev/null 2>&1 || true
+  tmux set-option -pu -t "$pane" @taw_agent >/dev/null 2>&1 || true
+}
+
+case "${1:-}" in
+  set)
+    [[ $# -ge 3 && $# -le 4 ]] || { usage; exit 2; }
+    case "$2" in codex|claude) ;; *) usage; exit 2 ;; esac
+    case "$3" in idle|thinking|waiting) ;; *) usage; exit 2 ;; esac
+    pane="$(pane_target "${4:-}")" || exit 0
+    tmux_available || exit 0
+    set_status "$2" "$3" "$pane"
+    ;;
+  acknowledge)
+    [[ $# -le 2 ]] || { usage; exit 2; }
+    pane="$(pane_target "${2:-}")" || exit 0
+    tmux_available || exit 0
+    acknowledge_status "$pane"
+    ;;
+  clear)
+    [[ $# -le 2 ]] || { usage; exit 2; }
+    pane="$(pane_target "${2:-}")" || exit 0
+    tmux_available || exit 0
+    clear_status "$pane"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

@@ -165,7 +165,7 @@ case "${1:-}" in
       while IFS= read -r line || [[ -n "$line" ]]; do
         line_number=$((line_number + 1))
         [[ -n "$line" ]] || continue
-        IFS=$'\t' read -r first second third _ <<<"$line"
+        IFS=$'\t' read -r first second third fourth _ <<<"$line"
         if [[ ( "$first" = @* || "$first" = \$* ) && -n "$third" ]]; then
           session_id="$first"
           session="$second"
@@ -183,8 +183,8 @@ case "${1:-}" in
           '#{session_id}')
             printf '%s\n' "$session_id"
             ;;
-          "[TMUX] #{session_name}")
-            printf '[TMUX] %s\n' "$session"
+          "* #{session_name}")
+            printf '* %s\n' "$session"
             ;;
           $'#{session_id}\t#{session_name}\t#{session_path}')
             printf '%s\t%s\t%s\n' "$session_id" "$session" "$path"
@@ -194,6 +194,18 @@ case "${1:-}" in
               printf '%s__taw_picker_end__\n' "$line"
             else
               printf '%s\t%s__taw_picker_end__\n' "$session_id" "$line"
+            fi
+            ;;
+          $'#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__')
+            if [[ ( "$first" = @* || "$first" = \$* ) && -n "$third" ]]; then
+              if [[ "$fourth" = *codex=* || "$fourth" = *claude=* ]]; then
+                printf '%s\t%s\t%s\t%s__taw_picker_end__\n' \
+                  "$first" "$second" "$third" "$fourth"
+              else
+                printf '%s\t__taw_picker_end__\n' "$line"
+              fi
+            else
+              printf '%s\t%s\t__taw_picker_end__\n' "$session_id" "$line"
             fi
             ;;
           $'#{session_name}\t#{session_path}')

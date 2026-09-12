@@ -1,0 +1,82 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude idle", "timeout": 3 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude thinking", "timeout": 3 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^AskUserQuestion$",
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude waiting", "timeout": 3 }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude waiting", "timeout": 3 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude thinking", "timeout": 3 }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude thinking", "timeout": 3 }
+        ]
+      }
+    ],
+    "Elicitation": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude waiting", "timeout": 3 }
+        ]
+      }
+    ],
+    "ElicitationResult": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude thinking", "timeout": 3 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude idle", "timeout": 3 }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude idle", "timeout": 3 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" clear", "timeout": 3 }
+        ]
+      }
+    ]
+  }
+}
