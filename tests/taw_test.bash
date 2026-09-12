@@ -264,6 +264,20 @@ make_path_without_fzf() {
   printf '%s\n' "$bin"
 }
 
+make_fake_fc_list() {
+  local bin="$1"
+
+  cat >"$bin/fc-list" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${TAW_FAKE_FONT_HAS_NERD:-0}" = 1 ]]; then
+  printf 'Maple Mono NF\n'
+fi
+EOF
+  chmod +x "$bin/fc-list"
+}
+
 make_fake_git_url_clone() {
   local bin="$1"
   local real_git
@@ -686,7 +700,7 @@ test_normal_repo_picker_lists_deduped_branches() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     run_taw "$repo" -p "$repo"
 
-  remote_count="$(grep -F $'remote-only\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
+  remote_count="$(grep -F $'remote-only\e[0m\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
   assert_eq "1" "$remote_count" "expected duplicate remote branches to dedupe to one picker row"
   assert_file_contains "$fzf_log" \
     $'  \e[31mremote-only\e[0m\tbranch\tremote-only\torigin/remote-only\t'
@@ -1702,7 +1716,7 @@ test_bare_picker_lists_deduped_branches() {
     run_taw "$TEST_TMPDIR" -p "$project"
 
   main_count="$(grep -F $'\tbranch\tmain\tmain\t' "$fzf_log" | wc -l | tr -d ' ')"
-  remote_count="$(grep -F $'remote-only\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
+  remote_count="$(grep -F $'remote-only\e[0m\tbranch' "$fzf_log" | wc -l | tr -d ' ')"
   assert_eq "1" "$main_count" "expected assigned local main to suppress remote duplicates"
   assert_eq "1" "$remote_count" "expected duplicate remote branches to dedupe to one picker row"
   assert_file_contains "$fzf_log" \
@@ -2832,10 +2846,112 @@ test_project_picker_batches_tmux_session_metadata() {
 
   assert_file_contains "$fzf_log" '* first'
   assert_file_contains "$fzf_log" '* second'
-  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}__taw_picker_end__'
+  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__'
   metadata_call_count="$(grep -Fxc -- "$metadata_call" "$log" || true)"
   assert_eq "1" "$metadata_call_count" "expected one batched tmux metadata query"
   assert_file_not_contains "$log" $'display-message\t-p\t-t\t'
+}
+
+test_project_picker_shows_unicode_agent_states_and_priority() {
+  local xdg empty_search elsewhere fake_bin log fzf_log sessions
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$1\tplain\t/tmp/plain\n'
+  sessions+=$'$2\tidle\t/tmp/idle\tcodex=idle;\n'
+  sessions+=$'$3\tthinking\t/tmp/thinking\tcodex=idle;,claude=thinking;\n'
+  sessions+=$'$4\tacknowledged\t/tmp/ack\tcodex=idle;,claude=acknowledged;\n'
+  sessions+=$'$5\twaiting\t/tmp/waiting\tcodex=thinking;,claude=waiting;'
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+
+  XDG_CONFIG_HOME="$xdg" TAW_ICONS=unicode TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_FZF_CANCEL=1 TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" run_taw "$elsewhere" -ts
+
+  assert_file_contains "$fzf_log" '* plain'
+  assert_file_contains "$fzf_log" '○ idle'
+  assert_file_contains "$fzf_log" '◐ thinking'
+  assert_file_contains "$fzf_log" '… acknowledged'
+  assert_file_contains "$fzf_log" '◉ waiting'
+}
+
+test_project_picker_shows_nerd_agent_states() {
+  local xdg empty_search elsewhere fake_bin log fzf_log sessions
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$1\tidle\t/tmp/idle\tcodex=idle;\n'
+  sessions+=$'$2\tthinking\t/tmp/thinking\tclaude=thinking;\n'
+  sessions+=$'$3\tacknowledged\t/tmp/ack\tcodex=acknowledged;\n'
+  sessions+=$'$4\twaiting\t/tmp/waiting\tclaude=waiting;'
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+
+  XDG_CONFIG_HOME="$xdg" TAW_ICONS=nerd TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_FZF_CANCEL=1 TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" run_taw "$elsewhere" -ts
+
+  assert_file_contains "$fzf_log" '󰚩 idle'
+  assert_file_contains "$fzf_log" '󰔟 thinking'
+  assert_file_contains "$fzf_log" '… acknowledged'
+  assert_file_contains "$fzf_log" '󰹇 waiting'
+}
+
+test_project_picker_auto_detects_agent_icons() {
+  local xdg empty_search elsewhere fake_bin log fzf_log sessions
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$1\tidle\t/tmp/idle\tcodex=idle;'
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  make_fake_fc_list "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf-nerd.log"
+
+  XDG_CONFIG_HOME="$xdg" TAW_ICONS=auto TAW_FAKE_FONT_HAS_NERD=1 \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_CANCEL=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" run_taw "$elsewhere" -ts
+  assert_file_contains "$fzf_log" '󰚩 idle'
+
+  fzf_log="$TEST_TMPDIR/fzf-unicode.log"
+  XDG_CONFIG_HOME="$xdg" TAW_ICONS=auto TAW_FAKE_FONT_HAS_NERD=0 \
+    TAW_FAKE_TMUX_SESSIONS="$sessions" TAW_FAKE_FZF_CANCEL=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" run_taw "$elsewhere" -ts
+  assert_file_contains "$fzf_log" '○ idle'
+}
+
+test_project_picker_rejects_invalid_icon_style() {
+  local elsewhere fake_bin log output
+
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if output="$(TAW_ICONS=pictures TAW_FAKE_TMUX_SESSIONS= \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere" -ts 2>&1)"; then
+    fail "expected invalid TAW_ICONS to fail"
+  fi
+  assert_string_contains "$output" 'TAW_ICONS must be auto, nerd, or unicode'
 }
 
 test_explicit_picker_prefetches_mode_snapshots() {
@@ -2885,7 +3001,7 @@ test_explicit_picker_prefetches_mode_snapshots() {
   assert_eq "1" "$(grep -Fxc -- "$branch_call" "$git_log")" \
     "expected one branch snapshot"
   assert_file_not_contains "$git_log" $'worktree\tlist\t--porcelain\t-z'
-  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}__taw_picker_end__'
+  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__'
   assert_eq "1" "$(grep -Fxc -- "$metadata_call" "$log")" \
     "expected one session snapshot"
   assert_eq "1" "$(wc -l <"$version_log" | tr -d ' ')" \
@@ -3052,7 +3168,7 @@ test_project_picker_skips_unsafe_current_tmux_session() {
   assert_file_contains "$fzf_log" "$repo"
   assert_file_not_contains "$fzf_log" '* current'
   assert_file_contains "$log" \
-    $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}__taw_picker_end__\t-f\t#{!=:#{session_id},$1}'
+    $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__\t-f\t#{!=:#{session_id},$1}'
   assert_file_not_contains "$log" $'display-message\t-p\t-t\t$1\t#{session_path}'
 }
 
@@ -5081,6 +5197,14 @@ test_case "taw: project picker rejects control characters in tmux sessions" \
   test_project_picker_rejects_control_characters_in_tmux_sessions
 test_case "taw: project picker batches tmux session metadata" \
   test_project_picker_batches_tmux_session_metadata
+test_case "taw: project picker shows Unicode agent states and priority" \
+  test_project_picker_shows_unicode_agent_states_and_priority
+test_case "taw: project picker shows Nerd Font agent states" \
+  test_project_picker_shows_nerd_agent_states
+test_case "taw: project picker auto-detects agent icons" \
+  test_project_picker_auto_detects_agent_icons
+test_case "taw: project picker rejects invalid icon style" \
+  test_project_picker_rejects_invalid_icon_style
 test_case "taw: explicit picker prefetches mode snapshots" \
   test_explicit_picker_prefetches_mode_snapshots
 test_case "taw: explicit picker starts fzf before rows finish" \

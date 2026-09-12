@@ -75,6 +75,25 @@ The session picker keeps the existing tmux-sessionizer scope: it lists tmux
 sessions and projects found under the configured search paths. Visible project
 paths use zsh named-directory abbreviations such as `~`, `~code`, and
 `~portables/subdirectory`; target resolution still uses their absolute paths.
+Ordinary tmux sessions begin with `*`. Sessions containing Codex or Claude Code
+replace that marker with the agent's state:
+
+| State | Nerd Font | Unicode | Meaning |
+| --- | :---: | :---: | --- |
+| Idle | `󰚩` | `○` | The agent is open and its turn has finished |
+| Thinking | `󰔟` | `◐` | The agent is processing a turn |
+| Waiting | `󰹇` | `◉` | The agent needs a question, permission, or elicitation answered |
+| Acknowledged | `…` | `…` | The waiting pane has been focused |
+
+For sessions containing multiple agents, the displayed priority is waiting,
+acknowledged, thinking, then idle. The marker is part of the session snapshot;
+reopen the picker to refresh it.
+
+`TAW_ICONS` controls the icon set. Its values are `auto`, `nerd`, and `unicode`.
+The default, `auto`, uses Nerd Font icons when `fc-list` finds a font covering
+all three glyphs, otherwise it uses Unicode. Set an explicit value when font
+detection does not match the terminal's configured font.
+
 Branch mode uses the Git project containing the directory where `taw` was
 invoked. Outside a Git project, it shows `Not in a Git project` instead of
 exiting. A mode with no discovered targets shows `Picker has no targets`.
@@ -109,13 +128,13 @@ Acceptance keys choose the layout for a newly created target:
 An explicit `-agent` supplies the agent command. Otherwise, an agent-containing
 acceptance layout uses trimmed `TAW_AGENT` when set and falls back to `codex`.
 Plain Enter does not enable an agent from `TAW_AGENT`. Acceptance modifiers are
-ignored for a selected `[TMUX]` session or an exact matching worktree window.
+ignored for a selected tmux session or an exact matching worktree window.
 
 Session picker result handling:
 
-- `[TMUX]` rows switch or attach directly by tmux session identity, preserving the session's active window
-- with `--peer`, a `[TMUX]` row links that active window into the invoking session and selects it there
-- layout options and acceptance modifiers apply to project rows; `[TMUX]` rows do not create layouts
+- tmux rows switch or attach directly by session identity, preserving the session's active window
+- with `--peer`, a tmux row links that active window into the invoking session and selects it there
+- layout options and acceptance modifiers apply to project rows; tmux rows do not create layouts
 - `normal` and `plain` projects open directly
 - `bare` projects open their default worktree directly
 
@@ -260,7 +279,7 @@ A match in another session is added to the invoking session with
 `link-window`. If there is no match, taw creates its normal layout directly in
 the invoking session.
 
-When a `[TMUX]` project-picker row is selected, peer mode links that session's
+When a tmux project-picker row is selected, peer mode links that session's
 active window into the invoking session and selects it there.
 
 An existing match conflicts with an explicit `-agent`, `-ed`, or `-sh`, or
@@ -270,6 +289,26 @@ fresh layout. `--force` is rejected without peer mode.
 A linked tmux window shares its panes, processes, name, and lifetime between
 sessions. `unlink-window` removes it from one session; `kill-window` removes
 it from every session to which it is linked.
+
+## Agent Status Hooks
+
+Install the Codex and Claude Code lifecycle hooks with:
+
+```bash
+bash ./configure agent-status
+```
+
+The configurator merges its handlers into `~/.codex/hooks.json` and
+`~/.claude/settings.json` without replacing unrelated settings or hooks. It
+requires `jq`, which is already managed by this repository. Restart existing
+agent sessions after configuration. Codex requires reviewing the new handlers
+with `/hooks`; Claude Code requires the workspace to be trusted before hooks run.
+
+Focusing a waiting agent pane changes its marker to `…`. Neither CLI exposes a
+universal event for a permission answer, so `…` means the prompt was seen, not
+that it was answered. The next tool completion or turn stop publishes a new
+state. A process killed without its normal session-end hook may leave metadata
+until its tmux pane closes or another lifecycle event updates it.
 
 ## Examples
 
