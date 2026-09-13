@@ -5,5 +5,5 @@
   (option) @_option
   (value
     content: (string) @injection.content)
-  (#eq? @_option "status-format")
+  (#match? @_option "^status-format(\\[[0-9]+\\])?$")
   (#set! injection.language "tmuxf"))
