@@ -119,7 +119,7 @@ return {
 
         if not parser_available then
           if explicitly_configured then
-            fallback_to_regex(bufnr, lang, parser_error)
+            fallback_to_regex(bufnr, lang, parser_error or "parser unavailable")
           else
             enable_regex_highlighting(bufnr)
           end
