@@ -401,9 +401,10 @@ bash ./configure agent-status
 
 Restart Neovim so it publishes its pane metadata, restart Codex, then inspect
 and trust the changed hook with `/hooks`. The Codex `SessionStart` hook adds a
-compact initial editor snapshot and concise usage guidance as developer context.
-That guidance tells Codex to use the exact Neovim pane conservatively for useful
-visual handoffs and to refresh the context only after a connection attempt fails.
+compact routing and connection summary plus concise usage guidance as developer
+context. Live editor state remains available on demand through `nvim-tmux
+context`. The guidance tells Codex to use the exact Neovim pane conservatively
+for useful visual handoffs and to refresh only after a connection attempt fails.
 
 The hook is advisory and produces no output outside tmux or when no editor is
 available. The helper exposes fixed operations, but it is not a privilege

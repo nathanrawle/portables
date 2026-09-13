@@ -305,7 +305,7 @@ run_clear_highlights() {
 }
 
 run_codex_context() {
-  local selected_status context summary panes
+  local selected_status summary panes
 
   select_candidate
   selected_status=$?
@@ -319,28 +319,21 @@ run_codex_context() {
     return 0
   fi
 
-  context="$(editor_context)" || return 0
-  summary="$(jq -c --arg codex_pane_id "$CALLER_PANE" \
+  summary="$(jq -cn --arg codex_pane_id "$CALLER_PANE" \
+    --argjson connection "$(candidate_json "$SELECTED")" \
     '{
       routing: {
-        window_id: .connection.window_id,
+        window_id: $connection.window_id,
         codex_pane_id: $codex_pane_id,
-        nvim_pane_id: .connection.pane_id
+        nvim_pane_id: $connection.pane_id
       },
       connection: {
-        pid: .connection.pid,
-        socket: .connection.socket,
-        source: .connection.source
-      },
-      editor: {
-        file: .editor.file,
-        cursor: .editor.cursor,
-        modified: .editor.modified,
-        mode: .editor.mode
+        pid: $connection.pid,
+        socket: $connection.socket,
+        source: $connection.source
       }
-    }' \
-    <<<"$context")"
-  printf 'A live Neovim is available in this exact tmux window. Initial context: %s\n' "$summary"
+    }')"
+  printf 'A live Neovim is available in this exact tmux window. Connection context: %s\n' "$summary"
   printf 'Use nvim-tmux --pane %s open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send. Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location. Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane %s context.\n' \
     "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PANES[SELECTED]}"
 }

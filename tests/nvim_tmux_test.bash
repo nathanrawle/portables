@@ -165,14 +165,15 @@ EOF
   registered_socket="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     show-option -pqv -t "$editor" @taw_nvim_socket)"
   output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
-  assert_string_contains "$output" 'A live Neovim is available in this exact tmux window.'
+  assert_string_contains "$output" \
+    'A live Neovim is available in this exact tmux window. Connection context:'
   assert_string_contains "$output" \
     "Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane $editor context."
   assert_string_contains "$output" \
     "Use nvim-tmux --pane $editor open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send."
   assert_string_contains "$output" \
     'Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location.'
-  summary="$(sed -n 's/^A live Neovim is available in this exact tmux window\. Initial context: //p' \
+  summary="$(sed -n 's/^A live Neovim is available in this exact tmux window\. Connection context: //p' \
     <<<"$output")"
   assert_eq "$agent" "$(jq -r '.routing.codex_pane_id' <<<"$summary")" \
     "unexpected Codex pane in startup context"
@@ -180,6 +181,8 @@ EOF
     "unexpected Neovim pane in startup context"
   assert_eq "$registered_socket" "$(jq -r '.connection.socket' <<<"$summary")" \
     "unexpected Neovim socket in startup context"
+  assert_eq false "$(jq -r 'has("editor")' <<<"$summary")" \
+    "startup context should not include stale editor state"
 
   stdin_guard_path="$TEST_TMPDIR/stdin-guard-bin"
   real_nvim="$(command -v nvim)"
