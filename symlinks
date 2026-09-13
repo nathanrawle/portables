@@ -39,6 +39,9 @@ parse_args() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+    --force)
+      LINK_CONFLICT_MODE=force
+      ;;
     --no-ignore)
       APPLY_IGNORE_RULES=0
       ;;
