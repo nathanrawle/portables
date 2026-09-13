@@ -142,7 +142,7 @@ test_nvim_tmux_discovers_and_controls_exact_window() {
   local init first second outside editor agent socket_path tmux_environment output summary count
   local ancestry_output ambiguity_output ambiguity_status other_agent fallback_editor fallback_agent
   local registered_socket registered_pid no_lsof_path stale_status stdin_guard_path real_nvim
-  local invalid_highlight_status highlight_row nested_socket
+  local extra_socket invalid_highlight_status highlight_row nested_socket
 
   command -v tmux >/dev/null 2>&1 || return 0
   command -v nvim >/dev/null 2>&1 || return 0
@@ -157,6 +157,7 @@ test_nvim_tmux_discovers_and_controls_exact_window() {
   NVIM_TMUX_TEST_FILE="$first"
   outside="$TEST_TMPDIR/../outside.txt"
   cat >"$init" <<'EOF'
+vim.opt.swapfile = false
 vim.opt.runtimepath:prepend(vim.env.TAW_NVIM_RUNTIME)
 require("agent_nvim").setup()
 EOF
@@ -296,6 +297,13 @@ EOF
   assert_eq "$editor" "$(jq -r '.pane_id' <<<"$output")" "explicit pane was not selected"
 
   if command -v lsof >/dev/null 2>&1; then
+    extra_socket="$TEST_TMPDIR/extra-nvim.sock"
+    nvim --server "$registered_socket" --remote-expr "serverstart('$extra_socket')" >/dev/null
+    wait_for_socket "$extra_socket"
+    output="$(run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
+    assert_eq registered "$(jq -r '.source' <<<"$output")" \
+      "multiple sockets for one Neovim should prefer its registration"
+
     nested_socket="$TEST_TMPDIR/nested-nvim.sock"
     nvim --server "$registered_socket" --remote-expr \
       "luaeval(\"vim.fn.jobstart({'nvim', '--headless', '-u', 'NONE', '-i', 'NONE', '--listen', _A})\", '$nested_socket')" \
