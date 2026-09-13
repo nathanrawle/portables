@@ -321,6 +321,14 @@ that it was answered. The next tool completion or turn stop publishes a new
 state. A process killed without its normal session-end hook may leave metadata
 until its tmux pane closes or another lifecycle event updates it.
 
+The tmux status bars show the same lifecycle state with the Nerd Font glyphs
+from the table above. Each pane tab shows that pane's state on its right-hand
+side. A window tab shows the highest-priority state among its panes using the
+same waiting, acknowledged, thinking, then idle order as the session picker.
+The window icon replaces `#F` while an agent state is present; normal tmux
+window flags return when no pane in the window has an agent state. Unlike the
+session picker, these status-bar glyphs do not change with `TAW_ICONS`.
+
 ## Examples
 
 ```bash
