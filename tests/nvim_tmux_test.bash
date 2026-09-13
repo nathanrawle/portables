@@ -129,6 +129,7 @@ test_nvim_tmux_discovers_and_controls_exact_window() {
   local init first second outside editor agent socket_path tmux_environment output summary count
   local ancestry_output ambiguity_output ambiguity_status other_agent fallback_editor fallback_agent
   local registered_socket registered_pid no_lsof_path stale_status stdin_guard_path real_nvim
+  local invalid_highlight_status highlight_row
 
   command -v tmux >/dev/null 2>&1 || return 0
   command -v nvim >/dev/null 2>&1 || return 0
@@ -229,6 +230,15 @@ EOF
   count="$(nvim --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
     --remote-expr "luaeval(\"#vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('taw-agent-nvim'), 0, -1, {})\")")"
   assert_eq 1 "$count" "expected one highlight extmark"
+  if run_bridge "$tmux_environment" "$agent" highlight "$first" 1:1 999:999 >/dev/null 2>&1; then
+    fail "expected an invalid later range to reject the highlight operation"
+  else
+    invalid_highlight_status=$?
+  fi
+  assert_eq 4 "$invalid_highlight_status" "unexpected invalid-highlight exit status"
+  highlight_row="$(nvim --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
+    --remote-expr "luaeval(\"vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('taw-agent-nvim'), 0, -1, {})[1][2]\")")"
+  assert_eq 1 "$highlight_row" "invalid ranges should preserve the previous highlights"
   run_bridge "$tmux_environment" "$agent" clear-highlights "$first" >/dev/null
   count="$(nvim --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
     --remote-expr "luaeval(\"#vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('taw-agent-nvim'), 0, -1, {})\")")"

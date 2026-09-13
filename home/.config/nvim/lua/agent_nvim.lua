@@ -166,8 +166,8 @@ function M.highlight(path_hex, ranges)
   local buffer = open_buffer(path_hex, 1, 1)
   local last_line = vim.api.nvim_buf_line_count(buffer)
   local first_line
+  local validated_ranges = {}
 
-  vim.api.nvim_buf_clear_namespace(buffer, highlight_namespace, 0, -1)
   for range in ranges:gmatch("[^,]+") do
     local start_line, end_line = range:match("^(%d+):(%d+)$")
     start_line = tonumber(start_line)
@@ -176,6 +176,13 @@ function M.highlight(path_hex, ranges)
       error("highlight range is outside the buffer")
     end
     first_line = first_line or start_line
+    table.insert(validated_ranges, { start_line, end_line })
+  end
+
+  vim.api.nvim_buf_clear_namespace(buffer, highlight_namespace, 0, -1)
+  for _, range in ipairs(validated_ranges) do
+    local start_line = range[1]
+    local end_line = range[2]
     vim.api.nvim_buf_set_extmark(buffer, highlight_namespace, start_line - 1, 0, {
       end_row = end_line,
       end_col = 0,
