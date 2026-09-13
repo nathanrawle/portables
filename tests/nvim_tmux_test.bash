@@ -106,7 +106,7 @@ test_nvim_tmux_hook_is_quiet_outside_tmux() {
 test_nvim_tmux_discovers_and_controls_exact_window() {
   local init first second outside editor agent socket_path tmux_environment output count
   local ancestry_output ambiguity_output ambiguity_status other_agent fallback_editor fallback_agent
-  local registered_socket registered_pid no_lsof_path stale_status
+  local registered_socket registered_pid no_lsof_path stale_status stdin_guard_path real_nvim
 
   command -v tmux >/dev/null 2>&1 || return 0
   command -v nvim >/dev/null 2>&1 || return 0
@@ -143,6 +143,22 @@ EOF
   output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
   assert_string_contains "$output" 'A live Neovim is available in this exact tmux window.'
   assert_string_contains "$output" 'Refresh with nvim-tmux context'
+
+  stdin_guard_path="$TEST_TMPDIR/stdin-guard-bin"
+  real_nvim="$(command -v nvim)"
+  mkdir -p "$stdin_guard_path"
+  cat >"$stdin_guard_path/nvim" <<EOF
+#!/usr/bin/env bash
+if IFS= read -r input; then
+  exit 0
+fi
+exec "$real_nvim" "\$@"
+EOF
+  chmod +x "$stdin_guard_path/nvim"
+  output="$(printf 'caller input\n' | PATH="$stdin_guard_path:$PATH" \
+    run_bridge "$tmux_environment" "$agent" context)"
+  assert_eq "$first" "$(jq -r '.editor.file' <<<"$output")" \
+    "RPC client should not inherit caller stdin"
 
   registered_socket="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     show-option -pqv -t "$editor" @taw_nvim_socket)"
