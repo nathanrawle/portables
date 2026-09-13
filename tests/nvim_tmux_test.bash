@@ -146,6 +146,10 @@ EOF
   assert_string_contains "$output" 'A live Neovim is available in this exact tmux window.'
   assert_string_contains "$output" \
     "Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane $editor context."
+  assert_string_contains "$output" \
+    "Use nvim-tmux --pane $editor open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send."
+  assert_string_contains "$output" \
+    'Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location.'
   summary="$(sed -n 's/^A live Neovim is available in this exact tmux window\. Initial context: //p' \
     <<<"$output")"
   assert_eq "$agent" "$(jq -r '.routing.codex_pane_id' <<<"$summary")" \

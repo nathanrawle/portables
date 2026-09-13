@@ -23,15 +23,6 @@ These are global, repository-agnostic working preferences that apply unless a pr
 - Prefer approaches that make information flow, control flow, and system boundaries easy to understand.
 - Treat dependency count and dependency criticality as meaningful design costs.
 
-## Live Neovim context
-
-- When running inside tmux, a startup hook may report a Neovim in the same exact window.
-- Before relying on the current buffer, cursor, selection, or diagnostics, run `nvim-tmux context` to refresh them.
-- Use `nvim-tmux open`, `highlight`, and `clear-highlights` for editor navigation and visual feedback.
-- Do not use direct Neovim Ex, Lua, `--remote-expr`, or `--remote-send` commands for agent integration.
-- If discovery reports multiple editors, do not guess; use `--pane` only when the intended pane is known.
-- If no editor is available, continue with normal filesystem tools.
-
 ## Dependency philosophy
 
 Prefer the lightest solution that meets the requirement well, in this order:

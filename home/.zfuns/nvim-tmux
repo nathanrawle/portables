@@ -341,8 +341,8 @@ run_codex_context() {
     }' \
     <<<"$context")"
   printf 'A live Neovim is available in this exact tmux window. Initial context: %s\n' "$summary"
-  printf 'Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane %s context. Use its constrained open, highlight, and clear-highlights commands instead of direct Ex, Lua, remote-expr, or remote-send.\n' \
-    "${CANDIDATE_PANES[SELECTED]}"
+  printf 'Use nvim-tmux --pane %s open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send. Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location. Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane %s context.\n' \
+    "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PANES[SELECTED]}"
 }
 
 TARGET_PANE=
