@@ -142,10 +142,14 @@ local function decode_hex(value)
   end))
 end
 
-local function open_buffer(path_hex, line, column)
+local function load_buffer(path_hex)
   local path = decode_hex(path_hex)
   local buffer = vim.fn.bufadd(path)
   vim.fn.bufload(buffer)
+  return buffer
+end
+
+local function focus_buffer(buffer, line, column)
   vim.api.nvim_set_current_buf(buffer)
 
   local last_line = vim.api.nvim_buf_line_count(buffer)
@@ -158,12 +162,12 @@ local function open_buffer(path_hex, line, column)
 end
 
 function M.open(path_hex, line, column)
-  open_buffer(path_hex, line, column)
+  focus_buffer(load_buffer(path_hex), line, column)
   return M.context()
 end
 
 function M.highlight(path_hex, ranges)
-  local buffer = open_buffer(path_hex, 1, 1)
+  local buffer = load_buffer(path_hex)
   local last_line = vim.api.nvim_buf_line_count(buffer)
   local first_line
   local validated_ranges = {}
@@ -192,8 +196,7 @@ function M.highlight(path_hex, ranges)
   end
 
   if first_line ~= nil then
-    vim.api.nvim_win_set_cursor(0, { first_line, 0 })
-    vim.cmd("normal! zv")
+    focus_buffer(buffer, first_line, 1)
   end
   return M.context()
 end

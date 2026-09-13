@@ -83,6 +83,8 @@ make_no_lsof_path() {
 }
 
 test_agent_nvim_lua_context() {
+  command -v nvim >/dev/null 2>&1 || return 0
+
   cat >"$TEST_TMPDIR/context-test.lua" <<'EOF'
 vim.opt.runtimepath:prepend(vim.env.TAW_NVIM_RUNTIME)
 local bridge = require("agent_nvim")
@@ -241,12 +243,21 @@ EOF
   count="$(nvim --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
     --remote-expr "luaeval(\"#vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('taw-agent-nvim'), 0, -1, {})\")")"
   assert_eq 1 "$count" "expected one highlight extmark"
+  run_bridge "$tmux_environment" "$agent" open "$second" 3 2 >/dev/null
   if run_bridge "$tmux_environment" "$agent" highlight "$first" 1:1 999:999 >/dev/null 2>&1; then
     fail "expected an invalid later range to reject the highlight operation"
   else
     invalid_highlight_status=$?
   fi
   assert_eq 4 "$invalid_highlight_status" "unexpected invalid-highlight exit status"
+  output="$(run_bridge "$tmux_environment" "$agent" context)"
+  assert_eq "$second" "$(jq -r '.editor.file' <<<"$output")" \
+    "invalid ranges should preserve the current file"
+  assert_eq 3 "$(jq -r '.editor.cursor.line' <<<"$output")" \
+    "invalid ranges should preserve the cursor line"
+  assert_eq 2 "$(jq -r '.editor.cursor.column' <<<"$output")" \
+    "invalid ranges should preserve the cursor column"
+  run_bridge "$tmux_environment" "$agent" open "$first" >/dev/null
   highlight_row="$(nvim --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
     --remote-expr "luaeval(\"vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('taw-agent-nvim'), 0, -1, {})[1][2]\")")"
   assert_eq 1 "$highlight_row" "invalid ranges should preserve the previous highlights"
