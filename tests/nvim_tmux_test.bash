@@ -42,6 +42,17 @@ wait_for_file() {
   fail "timed out waiting for $path"
 }
 
+wait_for_socket() {
+  local path="$1"
+  local attempt
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    [[ -S "$path" ]] && return 0
+    sleep 0.05
+  done
+  fail "timed out waiting for $path"
+}
+
 start_registered_nvim() {
   local command="$1"
   local target_args=( "${@:2}" )
@@ -129,7 +140,7 @@ test_nvim_tmux_discovers_and_controls_exact_window() {
   local init first second outside editor agent socket_path tmux_environment output summary count
   local ancestry_output ambiguity_output ambiguity_status other_agent fallback_editor fallback_agent
   local registered_socket registered_pid no_lsof_path stale_status stdin_guard_path real_nvim
-  local invalid_highlight_status highlight_row
+  local invalid_highlight_status highlight_row nested_socket
 
   command -v tmux >/dev/null 2>&1 || return 0
   command -v nvim >/dev/null 2>&1 || return 0
@@ -272,6 +283,20 @@ EOF
   assert_string_contains "$output" "$editor,$second_editor"
   output="$(run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
   assert_eq "$editor" "$(jq -r '.pane_id' <<<"$output")" "explicit pane was not selected"
+
+  if command -v lsof >/dev/null 2>&1; then
+    nested_socket="$TEST_TMPDIR/nested-nvim.sock"
+    nvim --server "$registered_socket" --remote-expr \
+      "luaeval(\"vim.fn.jobstart({'nvim', '--headless', '-u', 'NONE', '-i', 'NONE', '--listen', _A})\", '$nested_socket')" \
+      >/dev/null
+    wait_for_socket "$nested_socket"
+    if ambiguity_output="$(run_bridge "$tmux_environment" "$agent" --pane "$editor" discover 2>&1)"; then
+      fail "expected multiple editors in one registered pane to be rejected"
+    else
+      ambiguity_status=$?
+    fi
+    assert_eq 3 "$ambiguity_status" "unexpected same-pane ambiguity exit status"
+  fi
 
   other_agent="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" new-window \
     -d -P -F '#{pane_id}' -t nvim-tmux: -n no-editor 'sleep 120')"

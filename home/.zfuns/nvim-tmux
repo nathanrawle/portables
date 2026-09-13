@@ -162,7 +162,7 @@ discover_with_lsof() {
 }
 
 discover_candidates() {
-  local pane pane_pid socket pid registered
+  local pane pane_pid socket pid
 
   CANDIDATE_PANES=()
   CANDIDATE_PIDS=()
@@ -172,12 +172,10 @@ discover_candidates() {
 
   while IFS=$'\t' read -r pane pane_pid socket pid; do
     [[ -z "$TARGET_PANE" || "$pane" == "$TARGET_PANE" ]] || continue
-    registered=false
     if valid_socket "$socket" "$pid"; then
       add_candidate "$pane" "$pid" "$socket" registered
-      registered=true
     fi
-    [[ "$registered" == true ]] || discover_with_lsof "$pane" "$pane_pid"
+    discover_with_lsof "$pane" "$pane_pid"
   done < <(tmux list-panes -t "$CALLER_WINDOW" -F \
     "#{pane_id}"$'\t'"#{pane_pid}"$'\t'"#{@taw_nvim_socket}"$'\t'"#{@taw_nvim_pid}")
 }
