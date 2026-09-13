@@ -52,9 +52,15 @@ return {
       both = true,
     }
 
-    local function enable_regex_highlighting(bufnr)
-      vim.treesitter.stop(bufnr)
+    local function use_regex(bufnr, lang, reason)
       vim.bo[bufnr].syntax = "ON"
+
+      if reason then
+        vim.notify_once(
+          ("Tree-sitter highlighting unavailable for %s; using regex syntax: %s"):format(lang, reason),
+          vim.log.levels.WARN
+        )
+      end
     end
 
     local function highlighting_strategy(lang)
@@ -69,12 +75,8 @@ return {
       end
 
       local strategy = configured[lang]
-      if strategy == nil then
-        return "treesitter", false
-      end
-
-      if valid_strategies[strategy] then
-        return strategy, true
+      if strategy == nil or valid_strategies[strategy] then
+        return strategy or "treesitter", strategy ~= nil
       end
 
       vim.notify_once(
@@ -82,14 +84,6 @@ return {
         vim.log.levels.WARN
       )
       return "treesitter", true
-    end
-
-    local function fallback_to_regex(bufnr, lang, reason)
-      enable_regex_highlighting(bufnr)
-      vim.notify_once(
-        ("Tree-sitter highlighting unavailable for %s; using regex syntax: %s"):format(lang, reason),
-        vim.log.levels.WARN
-      )
     end
 
     vim.api.nvim_create_autocmd("FileType", {
@@ -103,25 +97,24 @@ return {
           return
         end
 
+        vim.treesitter.stop(bufnr)
+
         local strategy, explicitly_configured = highlighting_strategy(lang)
         if strategy == "regex" then
-          enable_regex_highlighting(bufnr)
+          use_regex(bufnr)
           return
         end
 
-        vim.treesitter.stop(bufnr)
-
         local load_ok, parser_available, parser_error = pcall(vim.treesitter.language.add, lang)
         if not load_ok then
-          parser_error = parser_available
-          parser_available = false
+          parser_available, parser_error = false, parser_available
         end
 
         if not parser_available then
           if explicitly_configured then
-            fallback_to_regex(bufnr, lang, parser_error or "parser unavailable")
+            use_regex(bufnr, lang, parser_error or "parser unavailable")
           else
-            enable_regex_highlighting(bufnr)
+            use_regex(bufnr)
           end
           return
         end
@@ -129,18 +122,19 @@ return {
         local query_ok, highlight_query = pcall(vim.treesitter.query.get, lang, "highlights")
         if not query_ok or not highlight_query then
           local reason = query_ok and "missing highlights query" or tostring(highlight_query)
-          fallback_to_regex(bufnr, lang, reason)
+          use_regex(bufnr, lang, reason)
           return
         end
 
         local start_ok, start_error = pcall(vim.treesitter.start, bufnr, lang)
         if not start_ok then
-          fallback_to_regex(bufnr, lang, tostring(start_error))
+          vim.treesitter.stop(bufnr)
+          use_regex(bufnr, lang, tostring(start_error))
           return
         end
 
         if strategy == "both" then
-          vim.bo[bufnr].syntax = "ON"
+          use_regex(bufnr)
         end
 
         local indent_ok, indent_query = pcall(vim.treesitter.query.get, lang, "indents")
