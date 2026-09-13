@@ -31,6 +31,39 @@ wait_for_pane_option() {
   fail "timed out waiting for $option on $pane"
 }
 
+wait_for_pane_option_value() {
+  local pane="$1"
+  local option="$2"
+  local expected="$3"
+  local value attempt
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    value="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+      show-option -pqv -t "$pane" "$option" 2>/dev/null)" || value=
+    [[ "$value" == "$expected" ]] && return 0
+    sleep 0.05
+  done
+  fail "timed out waiting for $option=$expected on $pane"
+}
+
+wait_for_pane_option_change() {
+  local pane="$1"
+  local option="$2"
+  local previous="$3"
+  local value attempt
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    value="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+      show-option -pqv -t "$pane" "$option" 2>/dev/null)" || value=
+    if [[ -n "$value" && "$value" != "$previous" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+    sleep 0.05
+  done
+  fail "timed out waiting for $option to change on $pane"
+}
+
 wait_for_file() {
   local path="$1"
   local attempt
@@ -142,7 +175,7 @@ test_nvim_tmux_discovers_and_controls_exact_window() {
   local init first second outside editor agent socket_path tmux_environment output summary count
   local ancestry_output ambiguity_output ambiguity_status other_agent fallback_editor fallback_agent
   local registered_socket registered_pid no_lsof_path stale_status stdin_guard_path real_nvim
-  local extra_socket invalid_highlight_status highlight_row nested_socket
+  local extra_socket invalid_highlight_status highlight_row nested_pid nested_socket registered_nested_socket
 
   command -v tmux >/dev/null 2>&1 || return 0
   command -v nvim >/dev/null 2>&1 || return 0
@@ -233,6 +266,20 @@ EOF
     set-option -p -t "$editor" @taw_nvim_pid "$registered_pid"
   "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     set-option -p -t "$editor" @taw_nvim_socket "$registered_socket"
+
+  TMUX="$tmux_environment" TMUX_PANE="$editor" TAW_NVIM_RUNTIME="$NVIM_RUNTIME" \
+    env -u NVIM nvim --headless -u "$init" -i NONE \
+    </dev/null >"$TEST_TMPDIR/registered-nested.log" 2>&1 &
+  nested_pid=$!
+  wait_for_pane_option_value "$editor" @taw_nvim_pid "$nested_pid"
+  registered_nested_socket="$(wait_for_pane_option_change \
+    "$editor" @taw_nvim_socket "$registered_socket")"
+  nvim --server "$registered_nested_socket" --remote-send '<Cmd>qa!<CR>'
+  wait "$nested_pid" || true
+  wait_for_pane_option_value "$editor" @taw_nvim_pid "$registered_pid"
+  output="$(PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
+  assert_eq "$registered_socket" "$(jq -r '.socket' <<<"$output")" \
+    "nested exit should restore the outer registration without lsof"
 
   output="$(cd "$REPO_ROOT" && run_bridge "$tmux_environment" "$agent" open "$second" 3 2)"
   assert_eq "$second" "$(jq -r '.editor.file' <<<"$output")" "open did not select the file"

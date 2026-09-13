@@ -45,6 +45,11 @@ local function publish()
   end
 
   local pid = tostring(vim.fn.getpid())
+  local previous_socket = tmux({ "show-option", "-pqv", "-t", pane, socket_option })
+  local previous_pid = tmux({ "show-option", "-pqv", "-t", pane, pid_option })
+  if previous_socket == address and previous_pid == pid then
+    return
+  end
   if tmux({ "set-option", "-p", "-t", pane, pid_option, pid }) == nil then
     return
   end
@@ -59,8 +64,15 @@ local function publish()
       if current_socket ~= address or current_pid ~= pid then
         return
       end
-      tmux({ "set-option", "-pu", "-t", pane, socket_option })
-      tmux({ "set-option", "-pu", "-t", pane, pid_option })
+      local has_previous = previous_socket ~= nil and previous_socket ~= ""
+        and previous_pid ~= nil and previous_pid ~= ""
+      if has_previous then
+        tmux({ "set-option", "-p", "-t", pane, pid_option, previous_pid })
+        tmux({ "set-option", "-p", "-t", pane, socket_option, previous_socket })
+      else
+        tmux({ "set-option", "-pu", "-t", pane, socket_option })
+        tmux({ "set-option", "-pu", "-t", pane, pid_option })
+      end
     end,
   })
 end
