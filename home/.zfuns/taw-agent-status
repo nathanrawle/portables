@@ -3,10 +3,25 @@
 set -u
 
 usage() {
-  printf 'usage: taw-agent-status set <codex|claude> <idle|thinking|waiting> [pane]\n' >&2
+  printf 'usage: taw-agent-status start <codex|claude> [pane]\n' >&2
+  printf '       taw-agent-status set <codex|claude> <idle|thinking|waiting> [pane]\n' >&2
   printf '       taw-agent-status acknowledge [pane]\n' >&2
   printf '       taw-agent-status clear [pane]\n' >&2
+  printf '       taw-agent-status sync\n' >&2
+  printf '       taw-agent-status unlink <window>\n' >&2
 }
+
+AGENT_SESSION_NAME=agents
+AGENT_SESSION_MARKER=@taw_agent_link_session
+AGENT_SUPPRESSION_OPTION=@taw_agent_link_suppressed
+AGENT_LINK_LOCK=taw-agent-link-session
+AGENT_SESSION_ID=
+AGENT_SESSION_NAMED_ID=
+SOURCE_WINDOW_IDS=()
+SOURCE_WINDOW_MEMBERS=()
+SOURCE_WINDOW_SUPPRESSIONS=()
+DESIRED_WINDOW_IDS=()
+SOURCE_WINDOW_INDEX=-1
 
 pane_target() {
   local explicit_pane="${1:-}"
@@ -24,6 +39,284 @@ pane_target() {
 tmux_available() {
   command -v tmux >/dev/null 2>&1
 }
+
+supported_agent() {
+  case "$1" in
+    codex|claude) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+source_window_index() {
+  local window="$1"
+  local i
+
+  SOURCE_WINDOW_INDEX=-1
+  for ((i = 0; i < ${#SOURCE_WINDOW_IDS[@]}; i++)); do
+    if [[ "${SOURCE_WINDOW_IDS[$i]}" = "$window" ]]; then
+      SOURCE_WINDOW_INDEX="$i"
+      return 0
+    fi
+  done
+  return 1
+}
+
+array_contains() {
+  local expected="$1"
+  shift
+  local actual
+
+  for actual in "$@"; do
+    [[ "$actual" = "$expected" ]] && return 0
+  done
+  return 1
+}
+
+locate_agent_session() {
+  local sessions line session_id session_name marker rest tab=$'\t'
+  local managed_id=
+
+  AGENT_SESSION_ID=
+  AGENT_SESSION_NAMED_ID=
+  sessions="$(tmux list-sessions \
+    -F $'#{session_id}\t#{session_name}\t#{@taw_agent_link_session}' 2>/dev/null)" \
+    || return 1
+
+  while IFS= read -r line; do
+    [[ -n "$line" && "$line" = *"$tab"* ]] || continue
+    session_id="${line%%"$tab"*}"
+    rest="${line#*"$tab"}"
+    session_name="${rest%%"$tab"*}"
+    marker="${rest#*"$tab"}"
+
+    if [[ "$marker" = 1 ]]; then
+      if [[ -n "$managed_id" && "$managed_id" != "$session_id" ]]; then
+        printf 'taw-agent-status: multiple managed agent sessions found\n' >&2
+        return 2
+      fi
+      managed_id="$session_id"
+    fi
+    if [[ "$session_name" = "$AGENT_SESSION_NAME" ]]; then
+      AGENT_SESSION_NAMED_ID="$session_id"
+    fi
+  done <<<"$sessions"
+
+  if [[ -n "$AGENT_SESSION_NAMED_ID" && "$AGENT_SESSION_NAMED_ID" != "$managed_id" ]]; then
+    printf 'taw-agent-status: refusing unowned tmux session: %s\n' \
+      "$AGENT_SESSION_NAME" >&2
+    return 2
+  fi
+
+  if [[ -n "$managed_id" && -z "$AGENT_SESSION_NAMED_ID" ]]; then
+    tmux rename-session -t "$managed_id" "$AGENT_SESSION_NAME" >/dev/null \
+      || return 1
+  fi
+  AGENT_SESSION_ID="$managed_id"
+}
+
+collect_source_windows() {
+  local panes line session_id window_id pane_id agent suppression rest tab=$'\t'
+  local member i fingerprint
+
+  SOURCE_WINDOW_IDS=()
+  SOURCE_WINDOW_MEMBERS=()
+  SOURCE_WINDOW_SUPPRESSIONS=()
+  DESIRED_WINDOW_IDS=()
+  panes="$(tmux list-panes -a \
+    -F $'#{session_id}\t#{window_id}\t#{pane_id}\t#{@taw_agent}\t#{@taw_agent_link_suppressed}' \
+    2>/dev/null)" || return 1
+
+  while IFS= read -r line; do
+    [[ -n "$line" && "$line" = *"$tab"* ]] || continue
+    session_id="${line%%"$tab"*}"
+    rest="${line#*"$tab"}"
+    window_id="${rest%%"$tab"*}"
+    rest="${rest#*"$tab"}"
+    pane_id="${rest%%"$tab"*}"
+    rest="${rest#*"$tab"}"
+    agent="${rest%%"$tab"*}"
+    suppression="${rest#*"$tab"}"
+    [[ -n "$session_id" && -n "$window_id" && -n "$pane_id" ]] || continue
+    [[ -z "$AGENT_SESSION_ID" || "$session_id" != "$AGENT_SESSION_ID" ]] || continue
+
+    if ! source_window_index "$window_id"; then
+      SOURCE_WINDOW_IDS+=( "$window_id" )
+      SOURCE_WINDOW_MEMBERS+=( "" )
+      SOURCE_WINDOW_SUPPRESSIONS+=( "$suppression" )
+      SOURCE_WINDOW_INDEX=$((${#SOURCE_WINDOW_IDS[@]} - 1))
+    fi
+    supported_agent "$agent" || continue
+    member="$pane_id=$agent"
+    case $'\n'"${SOURCE_WINDOW_MEMBERS[$SOURCE_WINDOW_INDEX]}" in
+      *$'\n'"$member"$'\n'*) ;;
+      *) SOURCE_WINDOW_MEMBERS[$SOURCE_WINDOW_INDEX]+="$member"$'\n' ;;
+    esac
+  done <<<"$panes"
+
+  for ((i = 0; i < ${#SOURCE_WINDOW_IDS[@]}; i++)); do
+    fingerprint="$(printf '%s' "${SOURCE_WINDOW_MEMBERS[$i]}" \
+      | LC_ALL=C sort -u | tr '\n' ',')"
+    suppression="${SOURCE_WINDOW_SUPPRESSIONS[$i]}"
+
+    if [[ -z "$fingerprint" ]]; then
+      if [[ -n "$suppression" ]]; then
+        tmux set-option -wu -t "${SOURCE_WINDOW_IDS[$i]}" \
+          "$AGENT_SUPPRESSION_OPTION" >/dev/null 2>&1 || true
+      fi
+      continue
+    fi
+    if [[ "$suppression" = "$fingerprint" ]]; then
+      continue
+    fi
+    if [[ -n "$suppression" ]]; then
+      tmux set-option -wu -t "${SOURCE_WINDOW_IDS[$i]}" \
+        "$AGENT_SUPPRESSION_OPTION" >/dev/null 2>&1 || true
+    fi
+    SOURCE_WINDOW_MEMBERS[$i]="$fingerprint"
+    DESIRED_WINDOW_IDS+=( "${SOURCE_WINDOW_IDS[$i]}" )
+  done
+}
+
+create_agent_session() {
+  local first_window="$1"
+  local temp_parent="${TMPDIR:-/tmp}" temp_template temp_dir created
+  local created_session created_window_index tab=$'\t'
+
+  if [[ "$temp_parent" = / ]]; then
+    temp_template=/XXX
+  else
+    temp_template="${temp_parent%/}/XXX"
+  fi
+  temp_dir="$(mktemp -d "$temp_template")" || return 1
+  created="$(tmux new-session -d -P \
+    -F $'#{session_id}\t#{window_index}' -s "$AGENT_SESSION_NAME" \
+    -c "$temp_dir")" || {
+    rmdir "$temp_dir" >/dev/null 2>&1 || true
+    return 1
+  }
+
+  created_session="${created%%"$tab"*}"
+  created_window_index="${created#*"$tab"}"
+  if [[ -z "$created_session" || -z "$created_window_index" \
+    || "$created_session" = "$created" ]]; then
+    tmux kill-session -t "=$AGENT_SESSION_NAME" >/dev/null 2>&1 || true
+    return 1
+  fi
+  tmux set-option -t "$created_session" "$AGENT_SESSION_MARKER" 1 \
+    >/dev/null || {
+    tmux kill-session -t "$created_session" >/dev/null 2>&1 || true
+    return 1
+  }
+  tmux link-window -d -k -s "$first_window" \
+    -t "$created_session:$created_window_index" >/dev/null || {
+    tmux kill-session -t "$created_session" >/dev/null 2>&1 || true
+    return 1
+  }
+  AGENT_SESSION_ID="$created_session"
+}
+
+remove_agent_session_window() {
+  local window="$1"
+
+  tmux unlink-window -t "$AGENT_SESSION_ID:$window" >/dev/null 2>&1 \
+    || tmux kill-window -t "$AGENT_SESSION_ID:$window" >/dev/null 2>&1 \
+    || true
+}
+
+reconcile_agent_session() {
+  local current_windows current desired missing_first= window
+  local has_current_desired=false
+  local missing_count=0
+  local -a current_ids missing_ids stale_ids
+
+  locate_agent_session || return $?
+  collect_source_windows || return 1
+
+  if (( ${#DESIRED_WINDOW_IDS[@]} == 0 )); then
+    if [[ -n "$AGENT_SESSION_ID" ]]; then
+      tmux kill-session -t "$AGENT_SESSION_ID" >/dev/null || return 1
+    fi
+    return 0
+  fi
+
+  if [[ -z "$AGENT_SESSION_ID" ]]; then
+    create_agent_session "${DESIRED_WINDOW_IDS[0]}" || return 1
+  fi
+
+  current_windows="$(tmux list-windows -t "$AGENT_SESSION_ID" \
+    -F '#{window_id}' 2>/dev/null)" || return 1
+  current_ids=()
+  while IFS= read -r current; do
+    [[ -n "$current" ]] && current_ids+=( "$current" )
+  done <<<"$current_windows"
+  missing_ids=()
+  stale_ids=()
+
+  for current in "${current_ids[@]+"${current_ids[@]}"}"; do
+    if array_contains "$current" "${DESIRED_WINDOW_IDS[@]}"; then
+      has_current_desired=true
+    else
+      stale_ids+=( "$current" )
+    fi
+  done
+  for desired in "${DESIRED_WINDOW_IDS[@]}"; do
+    if ! array_contains "$desired" "${current_ids[@]+"${current_ids[@]}"}"; then
+      missing_ids+=( "$desired" )
+      ((missing_count++)) || true
+    fi
+  done
+
+  # Add an anchor before removing the last stale window so the session survives.
+  if [[ "$has_current_desired" != true ]] && (( missing_count > 0 )); then
+    missing_first="${missing_ids[0]}"
+    tmux link-window -d -a -s "$missing_first" \
+      -t "$AGENT_SESSION_ID:{end}" >/dev/null || return 1
+    missing_ids=( "${missing_ids[@]:1}" )
+  fi
+
+  for window in "${stale_ids[@]+"${stale_ids[@]}"}"; do
+    remove_agent_session_window "$window"
+  done
+  for window in "${missing_ids[@]+"${missing_ids[@]}"}"; do
+    tmux link-window -d -a -s "$window" \
+      -t "$AGENT_SESSION_ID:{end}" >/dev/null || return 1
+  done
+}
+
+sync_agent_session() (
+  tmux wait-for -L "$AGENT_LINK_LOCK" >/dev/null 2>&1 || return 1
+  trap 'tmux wait-for -U "$AGENT_LINK_LOCK" >/dev/null 2>&1 || true' EXIT
+  reconcile_agent_session
+)
+
+unlink_agent_window() (
+  local window="$1" fingerprint= linked_windows linked
+  local -a linked_ids
+
+  tmux wait-for -L "$AGENT_LINK_LOCK" >/dev/null 2>&1 || return 1
+  trap 'tmux wait-for -U "$AGENT_LINK_LOCK" >/dev/null 2>&1 || true' EXIT
+  locate_agent_session || return $?
+  [[ -n "$AGENT_SESSION_ID" ]] || return 0
+  collect_source_windows || return 1
+  source_window_index "$window" || return 0
+  fingerprint="${SOURCE_WINDOW_MEMBERS[$SOURCE_WINDOW_INDEX]}"
+  [[ -n "$fingerprint" ]] || return 0
+  linked_windows="$(tmux list-windows -t "$AGENT_SESSION_ID" \
+    -F '#{window_id}' 2>/dev/null)" || return 1
+  linked_ids=()
+  while IFS= read -r linked; do
+    [[ -n "$linked" ]] && linked_ids+=( "$linked" )
+  done <<<"$linked_windows"
+  array_contains "$window" "${linked_ids[@]+"${linked_ids[@]}"}" || return 0
+
+  tmux set-option -w -t "$window" "$AGENT_SUPPRESSION_OPTION" "$fingerprint" \
+    >/dev/null || return 1
+  if ! tmux unlink-window -t "$AGENT_SESSION_ID:$window" >/dev/null; then
+    tmux set-option -wu -t "$window" "$AGENT_SUPPRESSION_OPTION" \
+      >/dev/null 2>&1 || true
+    return 1
+  fi
+)
 
 set_status() {
   local agent="$1"
@@ -51,6 +344,14 @@ clear_status() {
 }
 
 case "${1:-}" in
+  start)
+    [[ $# -ge 2 && $# -le 3 ]] || { usage; exit 2; }
+    supported_agent "$2" || { usage; exit 2; }
+    pane="$(pane_target "${3:-}")" || exit 0
+    tmux_available || exit 0
+    set_status "$2" idle "$pane"
+    sync_agent_session || true
+    ;;
   set)
     [[ $# -ge 3 && $# -le 4 ]] || { usage; exit 2; }
     case "$2" in codex|claude) ;; *) usage; exit 2 ;; esac
@@ -70,6 +371,19 @@ case "${1:-}" in
     pane="$(pane_target "${2:-}")" || exit 0
     tmux_available || exit 0
     clear_status "$pane"
+    sync_agent_session || true
+    ;;
+  sync)
+    [[ $# -eq 1 ]] || { usage; exit 2; }
+    [[ -n "${TMUX:-}" ]] || exit 0
+    tmux_available || exit 0
+    sync_agent_session
+    ;;
+  unlink)
+    [[ $# -eq 2 ]] || { usage; exit 2; }
+    [[ -n "${TMUX:-}" ]] || exit 0
+    tmux_available || exit 0
+    unlink_agent_window "$2"
     ;;
   *)
     usage

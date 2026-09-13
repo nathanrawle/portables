@@ -3,7 +3,7 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set codex idle", "timeout": 3 }
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" start codex", "timeout": 3 }
         ]
       }
     ],

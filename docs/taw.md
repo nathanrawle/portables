@@ -329,6 +329,33 @@ The window icon replaces `#F` while an agent state is present; normal tmux
 window flags return when no pane in the window has an agent state. Unlike the
 session picker, these status-bar glyphs do not change with `TAW_ICONS`.
 
+## Agent Link Session
+
+The same lifecycle hooks maintain a tmux session named `agents`. Every window
+with a Codex or Claude pane is linked into it without being removed from its
+source session. Detection does not depend on taw: agents started directly from
+a shell or with the tmux `C-x` and `C-c` split bindings are included when their
+session-start hooks publish pane metadata.
+
+The `agents` session is created on the first match and removed when no eligible
+windows remain. Its first window is created in a three-character directory
+under the operating system's temporary directory, then atomically replaced by
+the first linked window. The temporary directory is deliberately left for the
+operating system's normal cleanup schedule. Later links are appended after the
+last existing window. The session is marked as managed; an existing unmarked
+session named `agents` is never modified.
+
+In `agents`, both `C-q` and `<prefix> &` ask whether to unlink the current
+window while leaving it alive in its source session. Press `y` or `Y` to
+unlink; any other response does nothing. The window remains suppressed until
+its set of Codex and Claude panes changes. Outside `agents`, the bindings keep
+their normal kill behavior. Killing a source window removes the shared window
+from `agents` as well.
+
+The protection is implemented by those key bindings. Running the literal tmux
+`kill-window` command still destroys a linked window in every session because
+tmux represents linked windows as one shared object.
+
 ## Examples
 
 ```bash

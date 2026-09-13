@@ -3,7 +3,7 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" set claude idle", "timeout": 3 }
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" start claude", "timeout": 3 }
         ]
       }
     ],
