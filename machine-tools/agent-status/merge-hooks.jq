@@ -3,7 +3,9 @@ def owned_handler:
   and .type == "command"
   and ((.command? // "") as $command
     | ($command | startswith("$HOME/.zfuns/taw-agent-status "))
-      or ($command | startswith("\"$HOME/.zfuns/taw-agent-status\" ")));
+      or ($command | startswith("\"$HOME/.zfuns/taw-agent-status\" "))
+      or ($command | startswith("$HOME/.zfuns/nvim-tmux "))
+      or ($command | startswith("\"$HOME/.zfuns/nvim-tmux\" ")));
 
 def without_owned_handlers:
   if ((.hooks? | type) != "array") then

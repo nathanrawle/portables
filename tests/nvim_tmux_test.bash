@@ -140,6 +140,9 @@ EOF
 
   output="$(run_bridge "$tmux_environment" "$agent" context)"
   assert_eq "$first" "$(jq -r '.editor.file' <<<"$output")" "unexpected current file"
+  output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
+  assert_string_contains "$output" 'A live Neovim is available in this exact tmux window.'
+  assert_string_contains "$output" 'Refresh with nvim-tmux context'
 
   registered_socket="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     show-option -pqv -t "$editor" @taw_nvim_socket)"
@@ -200,6 +203,9 @@ EOF
   fi
   assert_eq 3 "$ambiguity_status" "unexpected ambiguity exit status"
   assert_string_contains "$ambiguity_output" 'multiple Neovim instances found'
+  output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
+  assert_string_contains "$output" 'Multiple Neovim instances are available'
+  assert_string_contains "$output" "$editor,$second_editor"
   output="$(run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
   assert_eq "$editor" "$(jq -r '.pane_id' <<<"$output")" "explicit pane was not selected"
 

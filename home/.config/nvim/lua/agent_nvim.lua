@@ -80,6 +80,9 @@ local function visual_selection(mode)
 
   local text = table.concat(region, "\n")
   local limited = vim.fn.strpart(text, 0, selection_limit, true)
+  if #limited > selection_limit then
+    limited = vim.fn.strcharpart(limited, 0, vim.fn.strchars(limited) - 1)
+  end
   return {
     mode = visual_mode,
     anchor = { line = anchor[2], column = anchor[3] },

@@ -30,6 +30,10 @@ owned_hook_count() {
   jq '[.hooks[][]?.hooks[]? | select((.command? // "") | startswith("\"$HOME/.zfuns/taw-agent-status\" "))] | length' "$1"
 }
 
+nvim_hook_count() {
+  jq '[.hooks[][]?.hooks[]? | select((.command? // "") | startswith("\"$HOME/.zfuns/nvim-tmux\" "))] | length' "$1"
+}
+
 test_agent_status_sets_pane_options() {
   local bin log
 
@@ -105,6 +109,7 @@ test_agent_status_config_creates_native_hooks() {
   assert_eq 8 "$(jq '.hooks | length' "$codex")" "expected Codex lifecycle events"
   assert_eq 11 "$(jq '.hooks | length' "$claude")" "expected Claude lifecycle events"
   assert_eq 8 "$(owned_hook_count "$codex")" "expected Codex status handlers"
+  assert_eq 1 "$(nvim_hook_count "$codex")" "expected Codex Neovim context handler"
   assert_eq 11 "$(owned_hook_count "$claude")" "expected Claude status handlers"
 }
 
@@ -121,7 +126,8 @@ test_agent_status_config_preserves_unrelated_settings() {
   "hooks": {
     "Stop": [{"hooks": [
       {"type": "command", "command": "keep-this"},
-      {"type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex stale"}
+      {"type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex stale"},
+      {"type": "command", "command": "$HOME/.zfuns/nvim-tmux stale"}
     ]}]
   }
 }
@@ -137,6 +143,8 @@ EOF
     "expected unrelated Codex hook preserved"
   assert_eq 0 "$(jq '[.hooks[][]?.hooks[]? | select(.command? == "$HOME/.zfuns/taw-agent-status set codex stale")] | length' "$codex")" \
     "expected stale owned hook replaced"
+  assert_eq 0 "$(jq '[.hooks[][]?.hooks[]? | select(.command? == "$HOME/.zfuns/nvim-tmux stale")] | length' "$codex")" \
+    "expected stale Neovim hook replaced"
   assert_eq dark "$(jq -r '.theme' "$claude")" "expected Claude theme preserved"
   assert_eq Read "$(jq -r '.permissions.allow[0]' "$claude")" \
     "expected Claude permissions preserved"
@@ -154,10 +162,11 @@ test_agent_status_config_is_idempotent() {
 
   assert_eq "$before" "$after" "expected repeated hook configuration to be stable"
   assert_eq 8 "$(owned_hook_count "$codex")" "expected no duplicate Codex handlers"
+  assert_eq 1 "$(nvim_hook_count "$codex")" "expected no duplicate Neovim handlers"
 }
 
 test_agent_status_config_quotes_home_with_spaces() {
-  local home codex bin log command
+  local home codex bin log command nvim_command
 
   home="$TEST_TMPDIR/home with spaces"
   codex="$home/.codex/hooks.json"
@@ -165,6 +174,7 @@ test_agent_status_config_quotes_home_with_spaces() {
   log="$TEST_TMPDIR/tmux.log"
   mkdir -p "$home/.zfuns"
   ln -s "$AGENT_STATUS" "$home/.zfuns/taw-agent-status"
+  ln -s "$REPO_ROOT/home/.zfuns/nvim-tmux" "$home/.zfuns/nvim-tmux"
 
   HOME="$home" bash "$AGENT_STATUS_CONFIG" config
   command="$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$codex")"
@@ -173,6 +183,9 @@ test_agent_status_config_quotes_home_with_spaces() {
 
   assert_file_contains "$log" 'set-option -p -t %4 @taw_agent codex'
   assert_file_contains "$log" 'set-option -p -t %4 @taw_agent_state idle'
+
+  nvim_command="$(jq -r '.hooks.SessionStart[0].hooks[] | select(.command | contains("nvim-tmux")) | .command' "$codex")"
+  HOME="$home" TMUX= bash -c "$nvim_command"
 }
 
 test_agent_status_config_refuses_malformed_json() {

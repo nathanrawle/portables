@@ -3,7 +3,8 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" start codex", "timeout": 3 }
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" start codex", "timeout": 3 },
+          { "type": "command", "command": "\"$HOME/.zfuns/nvim-tmux\" codex-context", "timeout": 3, "additionalContextLimit": 1000 }
         ]
       }
     ],
