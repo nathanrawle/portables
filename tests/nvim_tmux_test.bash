@@ -90,6 +90,28 @@ assert(context.selection.mode == "V")
 assert(context.selection.text == "first\nsecond")
 assert(context.diagnostics[1].line == 2)
 assert(context.diagnostics[1].severity == "WARN")
+
+local agent_namespace = vim.api.nvim_create_namespace("taw-agent-nvim")
+vim.api.nvim_buf_set_extmark(buffer, agent_namespace, 0, 0, { end_col = 1, hl_group = "Visual" })
+local other_buffer = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_extmark(other_buffer, agent_namespace, 0, 0, { hl_group = "Visual" })
+require("keymaps")
+vim.opt.hlsearch = true
+vim.fn.setreg("/", "first")
+vim.cmd("normal! gg")
+vim.cmd("normal! n")
+assert(vim.v.hlsearch == 1)
+local escape_mapping
+for _, mapping in ipairs(vim.api.nvim_get_keymap("n")) do
+  if mapping.lhs == "<Esc>" then
+    escape_mapping = mapping.callback
+  end
+end
+assert(type(escape_mapping) == "function")
+escape_mapping()
+assert(vim.v.hlsearch == 0)
+assert(#vim.api.nvim_buf_get_extmarks(buffer, agent_namespace, 0, -1, {}) == 0)
+assert(#vim.api.nvim_buf_get_extmarks(other_buffer, agent_namespace, 0, -1, {}) == 1)
 EOF
 
   TMUX= TMUX_PANE= TAW_NVIM_RUNTIME="$NVIM_RUNTIME" \

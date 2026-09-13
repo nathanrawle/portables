@@ -209,6 +209,10 @@ function M.clear_highlights(path_hex)
   return true
 end
 
+function M.clear_current_highlights()
+  vim.api.nvim_buf_clear_namespace(0, highlight_namespace, 0, -1)
+end
+
 function M.setup()
   publish()
 end
