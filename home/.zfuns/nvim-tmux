@@ -320,10 +320,29 @@ run_codex_context() {
   fi
 
   context="$(editor_context)" || return 0
-  summary="$(jq -c '{connection, editor: {file: .editor.file, cursor: .editor.cursor, modified: .editor.modified, mode: .editor.mode}}' \
+  summary="$(jq -c --arg codex_pane_id "$CALLER_PANE" \
+    '{
+      routing: {
+        window_id: .connection.window_id,
+        codex_pane_id: $codex_pane_id,
+        nvim_pane_id: .connection.pane_id
+      },
+      connection: {
+        pid: .connection.pid,
+        socket: .connection.socket,
+        source: .connection.source
+      },
+      editor: {
+        file: .editor.file,
+        cursor: .editor.cursor,
+        modified: .editor.modified,
+        mode: .editor.mode
+      }
+    }' \
     <<<"$context")"
   printf 'A live Neovim is available in this exact tmux window. Initial context: %s\n' "$summary"
-  printf 'Refresh with nvim-tmux context before relying on editor state; use its constrained open, highlight, and clear-highlights commands instead of direct Ex, Lua, remote-expr, or remote-send.\n'
+  printf 'Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane %s context. Use its constrained open, highlight, and clear-highlights commands instead of direct Ex, Lua, remote-expr, or remote-send.\n' \
+    "${CANDIDATE_PANES[SELECTED]}"
 }
 
 TARGET_PANE=
