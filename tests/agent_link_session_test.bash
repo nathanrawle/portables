@@ -239,6 +239,42 @@ test_agent_link_session_refuses_unowned_name() {
   assert_eq "$before" "$after" "expected the unowned session to remain untouched"
 }
 
+test_agent_link_session_clears_respawned_pane() {
+  local bin pane agent pane_pid
+
+  AGENT_LINK_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$AGENT_LINK_REAL_TMUX" ]] || return 0
+  AGENT_LINK_SOCKET="portables-agent-link-respawn-$$-$RANDOM"
+  trap cleanup_agent_link_server EXIT
+  : >"$TEST_TMPDIR/tmux.log"
+  bin="$(make_agent_link_tmux_wrapper "$TEST_TMPDIR/wrapper")"
+
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" -f /dev/null \
+    new-session -d -s source -n work 'sleep 300'
+  pane="$(
+    "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" display-message \
+      -p -t source:work '#{pane_id}'
+  )"
+  run_agent_link_status "$bin" start codex "$pane"
+  pane_pid="$(
+    "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" show-option \
+      -pqv -t "$pane" @taw_agent_pane_pid
+  )"
+  [[ -n "$pane_pid" ]] || fail "expected the agent pane process to be recorded"
+
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    respawn-pane -k -t "$pane" 'sleep 300'
+  run_agent_link_status "$bin" sync
+  agent="$(
+    "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" show-option \
+      -pqv -t "$pane" @taw_agent
+  )"
+  assert_eq "" "$agent" "expected respawned pane metadata to be cleared"
+  if "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" has-session -t agents 2>/dev/null; then
+    fail "expected a respawned non-agent pane to be unlinked"
+  fi
+}
+
 test_agent_link_bindings_load() {
   local home root_binding prefix_binding lower upper rejected
 
@@ -288,4 +324,6 @@ test_case "agent link session: removes temp dir when creation fails" \
   test_agent_link_session_removes_temp_dir_when_creation_fails
 test_case "agent link session: refuses an unowned agents session" \
   test_agent_link_session_refuses_unowned_name
+test_case "agent link session: clears respawned pane metadata" \
+  test_agent_link_session_clears_respawned_pane
 test_case "agent link session: safe bindings load" test_agent_link_bindings_load

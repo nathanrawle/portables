@@ -14,6 +14,7 @@ usage() {
 AGENT_SESSION_NAME=agents
 AGENT_SESSION_MARKER=@taw_agent_link_session
 AGENT_SUPPRESSION_OPTION=@taw_agent_link_suppressed
+AGENT_PANE_PID_OPTION=@taw_agent_pane_pid
 AGENT_LINK_LOCK=taw-agent-link-session
 AGENT_SESSION_ID=
 AGENT_SESSION_NAMED_ID=
@@ -115,7 +116,8 @@ locate_agent_session() {
 }
 
 collect_source_windows() {
-  local panes line session_id window_id pane_id agent suppression rest tab=$'\t'
+  local panes line session_id window_id pane_id agent agent_pane_pid pane_pid
+  local suppression rest tab=$'\t'
   local member i fingerprint
 
   SOURCE_WINDOW_IDS=()
@@ -123,7 +125,7 @@ collect_source_windows() {
   SOURCE_WINDOW_SUPPRESSIONS=()
   DESIRED_WINDOW_IDS=()
   panes="$(tmux list-panes -a \
-    -F $'#{session_id}\t#{window_id}\t#{pane_id}\t#{@taw_agent}\t#{@taw_agent_link_suppressed}' \
+    -F $'#{session_id}\t#{window_id}\t#{pane_id}\t#{@taw_agent}\t#{@taw_agent_pane_pid}\t#{pane_pid}\t#{@taw_agent_link_suppressed}' \
     2>/dev/null)" || return 1
 
   while IFS= read -r line; do
@@ -135,6 +137,10 @@ collect_source_windows() {
     pane_id="${rest%%"$tab"*}"
     rest="${rest#*"$tab"}"
     agent="${rest%%"$tab"*}"
+    rest="${rest#*"$tab"}"
+    agent_pane_pid="${rest%%"$tab"*}"
+    rest="${rest#*"$tab"}"
+    pane_pid="${rest%%"$tab"*}"
     suppression="${rest#*"$tab"}"
     [[ -n "$session_id" && -n "$window_id" && -n "$pane_id" ]] || continue
     [[ -z "$AGENT_SESSION_ID" || "$session_id" != "$AGENT_SESSION_ID" ]] || continue
@@ -146,6 +152,14 @@ collect_source_windows() {
       SOURCE_WINDOW_INDEX=$((${#SOURCE_WINDOW_IDS[@]} - 1))
     fi
     supported_agent "$agent" || continue
+    if [[ -n "$agent_pane_pid" && "$agent_pane_pid" != "$pane_pid" ]]; then
+      clear_status "$pane_id"
+      continue
+    fi
+    if [[ -z "$agent_pane_pid" ]]; then
+      tmux set-option -p -t "$pane_id" "$AGENT_PANE_PID_OPTION" "$pane_pid" \
+        >/dev/null 2>&1 || true
+    fi
     member="$pane_id=$agent"
     case $'\n'"${SOURCE_WINDOW_MEMBERS[$SOURCE_WINDOW_INDEX]}" in
       *$'\n'"$member"$'\n'*) ;;
@@ -322,9 +336,15 @@ set_status() {
   local agent="$1"
   local state="$2"
   local pane="$3"
+  local pane_pid
 
+  pane_pid="$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null)" \
+    || return 0
+  [[ -n "$pane_pid" ]] || return 0
   tmux set-option -p -t "$pane" @taw_agent "$agent" >/dev/null 2>&1 || return 0
   tmux set-option -p -t "$pane" @taw_agent_state "$state" >/dev/null 2>&1 || true
+  tmux set-option -p -t "$pane" "$AGENT_PANE_PID_OPTION" "$pane_pid" \
+    >/dev/null 2>&1 || true
 }
 
 acknowledge_status() {
@@ -341,6 +361,7 @@ clear_status() {
 
   tmux set-option -pu -t "$pane" @taw_agent_state >/dev/null 2>&1 || true
   tmux set-option -pu -t "$pane" @taw_agent >/dev/null 2>&1 || true
+  tmux set-option -pu -t "$pane" "$AGENT_PANE_PID_OPTION" >/dev/null 2>&1 || true
 }
 
 case "${1:-}" in
