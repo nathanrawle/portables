@@ -167,17 +167,18 @@ discover_with_lsof() {
 
 discover_candidates() {
   local pane pane_pid registrations socket pid registered_socket registered_pid pane_format
+  local field_separator=$'\034'
 
   CANDIDATE_PANES=()
   CANDIDATE_PIDS=()
   CANDIDATE_SOCKETS=()
   CANDIDATE_SOURCES=()
   load_processes
-  pane_format="#{pane_id}"$'\t'"#{pane_pid}"
-  pane_format+=$'\t'"#{@taw_nvim_registrations}"
-  pane_format+=$'\t'"#{@taw_nvim_socket}"$'\t'"#{@taw_nvim_pid}"
+  pane_format="#{pane_id}${field_separator}#{pane_pid}"
+  pane_format+="${field_separator}#{@taw_nvim_registrations}"
+  pane_format+="${field_separator}#{@taw_nvim_socket}${field_separator}#{@taw_nvim_pid}"
 
-  while IFS=$'\t' read -r pane pane_pid registrations socket pid; do
+  while IFS="$field_separator" read -r pane pane_pid registrations socket pid; do
     [[ -z "$TARGET_PANE" || "$pane" == "$TARGET_PANE" ]] || continue
     while IFS=$'\t' read -r registered_pid registered_socket; do
       [[ -n "$registered_pid" && -n "$registered_socket" ]] || continue

@@ -278,6 +278,13 @@ EOF
   assert_eq registered "$(jq -r '.source' <<<"$output")" \
     "registered discovery should not require lsof"
   "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+    set-option -pu -t "$editor" @taw_nvim_registrations
+  output="$(PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" discover)"
+  assert_eq "$registered_socket" "$(jq -r '.socket' <<<"$output")" \
+    "legacy registration should survive an empty registration-list field"
+  "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+    set-option -p -t "$editor" @taw_nvim_registrations "$registered_registrations"
+  "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     set-option -p -t "$editor" @taw_nvim_socket /tmp/missing-nvim-socket
   stale_registrations="$(jq -cn --arg pid "$registered_pid" \
     '[{pid: $pid, socket: "/tmp/missing-nvim-socket"}]')"
