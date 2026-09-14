@@ -92,13 +92,21 @@ clone_missing() {
 }
 
 user_git_file() {
-  GIT_USER_FILE="${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}"
+  GIT_USER_FILE="${GIT_CONFIG_GLOBAL:-${XDG_CONFIG_HOME:-$HOME/.config}/git/local.conf}"
   if [[ -L "$GIT_USER_FILE" ]]; then
-    log -e "refusing to write through global Git config symlink: $GIT_USER_FILE"
+    log -e "refusing to write through generated Git config symlink: $GIT_USER_FILE"
     return 1
   fi
   require_external_destination "$GIT_USER_FILE" || return 1
   mkdir -p "$(dirname "$GIT_USER_FILE")"
+}
+
+require_unmasked_xdg_git_config() {
+  [[ -n "${GIT_CONFIG_GLOBAL:-}" ]] && return 0
+  if [[ -e "$HOME/.gitconfig" || -L "$HOME/.gitconfig" ]]; then
+    log -e "$HOME/.gitconfig masks the XDG global config; move or remove it before retrying"
+    return 1
+  fi
 }
 
 require_external_destination() {

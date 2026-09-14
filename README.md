@@ -146,10 +146,12 @@ loads it, and requires `$HOME/.<lowercase-host>.env` to link back to that reposi
 A conflicting home file is preserved but makes maintenance fail. Keep secrets outside the
 repository.
 
-The tracked Git configuration contains shared defaults. Runtime identity settings go
-to the user-global Git file; hooks refuse to write through a global-config symlink or
-into the repository. Existing identity and custom ignore settings are preserved.
-Git's standard user ignore file is used by default instead of hardcoded machine paths.
+The tracked Git configuration contains shared defaults and includes generated files from
+the same XDG directory. Missing runtime identity settings go to `local.conf`; hooks refuse
+to write through its symlink or into the repository. Existing identity and custom ignore
+settings are preserved. Git's standard XDG user ignore file is used instead of hardcoded
+machine paths. A root `~/.gitconfig` masks the XDG global config, so hooks report it and
+leave it untouched unless `GIT_CONFIG_GLOBAL` explicitly selects another writable file.
 
 The `gcm` hook owns OS-specific credential defaults:
 
@@ -157,9 +159,10 @@ The `gcm` hook owns OS-specific credential defaults:
 - Linux: `cache --timeout 21600`, then `oauth`.
 
 It writes a marked `portables-credentials.conf` under
-`${XDG_CONFIG_HOME:-$HOME/.config}/git` and adds an idempotent include to the user-global
-Git file. This generated file stays outside the tracked payload. Custom generic helpers
-cause managed defaults to be omitted; host-specific sections remain unchanged.
+`${XDG_CONFIG_HOME:-$HOME/.config}/git`; the tracked config includes that relative path.
+When `GIT_CONFIG_GLOBAL` explicitly selects another file, the hook adds an idempotent
+include there instead. Generated files stay outside the tracked payload. Custom generic
+helpers cause managed defaults to be omitted; host-specific sections remain unchanged.
 
 An exact legacy `manager` / `oauth` pair in the writable user-global file is migrated,
 with a `.bak.*` backup. Other combinations are treated as custom. No credentials are

@@ -5,5 +5,7 @@
   defaultBranch = main
 [include]
   path = gitbutler_config
+  path = local.conf
+  path = portables-credentials.conf
 [credential "https://dev.azure.com"]
   useHttpPath = true

@@ -7,6 +7,7 @@ case "$1" in
   install) command -v git >/dev/null 2>&1 || echo syspkgmgr:git ;;
   config)
     require_commands git
+    require_unmasked_xdg_git_config
     for field in name email; do
       if ! git config --global --includes --get "user.$field" >/dev/null; then
         case "$field" in

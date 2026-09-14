@@ -13,6 +13,7 @@ case "$1" in
     ;;
   config)
     require_commands git
+    require_unmasked_xdg_git_config
     case "$OS" in
       Darwin) defaults=( manager ) ;;
       Linux) defaults=( 'cache --timeout 21600' oauth ) ;;
@@ -65,9 +66,11 @@ case "$1" in
     fi
     chmod 600 "$temp/config"
     mv "$temp/config" "$managed"
-    includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"
-    found=0
-    while IFS= read -r included; do [[ "$included" != "$managed" ]] || found=1; done <<<"$includes"
-    [[ "$found" = 1 ]] || git config --file "$GIT_USER_FILE" --add include.path "$managed"
+    if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
+      includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"
+      found=0
+      while IFS= read -r included; do [[ "$included" != "$managed" ]] || found=1; done <<<"$includes"
+      [[ "$found" = 1 ]] || git config --file "$GIT_USER_FILE" --add include.path "$managed"
+    fi
     ;;
 esac

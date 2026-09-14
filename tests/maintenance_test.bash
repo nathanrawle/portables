@@ -203,6 +203,46 @@ test_maintenance_git_migrates_only_legacy_pair() {
   assert_eq $'manager\noauth' "$(git config --file "${backups[0]}" --get-all credential.helper)"
 }
 
+test_maintenance_git_uses_xdg_fragments() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/git.sh" "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  mkdir -p "$FIXTURE/home/.config/git"
+  cp "$REPO_ROOT/home/.config/git/config" "$FIXTURE/home/.config/git/config"
+  git config --file "$FIXTURE/home/.config/git/config" --unset-all user.name
+  git config --file "$FIXTURE/home/.config/git/config" --unset-all user.email
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager"
+  bash "$FIXTURE/symlinks" .config/git/config
+  unset GIT_CONFIG_GLOBAL
+  GIT_NAME='Portable User' GIT_EMAIL=portable@example.com bash "$FIXTURE/configure" git gcm
+  assert_not_exists "$HOME/.gitconfig"
+  assert_eq 'Portable User' "$(git config --global --includes --get user.name)"
+  assert_eq portable@example.com "$(git config --global --includes --get user.email)"
+  assert_eq manager "$(git config --global --includes --get-all credential.helper)"
+  assert_eq 'Portable User' "$(git config --file "$HOME/.config/git/local.conf" --get user.name)"
+  assert_eq $'gitbutler_config\nlocal.conf\nportables-credentials.conf' \
+    "$(git config --file "$HOME/.config/git/config" --get-all include.path)"
+  printf 'ignored-by-xdg\n' >"$HOME/.config/git/ignore"
+  mkdir "$TEST_TMPDIR/git-repo"
+  git -C "$TEST_TMPDIR/git-repo" init -q
+  printf 'ignored\n' >"$TEST_TMPDIR/git-repo/ignored-by-xdg"
+  git -C "$TEST_TMPDIR/git-repo" check-ignore -q ignored-by-xdg || fail 'standard XDG ignore file not used'
+}
+
+test_maintenance_git_reports_masking_root_config() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/git.sh" "$FIXTURE/machine-tools/"
+  unset GIT_CONFIG_GLOBAL
+  printf '[user]\n  name = legacy\n' >"$HOME/.gitconfig"
+  local output rc=0
+  output="$(bash "$FIXTURE/configure" git 2>&1)" || rc=$?
+  assert_eq 1 "$rc"
+  [[ "$output" = *'.gitconfig masks the XDG global config; move or remove it before retrying'* ]] ||
+    fail 'masking Git config diagnostic missing'
+  assert_file_contents "$HOME/.gitconfig" $'[user]\n  name = legacy'
+  assert_not_exists "$HOME/.config/git/local.conf"
+}
+
 test_maintenance_wrappers_preserve_failure_and_scope() {
   maintenance_fixture
   cat >"$TEST_TMPDIR/bin/bash" <<'EOF'
@@ -244,6 +284,8 @@ test_case 'maintenance: system packages use deduplicated batches' test_maintenan
 test_case 'maintenance: bootstrap packages share one transaction' test_maintenance_batches_bootstrap_packages
 test_case 'maintenance: Git defaults follow OS and preserve custom helpers' test_maintenance_git_defaults_and_custom_helpers
 test_case 'maintenance: Git migrates exact legacy pair and preserves host helpers' test_maintenance_git_migrates_only_legacy_pair
+test_case 'maintenance: Git writes generated settings through XDG fragments' test_maintenance_git_uses_xdg_fragments
+test_case 'maintenance: Git reports a root config that masks XDG' test_maintenance_git_reports_masking_root_config
 test_case 'maintenance: Zsh wrappers preserve failures and caller state' test_maintenance_wrappers_preserve_failure_and_scope
 test_case 'maintenance: wrapper help does not relink or prompt' test_maintenance_wrappers_help_has_no_followup
 
