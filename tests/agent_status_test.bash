@@ -18,6 +18,8 @@ set -euo pipefail
 printf '%s\n' "$*" >>"$TAW_STATUS_TMUX_LOG"
 if [[ "${1:-}" = show-option ]]; then
   printf '%s\n' "${TAW_STATUS_EXISTING_STATE:-}"
+elif [[ "${1:-}" = display-message ]]; then
+  printf '1234\n'
 fi
 EOF
   chmod +x "$bin/tmux"
@@ -38,6 +40,7 @@ test_agent_status_sets_pane_options() {
 
   assert_file_contains "$log" 'set-option -p -t %3 @taw_agent codex'
   assert_file_contains "$log" 'set-option -p -t %3 @taw_agent_state thinking'
+  assert_file_contains "$log" 'set-option -p -t %3 @taw_agent_pane_pid 1234'
 }
 
 test_agent_status_acknowledges_only_waiting() {
@@ -65,6 +68,7 @@ test_agent_status_clears_pane_options() {
 
   assert_file_contains "$log" 'set-option -pu -t %2 @taw_agent_state'
   assert_file_contains "$log" 'set-option -pu -t %2 @taw_agent'
+  assert_file_contains "$log" 'set-option -pu -t %2 @taw_agent_pane_pid'
 }
 
 test_agent_status_is_quiet_without_tmux() {
