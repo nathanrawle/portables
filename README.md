@@ -57,7 +57,7 @@ operational failures, but return failure and do not offer a shell restart.
 2. Establish home links.
 3. Prepare the package manager, refresh metadata, and ensure curl/Git are available.
 4. Collect and validate all tool requirements.
-5. Install system packages and self-installed providers, then Node, managed Python,
+5. Install missing system packages in package-manager batches and self-installed providers, then Node, managed Python,
    uv tools, pip, pipx, and npm requirements.
 6. Configure every eligible tool once, including tools that were already installed.
 7. Relink generated files and report the overall result.
@@ -108,6 +108,8 @@ Identical requirements are deduplicated; multiple toolchain requests are handled
 separately. The obsolete `syspkgmgr:ext:` encoding and unknown backends fail validation.
 Pip/pipx remain supported extension points even though no current hook requests them.
 Pip does not upgrade itself or bypass externally managed Python protections.
+System requirements retain their owning hooks while formulas, casks, or distribution
+packages are passed to the package manager in the smallest appropriate batches.
 
 `OS`, `ID`, and `VERSION_ID` may be supplied for controlled environments/tests.
 Otherwise the scripts detect them from the platform. Repository paths always come from

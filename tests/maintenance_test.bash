@@ -4,6 +4,7 @@ maintenance_fixture() {
   export FIXTURE="$TEST_TMPDIR/repo with spaces"
   export HOME="$TEST_TMPDIR/home with spaces"
   export TRACE="$TEST_TMPDIR/trace"
+  export PACKAGE_STATE="$TEST_TMPDIR/package-state"
   export OS=Darwin ID= VERSION_ID= HOST=maintenance-test
   export PATH="$TEST_TMPDIR/bin:$PATH"
   mkdir -p "$FIXTURE/home" "$FIXTURE/machine-tools" "$HOME" "$TEST_TMPDIR/bin"
@@ -13,13 +14,30 @@ maintenance_fixture() {
   unset BASH_ENV ENV GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT
   cp "$REPO_ROOT/instantiate" "$REPO_ROOT/configure" "$REPO_ROOT/symlinks" "$REPO_ROOT/log" "$FIXTURE/"
   cp -R "$REPO_ROOT/lib" "$FIXTURE/lib"
+  : >"$PACKAGE_STATE"
   printf 'shell\n' >"$FIXTURE/home/.zshrc"
-  cat >"$TEST_TMPDIR/bin/brew" <<'EOF'
+cat >"$TEST_TMPDIR/bin/brew" <<'EOF'
 #!/usr/bin/env bash
 printf 'brew %s\n' "$*" >>"$TRACE"
 case "$1" in
-  list) exit 1 ;;
-  install) [[ "$*" != *broken* ]] ;;
+  list)
+    kind=${2#--}
+    grep -qx "$kind:$3" "$PACKAGE_STATE"
+    ;;
+  install)
+    shift
+    kind=${1#--}
+    shift
+    rc=0
+    for package in "$@"; do
+      if [[ "$package" = broken ]]; then
+        rc=1
+      else
+        grep -qx "$kind:$package" "$PACKAGE_STATE" || printf '%s:%s\n' "$kind" "$package" >>"$PACKAGE_STATE"
+      fi
+    done
+    exit "$rc"
+    ;;
 esac
 EOF
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/xcode-select"
@@ -104,6 +122,53 @@ test_maintenance_cask_dispatch() {
   if grep -q 'brew tap' "$TRACE"; then fail 'cask dispatched as tap'; fi
 }
 
+test_maintenance_batches_system_packages() {
+  maintenance_fixture
+  cat >"$FIXTURE/machine-tools/a.sh" <<'EOF'
+[[ "$1" != install ]] || printf '%s\n' syspkgmgr:one syspkgmgr:two syspkgmgr:cask:first
+EOF
+  cat >"$FIXTURE/machine-tools/b.sh" <<'EOF'
+[[ "$1" != install ]] || printf '%s\n' syspkgmgr:two syspkgmgr:three syspkgmgr:cask:second
+EOF
+  bash "$FIXTURE/instantiate"
+  assert_eq 1 "$(grep -c '^brew install --formula ' "$TRACE")"
+  assert_eq 1 "$(grep -c '^brew install --cask ' "$TRACE")"
+  grep -q '^brew install --formula one two three$' "$TRACE" || fail 'formula batch missing or reordered'
+  grep -q '^brew install --cask first second$' "$TRACE" || fail 'cask batch missing or reordered'
+}
+
+test_maintenance_batches_bootstrap_packages() {
+  maintenance_fixture
+  local original_path="$PATH" command_path command
+  for command in bash dirname readlink tr hostname mktemp cp awk mv rm ln chmod mkdir; do
+    command_path="$(PATH="$original_path" command -v "$command")"
+    ln -sf "$command_path" "$TEST_TMPDIR/bin/$command"
+  done
+  cat >"$TEST_TMPDIR/bin/sudo" <<'EOF'
+#!/bin/sh
+exec "$@"
+EOF
+  cat >"$TEST_TMPDIR/bin/apt-get" <<'EOF'
+#!/usr/bin/env bash
+printf 'apt-get %s\n' "$*" >>"$TRACE"
+case "$1" in
+  install)
+    shift
+    for package in "$@"; do
+      [[ "$package" = -* ]] && continue
+      printf '#!/bin/sh\nexit 0\n' >"$BOOTSTRAP_BIN/$package"
+      chmod +x "$BOOTSTRAP_BIN/$package"
+    done
+    ;;
+esac
+EOF
+  chmod +x "$TEST_TMPDIR/bin/sudo" "$TEST_TMPDIR/bin/apt-get"
+  export BOOTSTRAP_BIN="$TEST_TMPDIR/bin"
+  OS=Linux ID=ubuntu PATH="$TEST_TMPDIR/bin" bash "$FIXTURE/instantiate"
+  grep -q '^apt-get install -y curl git$' "$TRACE" ||
+    fail "bootstrap package batch missing from: $(tr '\n' ';' <"$TRACE")"
+}
+
 test_maintenance_git_defaults_and_custom_helpers() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
@@ -175,6 +240,8 @@ test_case 'maintenance: bootstrap configures existing tools once after installat
 test_case 'maintenance: failed installations block only their owner' test_maintenance_install_failure_blocks_only_owner
 test_case 'maintenance: unknown requirements block installation' test_maintenance_unknown_requirement_blocks_installation
 test_case 'maintenance: casks use brew install' test_maintenance_cask_dispatch
+test_case 'maintenance: system packages use deduplicated batches' test_maintenance_batches_system_packages
+test_case 'maintenance: bootstrap packages share one transaction' test_maintenance_batches_bootstrap_packages
 test_case 'maintenance: Git defaults follow OS and preserve custom helpers' test_maintenance_git_defaults_and_custom_helpers
 test_case 'maintenance: Git migrates exact legacy pair and preserves host helpers' test_maintenance_git_migrates_only_legacy_pair
 test_case 'maintenance: Zsh wrappers preserve failures and caller state' test_maintenance_wrappers_preserve_failure_and_scope
@@ -189,9 +256,19 @@ EOF
   cat >"$TEST_TMPDIR/bin/package-stub" <<'EOF'
 #!/usr/bin/env bash
 printf '%s %s\n' "${0##*/}" "$*" >>"$TRACE"
-case "${0##*/}:$1" in
+backend=${0##*/}
+case "$backend:$1" in
   dnf:check-update) exit 100 ;;
-  dpkg-query:*|rpm:*|pacman:-Q) exit 1 ;;
+  dpkg-query:*) grep -qx "apt:${!#}" "$PACKAGE_STATE" && printf 'install ok installed';;
+  rpm:*) grep -qx "dnf:${!#}" "$PACKAGE_STATE" ;;
+  pacman:-Q) grep -qx "pacman:$2" "$PACKAGE_STATE" ;;
+  apt-get:install|dnf:install|pacman:-S)
+    case "$backend" in apt-get) kind=apt ;; *) kind=$backend ;; esac
+    for package in "$@"; do
+      [[ "$package" = -* || "$package" = install ]] && continue
+      grep -qx "$kind:$package" "$PACKAGE_STATE" || printf '%s:%s\n' "$kind" "$package" >>"$PACKAGE_STATE"
+    done
+    ;;
 esac
 EOF
   chmod +x "$TEST_TMPDIR/bin/"*
@@ -201,6 +278,7 @@ EOF
   done
   printf '[[ "$1" != install ]] || echo syspkgmgr:example\n' >"$FIXTURE/machine-tools/a.sh"
   for distro in ubuntu debian pop arch fedora; do
+    : >"$PACKAGE_STATE"
     OS=Linux ID="$distro" bash "$FIXTURE/instantiate"
   done
   grep -q '^apt-get install -y example$' "$TRACE" || fail 'apt dispatch missing'
@@ -300,7 +378,7 @@ EOF
 case "$1" in install) echo syspkgmgr:shared ;; config) echo independent >>"$TRACE" ;; esac
 EOF
   if bash "$FIXTURE/instantiate"; then fail 'failure hidden'; fi
-  grep -q '^brew install --formula shared$' "$TRACE" || fail 'shared requirement incorrectly blocked'
+  grep -q '^brew install --formula broken shared$' "$TRACE" || fail 'system requirements were not batched'
   grep -q '^independent$' "$TRACE" || fail 'independent owner incorrectly blocked'
 }
 

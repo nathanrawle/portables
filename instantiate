@@ -73,41 +73,62 @@ if [[ "$system_ready" = 1 && ${#update[@]} -gt 0 ]]; then
 fi
 [[ "$system_ready" = 1 ]] || failure "system package prerequisites or metadata"
 
-system_install() {
+system_package_installed() {
   local package="$1"
   case "$manager" in
     brew)
       if [[ "$package" = cask:* ]]; then
         package=${package#cask:}
-        brew list --cask "$package" >/dev/null 2>&1 && return 0
-        [[ "$system_ready" = 1 ]] || return 1
-        brew install --cask "$package"
+        brew list --cask "$package" >/dev/null 2>&1
       else
-        brew list --formula "$package" >/dev/null 2>&1 && return 0
-        [[ "$system_ready" = 1 ]] || return 1
-        brew install --formula "$package"
+        brew list --formula "$package" >/dev/null 2>&1
       fi
       ;;
-    apt)
-      [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null)" = 'install ok installed' ]] && return 0
-      [[ "$system_ready" = 1 ]] || return 1
-      "${install[@]}" "$package"
-      ;;
-    pacman)
-      pacman -Q "$package" >/dev/null 2>&1 && return 0
-      [[ "$system_ready" = 1 ]] || return 1
-      "${install[@]}" "$package"
-      ;;
-    dnf)
-      rpm -q "$package" >/dev/null 2>&1 && return 0
-      [[ "$system_ready" = 1 ]] || return 1
-      "${install[@]}" "$package"
-      ;;
+    apt) [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null)" = 'install ok installed' ]] ;;
+    pacman) pacman -Q "$package" >/dev/null 2>&1 ;;
+    dnf) rpm -q "$package" >/dev/null 2>&1 ;;
   esac
 }
+
+system_install_batch() {
+  local package rc=0
+  local formulas=() casks=()
+  [[ $# -gt 0 ]] || return 0
+  [[ "$system_ready" = 1 ]] || return 1
+  case "$manager" in
+    brew)
+      for package in "$@"; do
+        if [[ "$package" = cask:* ]]; then
+          casks+=( "${package#cask:}" )
+        else
+          formulas+=( "$package" )
+        fi
+      done
+      [[ ${#formulas[@]} -eq 0 ]] || brew install --formula "${formulas[@]}" || rc=1
+      [[ ${#casks[@]} -eq 0 ]] || brew install --cask "${casks[@]}" || rc=1
+      ;;
+    *) "${install[@]}" "$@" || rc=1 ;;
+  esac
+  return "$rc"
+}
+
+system_install() {
+  local package="$1"
+  system_package_installed "$package" && return 0
+  system_install_batch "$package" || true
+  system_package_installed "$package"
+}
+
+bootstrap_packages=()
 for command in curl git; do
-  command -v "$command" >/dev/null 2>&1 || system_install "$command" || failure "bootstrap $command"
+  command -v "$command" >/dev/null 2>&1 || bootstrap_packages+=( "$command" )
 done
+if [[ ${#bootstrap_packages[@]} -gt 0 ]]; then
+  system_install_batch "${bootstrap_packages[@]}" || true
+  for command in "${bootstrap_packages[@]}"; do
+    command -v "$command" >/dev/null 2>&1 || failure "bootstrap $command"
+  done
+fi
 
 shopt -s nullglob
 tools=( "$MACHINE_TOOLS"/*.sh )
@@ -215,11 +236,40 @@ execute_requirement() (
   esac
 )
 
-for phase in system self node python uv pip pipx npm; do
+system_packages=()
+for ((i = 0; i < ${#tokens[@]}; i++)); do
+  token=${tokens[i]}
+  [[ "$token" = syspkgmgr:* ]] || continue
+  value=${token#syspkgmgr:}
+  if system_package_installed "$value"; then
+    results[i]=0
+    continue
+  fi
+  log "ensuring $token (${tools[owners[i]]##*/})"
+  seen=0
+  for package in "${system_packages[@]}"; do
+    [[ "$package" != "$value" ]] || seen=1
+  done
+  [[ "$seen" = 1 ]] || system_packages+=( "$value" )
+done
+system_install_batch "${system_packages[@]}" || true
+for ((i = 0; i < ${#tokens[@]}; i++)); do
+  token=${tokens[i]}
+  [[ "$token" = syspkgmgr:* ]] || continue
+  if [[ "${results[i]}" = pending ]]; then
+    value=${token#syspkgmgr:}
+    if system_package_installed "$value"; then results[i]=0; else results[i]=1; fi
+  fi
+  if [[ "${results[i]}" != 0 ]]; then
+    blocked[owners[i]]=1
+    failure "$token for ${tools[owners[i]]##*/}"
+  fi
+done
+
+for phase in self node python uv pip pipx npm; do
   for ((i = 0; i < ${#tokens[@]}; i++)); do
     token=${tokens[i]}
     case "$token" in
-      syspkgmgr:*) category=system ;;
       self-install) category=self ;;
       nvm:*) category=node ;;
       uv:python:*) category=python ;;
