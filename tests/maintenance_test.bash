@@ -400,3 +400,57 @@ EOF
 }
 
 test_case 'maintenance: default Python setup retains the installed version' test_maintenance_default_python_reuses_installed_version
+
+test_maintenance_python_creates_fresh_monty_directory() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/python.sh" "$FIXTURE/machine-tools/"
+  mkdir -p "$HOME/.config/python"
+  printf example >"$HOME/.config/python/monty"
+  cat >"$TEST_TMPDIR/bin/uv" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" = venv ]]; then
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" = --directory ]]; then directory="$2"; break; fi
+    shift
+  done
+  [[ -d "$directory" ]] || exit 2
+  mkdir -p "$directory/.venv/bin"
+  printf '#!/bin/sh\n' >"$directory/.venv/bin/python"
+  chmod +x "$directory/.venv/bin/python"
+fi
+EOF
+  chmod +x "$TEST_TMPDIR/bin/uv"
+  bash "$FIXTURE/configure" python
+  assert_exists "$HOME/monty/.venv/bin/python"
+}
+
+test_maintenance_stale_metadata_allows_installed_requirements() {
+  maintenance_fixture
+  export OS=Linux ID=ubuntu
+  cat >"$TEST_TMPDIR/bin/sudo" <<'EOF'
+#!/bin/sh
+exec "$@"
+EOF
+  cat >"$TEST_TMPDIR/bin/apt-get" <<'EOF'
+#!/bin/sh
+printf 'apt-get %s\n' "$*" >>"$TRACE"
+[[ "$1" != update ]]
+EOF
+  cat >"$TEST_TMPDIR/bin/dpkg-query" <<'EOF'
+#!/bin/sh
+printf 'install ok installed'
+EOF
+  chmod +x "$TEST_TMPDIR/bin/sudo" "$TEST_TMPDIR/bin/apt-get" "$TEST_TMPDIR/bin/dpkg-query"
+  cat >"$FIXTURE/machine-tools/a.sh" <<'EOF'
+case "$1" in
+  install) echo syspkgmgr:already-installed ;;
+  config) echo configured >>"$TRACE" ;;
+esac
+EOF
+  if bash "$FIXTURE/instantiate"; then fail 'metadata failure hidden'; fi
+  grep -q '^configured$' "$TRACE" || fail 'installed requirement incorrectly blocked configuration'
+  if grep -q '^apt-get install' "$TRACE"; then fail 'installed package was reinstalled'; fi
+}
+
+test_case 'maintenance: Python creates Monty before using it as uv working directory' test_maintenance_python_creates_fresh_monty_directory
+test_case 'maintenance: stale metadata preserves installed requirements' test_maintenance_stale_metadata_allows_installed_requirements

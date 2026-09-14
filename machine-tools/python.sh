@@ -17,6 +17,7 @@ case "$1" in
     require_commands uv
     require_files "$HOME/.config/python/monty"
     if [[ ! -x "$HOME/monty/.venv/bin/python" ]]; then
+      mkdir -p "$HOME/monty"
       uv venv --directory "$HOME/monty" --allow-existing --prompt monty
     fi
     uv pip install --python "$HOME/monty/.venv/bin/python" -r "$HOME/.config/python/monty"

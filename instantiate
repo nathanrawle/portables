@@ -68,23 +68,34 @@ fi
 
 system_install() {
   local package="$1"
-  [[ "$system_ready" = 1 ]] || return 1
   case "$manager" in
     brew)
       if [[ "$package" = cask:* ]]; then
         package=${package#cask:}
-        brew list --cask "$package" >/dev/null 2>&1 || brew install --cask "$package"
+        brew list --cask "$package" >/dev/null 2>&1 && return 0
+        [[ "$system_ready" = 1 ]] || return 1
+        brew install --cask "$package"
       else
-        brew list --formula "$package" >/dev/null 2>&1 || brew install --formula "$package"
+        brew list --formula "$package" >/dev/null 2>&1 && return 0
+        [[ "$system_ready" = 1 ]] || return 1
+        brew install --formula "$package"
       fi
       ;;
     apt)
-      if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null)" != 'install ok installed' ]]; then
-        "${install[@]}" "$package"
-      fi
+      [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null)" = 'install ok installed' ]] && return 0
+      [[ "$system_ready" = 1 ]] || return 1
+      "${install[@]}" "$package"
       ;;
-    pacman) pacman -Q "$package" >/dev/null 2>&1 || "${install[@]}" "$package" ;;
-    dnf) rpm -q "$package" >/dev/null 2>&1 || "${install[@]}" "$package" ;;
+    pacman)
+      pacman -Q "$package" >/dev/null 2>&1 && return 0
+      [[ "$system_ready" = 1 ]] || return 1
+      "${install[@]}" "$package"
+      ;;
+    dnf)
+      rpm -q "$package" >/dev/null 2>&1 && return 0
+      [[ "$system_ready" = 1 ]] || return 1
+      "${install[@]}" "$package"
+      ;;
   esac
 }
 for command in curl git; do
