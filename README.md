@@ -138,9 +138,11 @@ destination parents, and filesystem errors return failure while independent link
 
 ## Machine-specific and Git configuration
 
-The hostname selects `home/.<lowercase-host>.env`. Bootstrap preserves other settings
-and permissions, writes a shell-quoted `PORTABLES` assignment, loads the file, and links
-it before configuration. Keep secrets outside the repository.
+The hostname selects the canonical `home/.<lowercase-host>.env` regular file. Bootstrap
+preserves its other settings and permissions, writes a shell-quoted `PORTABLES` assignment,
+loads it, and requires `$HOME/.<lowercase-host>.env` to link back to that repository source.
+A conflicting home file is preserved but makes maintenance fail. Keep secrets outside the
+repository.
 
 The tracked Git configuration contains shared defaults. Runtime identity settings go
 to the user-global Git file; hooks refuse to write through a global-config symlink or

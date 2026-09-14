@@ -36,7 +36,11 @@ write_machine_env() {
   case "$machine" in ''|*[!a-z0-9_-]*) log -e "invalid hostname: $machine"; return 1 ;; esac
   target="$PORTABLE_HOME/.$machine.env"
   MACHENV="$target"
-  [[ ! -L "$target" ]] || { log -e "machine env must not be a symlink: $target"; return 1; }
+  MACHENV_LINK="$HOME/.$machine.env"
+  [[ ! -L "$target" ]] || {
+    log -e "repository machine env must not be a symlink: $target"
+    return 1
+  }
   temp="$(mktemp "$PORTABLE_HOME/.machine-env.XXXXXX")" || return 1
   if [[ -e "$target" ]]; then
     cp -p "$target" "$temp" || { rm -f "$temp"; return 1; }
@@ -49,6 +53,9 @@ write_machine_env() {
 write_machine_env || { failure "machine environment"; finish; exit 1; }
 . "$MACHENV" || { failure "load machine environment"; finish; exit 1; }
 bash "$PORTABLES/symlinks" || failure "initial symlinks"
+if [[ ! -L "$MACHENV_LINK" || ! "$MACHENV_LINK" -ef "$MACHENV" ]]; then
+  failure "machine environment link must target repository source: $MACHENV_LINK"
+fi
 
 system_ready=1
 if [[ "$OS" = Darwin ]]; then

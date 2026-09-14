@@ -310,12 +310,37 @@ test_maintenance_machine_env_preserves_settings_and_mode() {
   chmod 640 "$FIXTURE/home/.maintenance-test.env"
   printf '[[ "$1" != config ]] || printf "%%s" "$EXTRA" >>"$TRACE"\n' >"$FIXTURE/machine-tools/a.sh"
   bash "$FIXTURE/instantiate"
+  assert_symlink_to "$HOME/.maintenance-test.env" "$FIXTURE/home/.maintenance-test.env"
   grep -q '^export EXTRA=preserved$' "$FIXTURE/home/.maintenance-test.env" || fail 'setting removed'
   assert_eq 1 "$(grep -c '^export PORTABLES=' "$FIXTURE/home/.maintenance-test.env")"
   assert_eq preserved "$(tail -1 "$TRACE")"
   local mode
   mode="$(stat -c '%a' "$FIXTURE/home/.maintenance-test.env" 2>/dev/null || stat -f '%Lp' "$FIXTURE/home/.maintenance-test.env")"
   assert_eq 640 "$mode"
+  printf 'export WRITTEN_THROUGH_HOME=1\n' >>"$HOME/.maintenance-test.env"
+  grep -q '^export WRITTEN_THROUGH_HOME=1$' "$FIXTURE/home/.maintenance-test.env" ||
+    fail 'home machine environment does not write through to repository source'
+}
+
+test_maintenance_machine_env_preserves_home_conflict() {
+  maintenance_fixture
+  printf 'local machine settings\n' >"$HOME/.maintenance-test.env"
+  printf '[[ "$1" != config ]] || echo configured >>"$TRACE"\n' >"$FIXTURE/machine-tools/a.sh"
+  if bash "$FIXTURE/instantiate"; then fail 'conflicting home machine environment accepted'; fi
+  assert_file_contents "$HOME/.maintenance-test.env" 'local machine settings'
+  assert_eq configured "$(tail -1 "$TRACE")"
+}
+
+test_maintenance_machine_env_rejects_repository_symlink() {
+  maintenance_fixture
+  printf 'external settings\n' >"$TEST_TMPDIR/external.env"
+  ln -s "$TEST_TMPDIR/external.env" "$FIXTURE/home/.maintenance-test.env"
+  local output rc=0
+  output="$(bash "$FIXTURE/instantiate" 2>&1)" || rc=$?
+  assert_eq 1 "$rc"
+  [[ "$output" = *'repository machine env must not be a symlink:'* ]] ||
+    fail 'repository source rejection was unclear'
+  assert_file_contents "$TEST_TMPDIR/external.env" 'external settings'
 }
 
 test_maintenance_symlinked_entrypoints() {
@@ -381,6 +406,8 @@ EOF
 
 test_case 'maintenance: unattempted requirements do not poison independent owners' test_maintenance_skipped_requirement_does_not_block_independent_owner
 test_case 'maintenance: machine environment preserves settings and permissions' test_maintenance_machine_env_preserves_settings_and_mode
+test_case 'maintenance: machine environment preserves conflicting home files' test_maintenance_machine_env_preserves_home_conflict
+test_case 'maintenance: machine environment source must be a regular file' test_maintenance_machine_env_rejects_repository_symlink
 test_case 'maintenance: symlinked entrypoints find their repository' test_maintenance_symlinked_entrypoints
 test_case 'maintenance: Git never writes runtime settings into the repository' test_maintenance_git_refuses_source_writes
 test_case 'maintenance: interactive restart accepts y/Y and declines Enter/n/N' test_maintenance_restart_responses
