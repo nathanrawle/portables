@@ -14,9 +14,10 @@ The bootstrap scripts run with Bash 3.2 or newer and use no additional orchestra
 
 The functions are autoloaded by Zsh from `home/.zfuns`. They belong in the current
 shell; do not run them with Bash. After successful interactive maintenance they offer
-to replace `$SHELL`: y/Y accepts, while Enter/n/N declines. Failed runs, EOF, help, and
-noninteractive invocations do not replace the shell. Their temporary variables and
-logging context do not leak into the caller.
+to replace the shell: y/Y accepts, while Enter/n/N declines. A valid executable `$SHELL`
+is preferred, with the current Zsh command as fallback for malformed login-shell values.
+Failed runs, EOF, help, and noninteractive invocations do not replace the shell. Their
+temporary variables and logging context do not leak into the caller.
 
 Examples:
 
@@ -167,6 +168,10 @@ helpers cause managed defaults to be omitted; host-specific sections remain unch
 An exact legacy `manager` / `oauth` pair in the writable user-global file is migrated,
 with a `.bak.*` backup. Other combinations are treated as custom. No credentials are
 read, stored, or requested by this configuration step.
+
+The Zsh hook links `zcp` and `zln` directly to the current `zmv`. It repairs links through
+the former repository intermediaries and broken links to versioned Zsh `zmv` locations,
+while preserving custom destinations and rejecting unrelated broken links.
 
 ## Repository layout and validation
 

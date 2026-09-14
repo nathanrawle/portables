@@ -25,14 +25,26 @@ case "$1" in
       mkdir -p "$HOME/.zfuns"
     fi
     for name in zcp zln; do
-      if [[ ! -e "$HOME/.zfuns/$name" && ! -L "$HOME/.zfuns/$name" ]]; then
+      destination="$HOME/.zfuns/$name"
+      managed=0
+      if [[ ! -e "$destination" && ! -L "$destination" ]]; then
+        managed=1
+      elif [[ -L "$destination" ]]; then
+        target="$(readlink "$destination")"
+        if [[ "$target" = "$PORTABLE_HOME/.zfuns/$name" ]]; then
+          managed=1
+        elif [[ ! -e "$destination" && "$target" = */share/zsh/*/functions/zmv ]]; then
+          managed=1
+        fi
+      fi
+      if [[ "$managed" = 1 ]]; then
         if require_external_destination "$HOME/.zfuns/$name"; then
-          ln -s "$zmv" "$HOME/.zfuns/$name" || failure "function $name"
+          ln -sfn "$zmv" "$destination" || failure "function $name"
         else
           failure "function $name destination is inside repository"
         fi
-      elif [[ ! -e "$HOME/.zfuns/$name" ]]; then
-        failure "broken function link: $HOME/.zfuns/$name"
+      elif [[ ! -e "$destination" ]]; then
+        failure "broken function link: $destination"
       fi
     done
     finish

@@ -484,10 +484,13 @@ test_maintenance_restart_responses() {
   maintenance_fixture
   export WRAPPER_REPO="$REPO_ROOT" PORTABLES="$FIXTURE" SHELL="$TEST_TMPDIR/fake-shell"
   printf '#!/bin/sh\nprintf "RESULT:replaced:end\\n"\n' >"$SHELL"
+  printf '#!/bin/sh\n: >"%s/fallback-used"\n' "$TEST_TMPDIR" >"$TEST_TMPDIR/fallback-shell"
   chmod +x "$SHELL"
+  chmod +x "$TEST_TMPDIR/fallback-shell"
   cat >"$TEST_TMPDIR/wrapper.zsh" <<'EOF'
 fpath=( "$WRAPPER_REPO/home/.zfuns" $fpath )
 autoload -Uz relink
+[[ -z "${FALLBACK_SHELL:-}" ]] || commands[zsh]="$FALLBACK_SHELL"
 relink
 print "RESULT:return:${?}:end"
 EOF
@@ -521,7 +524,77 @@ EOF
         *) [[ "$output" = *RESULT:return:0:end* ]] || exit 1 ;;
       esac
     done
+    export SHELL=-zsh FALLBACK_SHELL="$1/fallback-shell"
+    zpty -b worker zsh -fi "$1/wrapper.zsh"
+    output= ready=0 chunk=
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      chunk=
+      zpty -r worker chunk
+      output+=$chunk
+      if [[ "$output" = *"replace the shell now?"* ]]; then ready=1; break; fi
+      sleep 0.05
+    done
+    (( ready )) || { zpty -d worker; print -u2 "fallback prompt missing: $output"; exit 1; }
+    printf -v input "%s\n" y
+    zpty -w -n worker "$input"
+    output= ready=0 chunk=
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if [[ -e "$1/fallback-used" ]]; then ready=1; break; fi
+      chunk=
+      zpty -r worker chunk 2>/dev/null || true
+      output+=$chunk
+      sleep 0.05
+    done
+    zpty -d worker
+    (( ready )) || {
+      print -u2 "fallback shell not used: $output"
+      exit 1
+    }
   ' _ "$TEST_TMPDIR"
+}
+
+zsh_config_fixture() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/zsh.sh" "$FIXTURE/machine-tools/"
+  export ZMV_TARGET="$TEST_TMPDIR/current/share/zsh/5.10/functions/zmv"
+  mkdir -p "$(dirname "$ZMV_TARGET")" "$HOME/.zfuns" "$FIXTURE/home/.zfuns"
+  printf '# zmv\n' >"$ZMV_TARGET"
+  cat >"$TEST_TMPDIR/bin/zsh" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$ZMV_TARGET"
+EOF
+  chmod +x "$TEST_TMPDIR/bin/zsh"
+  mkdir -p "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" \
+    "$HOME/.oh-my-zsh/custom/plugins/zsh-completions" \
+    "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" \
+    "$HOME/.oh-my-zsh/custom/plugins/zsh-autocomplete" \
+    "$HOME/.oh-my-zsh/custom/themes/powerlevel10k"
+  printf '# framework\n' >"$HOME/.oh-my-zsh/oh-my-zsh.sh"
+}
+
+test_maintenance_zsh_migrates_managed_function_links() {
+  zsh_config_fixture
+  ln -s "$FIXTURE/home/.zfuns/zcp" "$HOME/.zfuns/zcp"
+  ln -s "$ZMV_TARGET" "$FIXTURE/home/.zfuns/zln"
+  ln -s "$FIXTURE/home/.zfuns/zln" "$HOME/.zfuns/zln"
+  bash "$FIXTURE/configure" zsh
+  assert_symlink_to "$HOME/.zfuns/zcp" "$ZMV_TARGET"
+  assert_symlink_to "$HOME/.zfuns/zln" "$ZMV_TARGET"
+
+  ln -sfn "$TEST_TMPDIR/old/share/zsh/5.9/functions/zmv" "$HOME/.zfuns/zcp"
+  bash "$FIXTURE/configure" zsh
+  assert_symlink_to "$HOME/.zfuns/zcp" "$ZMV_TARGET"
+  assert_symlink_to "$HOME/.zfuns/zln" "$ZMV_TARGET"
+}
+
+test_maintenance_zsh_preserves_unmanaged_function_links() {
+  zsh_config_fixture
+  printf '# custom\n' >"$TEST_TMPDIR/custom-zmv"
+  ln -s "$TEST_TMPDIR/missing-custom" "$HOME/.zfuns/zcp"
+  ln -s "$TEST_TMPDIR/custom-zmv" "$HOME/.zfuns/zln"
+  if bash "$FIXTURE/configure" zsh; then fail 'unrelated broken function link accepted'; fi
+  assert_symlink_to "$HOME/.zfuns/zcp" "$TEST_TMPDIR/missing-custom"
+  assert_symlink_to "$HOME/.zfuns/zln" "$TEST_TMPDIR/custom-zmv"
 }
 
 test_case 'maintenance: unattempted requirements do not poison independent owners' test_maintenance_skipped_requirement_does_not_block_independent_owner
@@ -531,6 +604,8 @@ test_case 'maintenance: machine environment source must be a regular file' test_
 test_case 'maintenance: symlinked entrypoints find their repository' test_maintenance_symlinked_entrypoints
 test_case 'maintenance: Git never writes runtime settings into the repository' test_maintenance_git_refuses_source_writes
 test_case 'maintenance: interactive restart accepts y/Y and declines Enter/n/N' test_maintenance_restart_responses
+test_case 'maintenance: Zsh migrates only recognized function links' test_maintenance_zsh_migrates_managed_function_links
+test_case 'maintenance: Zsh preserves unmanaged function links' test_maintenance_zsh_preserves_unmanaged_function_links
 
 test_maintenance_default_python_reuses_installed_version() {
   maintenance_fixture

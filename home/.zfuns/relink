@@ -2,7 +2,7 @@
 
 emulate -L zsh
 local -x LOG_NAME=relink
-local result=0 reply
+local result=0 reply shell
 
 if [[ -z "${PORTABLES:-}" || ! -f "$PORTABLES/symlinks" ]]; then
   print -u2 "relink: PORTABLES must identify the repository"
@@ -16,8 +16,10 @@ while true; do
   read 'reply?Would you like to replace the shell now? [y|N] ' || return 0
   case "$reply" in
     y|Y)
-      [[ -n "${SHELL:-}" && -x "$SHELL" ]] || { print -u2 "Cannot execute SHELL"; return 1; }
-      exec "$SHELL"
+      shell=${SHELL:-}
+      [[ -n "$shell" && -x "$shell" ]] || shell=${commands[zsh]:-}
+      [[ -n "$shell" && -x "$shell" ]] || { print -u2 "Cannot find executable Zsh"; return 1; }
+      exec "$shell"
       return $?
       ;;
     ''|n|N) return 0 ;;
