@@ -213,15 +213,17 @@ EOF
   assert_eq "$first" "$(jq -r '.editor.file' <<<"$output")" "unexpected current file"
   registered_socket="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     show-option -pqv -t "$editor" @taw_nvim_socket)"
+  registered_pid="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+    show-option -pqv -t "$editor" @taw_nvim_pid)"
   registered_registrations="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     show-option -pqv -t "$editor" @taw_nvim_registrations)"
   output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
   assert_string_contains "$output" \
     'A live Neovim is available in this exact tmux window. Connection context:'
   assert_string_contains "$output" \
-    "Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane $editor context."
+    "Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane $editor --pid $registered_pid context."
   assert_string_contains "$output" \
-    "Use nvim-tmux --pane $editor open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send."
+    "Use nvim-tmux --pane $editor --pid $registered_pid open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send."
   assert_string_contains "$output" \
     'Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location.'
   summary="$(sed -n 's/^A live Neovim is available in this exact tmux window\. Connection context: //p' \
@@ -251,8 +253,6 @@ EOF
   assert_eq "$first" "$(jq -r '.editor.file' <<<"$output")" \
     "RPC client should not inherit caller stdin"
 
-  registered_pid="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
-    show-option -pqv -t "$editor" @taw_nvim_pid)"
   no_lsof_path="$(make_no_lsof_path)"
   output="$(PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" discover)"
   assert_eq registered "$(jq -r '.source' <<<"$output")" \
@@ -298,6 +298,10 @@ EOF
     ambiguity_status=$?
   fi
   assert_eq 3 "$ambiguity_status" "unexpected registered same-pane ambiguity status"
+  output="$(PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" \
+    --pane "$editor" --pid "$third_pid" discover)"
+  assert_eq "$third_socket" "$(jq -r '.socket' <<<"$output")" \
+    "PID selector should choose one of multiple editors in a pane"
 
   nvim --server "$registered_nested_socket" --remote-send '<Cmd>qa!<CR>'
   wait "$nested_pid" || true
@@ -367,7 +371,7 @@ EOF
   assert_string_contains "$ambiguity_output" 'multiple Neovim instances found'
   output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
   assert_string_contains "$output" 'Multiple Neovim instances are available'
-  assert_string_contains "$output" "$editor,$second_editor"
+  assert_string_contains "$output" 'Select one with nvim-tmux --pid PID'
   output="$(run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
   assert_eq "$editor" "$(jq -r '.pane_id' <<<"$output")" "explicit pane was not selected"
 

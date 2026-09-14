@@ -3,12 +3,12 @@
 set -u
 
 usage() {
-  printf 'usage: nvim-tmux [--pane %%N] discover\n' >&2
-  printf '       nvim-tmux [--pane %%N] context\n' >&2
-  printf '       nvim-tmux [--pane %%N] open PATH [LINE [COLUMN]]\n' >&2
-  printf '       nvim-tmux [--pane %%N] highlight PATH START:END [START:END ...]\n' >&2
-  printf '       nvim-tmux [--pane %%N] clear-highlights [PATH]\n' >&2
-  printf '       nvim-tmux [--pane %%N] codex-context\n' >&2
+  printf 'usage: nvim-tmux [--pane %%N] [--pid PID] discover\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] context\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] open PATH [LINE [COLUMN]]\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] highlight PATH START:END [START:END ...]\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] clear-highlights [PATH]\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] codex-context\n' >&2
 }
 
 die() {
@@ -89,6 +89,7 @@ add_candidate() {
   local source="$4"
   local index
 
+  [[ -z "$TARGET_PID" || "$pid" == "$TARGET_PID" ]] || return 0
   for ((index = 0; index < ${#CANDIDATE_SOCKETS[@]}; index++)); do
     if [[ "${CANDIDATE_PIDS[index]}" == "$pid" ]] \
       || [[ "${CANDIDATE_SOCKETS[index]}" == "$socket" ]]; then
@@ -318,16 +319,16 @@ run_clear_highlights() {
 }
 
 run_codex_context() {
-  local selected_status summary panes
+  local selected_status summary pids
 
   select_candidate
   selected_status=$?
   if [[ "$selected_status" -ne 0 ]]; then
     if [[ "$selected_status" -eq 3 ]]; then
       local IFS=,
-      panes="${CANDIDATE_PANES[*]}"
-      printf 'Multiple Neovim instances are available in tmux window %s (panes %s). Use nvim-tmux --pane %%N before relying on editor context.\n' \
-        "$CALLER_WINDOW" "$panes"
+      pids="${CANDIDATE_PIDS[*]}"
+      printf 'Multiple Neovim instances are available in tmux window %s (PIDs %s). Select one with nvim-tmux --pid PID before relying on editor context.\n' \
+        "$CALLER_WINDOW" "$pids"
     fi
     return 0
   fi
@@ -347,16 +348,24 @@ run_codex_context() {
       }
     }')"
   printf 'A live Neovim is available in this exact tmux window. Connection context: %s\n' "$summary"
-  printf 'Use nvim-tmux --pane %s open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send. Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location. Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane %s context.\n' \
-    "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PANES[SELECTED]}"
+  printf 'Use nvim-tmux --pane %s --pid %s open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send. Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location. Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane %s --pid %s context.\n' \
+    "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PIDS[SELECTED]}" \
+    "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PIDS[SELECTED]}"
 }
 
 TARGET_PANE=
-if [[ "${1:-}" == --pane ]]; then
+TARGET_PID=
+while [[ "${1:-}" == --* ]]; do
   [[ $# -ge 2 ]] || { usage; exit 2; }
-  TARGET_PANE="$2"
+  case "$1" in
+    --pane) TARGET_PANE="$2" ;;
+    --pid) TARGET_PID="$2" ;;
+    *) usage; exit 2 ;;
+  esac
   shift 2
-fi
+done
+[[ -z "$TARGET_PID" || "$TARGET_PID" =~ ^[1-9][0-9]*$ ]] \
+  || die "invalid PID: $TARGET_PID"
 
 COMMAND="${1:-}"
 [[ -n "$COMMAND" ]] || { usage; exit 2; }
@@ -388,7 +397,7 @@ case "$status" in
   1) die "no Neovim instance found in tmux window $CALLER_WINDOW" 1 ;;
   3)
     candidate_list_json >&2
-    die "multiple Neovim instances found; select one with --pane" 3
+    die "multiple Neovim instances found; select one with --pid" 3
     ;;
 esac
 

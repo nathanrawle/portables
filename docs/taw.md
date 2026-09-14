@@ -366,17 +366,17 @@ stable `window_id` and validates each socket against its PID before using it.
 The normal `taw` editor-and-agent layout satisfies this relationship, but the
 bridge also works with manually created panes. It never falls back to another
 window in the tmux session. If more than one Neovim is valid in the window, it
-exits with status 3 rather than guessing; select one explicitly with
-`nvim-tmux --pane %N ...`.
+exits with status 3 rather than guessing. Select a pane with `--pane %N`; if a
+pane contains multiple editors, select one with `--pid PID`.
 
 Available commands are:
 
 ```text
-nvim-tmux [--pane %N] discover
-nvim-tmux [--pane %N] context
-nvim-tmux [--pane %N] open PATH [LINE [COLUMN]]
-nvim-tmux [--pane %N] highlight PATH START:END [START:END ...]
-nvim-tmux [--pane %N] clear-highlights [PATH]
+nvim-tmux [--pane %N] [--pid PID] discover
+nvim-tmux [--pane %N] [--pid PID] context
+nvim-tmux [--pane %N] [--pid PID] open PATH [LINE [COLUMN]]
+nvim-tmux [--pane %N] [--pid PID] highlight PATH START:END [START:END ...]
+nvim-tmux [--pane %N] [--pid PID] clear-highlights [PATH]
 ```
 
 `discover` and `context` return JSON. Context includes the active file, cursor,
