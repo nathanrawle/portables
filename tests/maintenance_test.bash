@@ -372,8 +372,8 @@ EOF
       zpty -d worker
       (( ready )) || { print -u2 "result missing for answer [$answer]: $output"; exit 1; }
       case "$answer" in
-        n|N) [[ "$output" = *RESULT:return:0:end* ]] || exit 1 ;;
-        *) [[ "$output" = *RESULT:replaced:end* ]] || exit 1 ;;
+        y|Y) [[ "$output" = *RESULT:replaced:end* ]] || exit 1 ;;
+        *) [[ "$output" = *RESULT:return:0:end* ]] || exit 1 ;;
       esac
     done
   ' _ "$TEST_TMPDIR"
@@ -383,7 +383,7 @@ test_case 'maintenance: unattempted requirements do not poison independent owner
 test_case 'maintenance: machine environment preserves settings and permissions' test_maintenance_machine_env_preserves_settings_and_mode
 test_case 'maintenance: symlinked entrypoints find their repository' test_maintenance_symlinked_entrypoints
 test_case 'maintenance: Git never writes runtime settings into the repository' test_maintenance_git_refuses_source_writes
-test_case 'maintenance: interactive restart accepts Enter/y/Y and declines n/N' test_maintenance_restart_responses
+test_case 'maintenance: interactive restart accepts y/Y and declines Enter/n/N' test_maintenance_restart_responses
 
 test_maintenance_default_python_reuses_installed_version() {
   maintenance_fixture

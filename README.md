@@ -14,7 +14,7 @@ The bootstrap scripts run with Bash 3.2 or newer and use no additional orchestra
 
 The functions are autoloaded by Zsh from `home/.zfuns`. They belong in the current
 shell; do not run them with Bash. After successful interactive maintenance they offer
-to replace `$SHELL`: Enter/y/Y accepts, n/N declines. Failed runs, EOF, help, and
+to replace `$SHELL`: y/Y accepts, while Enter/n/N declines. Failed runs, EOF, help, and
 noninteractive invocations do not replace the shell. Their temporary variables and
 logging context do not leak into the caller.
 

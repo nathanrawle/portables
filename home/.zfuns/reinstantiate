@@ -2,7 +2,7 @@
 
 emulate -L zsh
 local -x LOG_NAME=reinstantiate
-local result=0 step_result=0 reply
+local result=0 reply
 
 if [[ -z "${PORTABLES:-}" || ! -f "$PORTABLES/instantiate" ]]; then
   print -u2 "reinstantiate: PORTABLES must identify the repository"
@@ -13,13 +13,13 @@ command bash "$PORTABLES/instantiate" "$@" || result=$?
 [[ "${1:-}" != --help && -o interactive && -t 0 && -t 1 ]] || return 0
 
 while true; do
-  read 'reply?Would you like to replace the shell now? [Y|n] ' || return 0
+  read 'reply?Would you like to replace the shell now? [y|N] ' || return 0
   case "$reply" in
-    ''|y|Y)
+    y|Y)
       [[ -n "${SHELL:-}" && -x "$SHELL" ]] || { print -u2 "Cannot execute SHELL"; return 1; }
       exec "$SHELL"
       return $?
       ;;
-    n|N) return 0 ;;
+    ''|n|N) return 0 ;;
   esac
 done
