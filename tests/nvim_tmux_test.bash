@@ -174,8 +174,9 @@ test_nvim_tmux_hook_is_quiet_outside_tmux() {
 test_nvim_tmux_discovers_and_controls_exact_window() {
   local init first second outside editor agent socket_path tmux_environment output summary count
   local ancestry_output ambiguity_output ambiguity_status other_agent fallback_editor fallback_agent
-  local registered_socket registered_pid no_lsof_path stale_status stdin_guard_path real_nvim
-  local extra_socket invalid_highlight_status highlight_row nested_pid nested_socket registered_nested_socket
+  local registered_socket registered_pid registered_registrations no_lsof_path stale_status
+  local stale_registrations stdin_guard_path real_nvim extra_socket invalid_highlight_status
+  local highlight_row nested_pid nested_socket registered_nested_socket third_pid third_socket
 
   command -v tmux >/dev/null 2>&1 || return 0
   command -v nvim >/dev/null 2>&1 || return 0
@@ -212,6 +213,8 @@ EOF
   assert_eq "$first" "$(jq -r '.editor.file' <<<"$output")" "unexpected current file"
   registered_socket="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     show-option -pqv -t "$editor" @taw_nvim_socket)"
+  registered_registrations="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+    show-option -pqv -t "$editor" @taw_nvim_registrations)"
   output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
   assert_string_contains "$output" \
     'A live Neovim is available in this exact tmux window. Connection context:'
@@ -256,6 +259,10 @@ EOF
     "registered discovery should not require lsof"
   "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     set-option -p -t "$editor" @taw_nvim_socket /tmp/missing-nvim-socket
+  stale_registrations="$(jq -cn --arg pid "$registered_pid" \
+    '[{pid: $pid, socket: "/tmp/missing-nvim-socket"}]')"
+  "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+    set-option -p -t "$editor" @taw_nvim_registrations "$stale_registrations"
   if PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" discover >/dev/null 2>&1; then
     fail "expected stale registration to be ignored without lsof"
   else
@@ -266,6 +273,8 @@ EOF
     set-option -p -t "$editor" @taw_nvim_pid "$registered_pid"
   "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     set-option -p -t "$editor" @taw_nvim_socket "$registered_socket"
+  "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+    set-option -p -t "$editor" @taw_nvim_registrations "$registered_registrations"
 
   TMUX="$tmux_environment" TMUX_PANE="$editor" TAW_NVIM_RUNTIME="$NVIM_RUNTIME" \
     env -u NVIM nvim --headless -u "$init" -i NONE \
@@ -274,8 +283,27 @@ EOF
   wait_for_pane_option_value "$editor" @taw_nvim_pid "$nested_pid"
   registered_nested_socket="$(wait_for_pane_option_change \
     "$editor" @taw_nvim_socket "$registered_socket")"
+
+  TMUX="$tmux_environment" TMUX_PANE="$editor" TAW_NVIM_RUNTIME="$NVIM_RUNTIME" \
+    env -u NVIM nvim --headless -u "$init" -i NONE \
+    </dev/null >"$TEST_TMPDIR/registered-third.log" 2>&1 &
+  third_pid=$!
+  wait_for_pane_option_value "$editor" @taw_nvim_pid "$third_pid"
+  third_socket="$(wait_for_pane_option_change \
+    "$editor" @taw_nvim_socket "$registered_nested_socket")"
+  if PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" \
+    --pane "$editor" discover >/dev/null 2>&1; then
+    fail "expected registered editors in one pane to be rejected without lsof"
+  else
+    ambiguity_status=$?
+  fi
+  assert_eq 3 "$ambiguity_status" "unexpected registered same-pane ambiguity status"
+
   nvim --server "$registered_nested_socket" --remote-send '<Cmd>qa!<CR>'
   wait "$nested_pid" || true
+  wait_for_pane_option_value "$editor" @taw_nvim_pid "$third_pid"
+  nvim --server "$third_socket" --remote-send '<Cmd>qa!<CR>'
+  wait "$third_pid" || true
   wait_for_pane_option_value "$editor" @taw_nvim_pid "$registered_pid"
   output="$(PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
   assert_eq "$registered_socket" "$(jq -r '.socket' <<<"$output")" \

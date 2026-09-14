@@ -2,6 +2,7 @@ local M = {}
 
 local socket_option = "@taw_nvim_socket"
 local pid_option = "@taw_nvim_pid"
+local registrations_option = "@taw_nvim_registrations"
 local highlight_namespace = vim.api.nvim_create_namespace("taw-agent-nvim")
 local selection_limit = 64 * 1024
 local diagnostic_limit = 200
@@ -37,6 +38,44 @@ local function server_address()
   return address
 end
 
+local function read_registrations(pane)
+  local encoded = tmux({ "show-option", "-pqv", "-t", pane, registrations_option })
+  if encoded == nil or encoded == "" then
+    return {}
+  end
+
+  local ok, decoded = pcall(vim.json.decode, encoded)
+  if not ok or type(decoded) ~= "table" then
+    return {}
+  end
+
+  local registrations = {}
+  for _, registration in ipairs(decoded) do
+    if type(registration) == "table"
+      and type(registration.pid) == "string"
+      and registration.pid:match("^%d+$")
+      and type(registration.socket) == "string"
+      and registration.socket:sub(1, 1) == "/" then
+      table.insert(registrations, registration)
+    end
+  end
+  return registrations
+end
+
+local function write_registrations(pane, registrations)
+  if #registrations == 0 then
+    tmux({ "set-option", "-pu", "-t", pane, registrations_option })
+    tmux({ "set-option", "-pu", "-t", pane, socket_option })
+    tmux({ "set-option", "-pu", "-t", pane, pid_option })
+    return
+  end
+
+  local current = registrations[#registrations]
+  tmux({ "set-option", "-p", "-t", pane, registrations_option, vim.json.encode(registrations) })
+  tmux({ "set-option", "-p", "-t", pane, pid_option, current.pid })
+  tmux({ "set-option", "-p", "-t", pane, socket_option, current.socket })
+end
+
 local function publish()
   local pane = vim.env.TMUX_PANE
   local address = server_address()
@@ -45,34 +84,37 @@ local function publish()
   end
 
   local pid = tostring(vim.fn.getpid())
-  local previous_socket = tmux({ "show-option", "-pqv", "-t", pane, socket_option })
-  local previous_pid = tmux({ "show-option", "-pqv", "-t", pane, pid_option })
-  if previous_socket == address and previous_pid == pid then
-    return
+  local registrations = read_registrations(pane)
+  if #registrations == 0 then
+    local existing_socket = tmux({ "show-option", "-pqv", "-t", pane, socket_option })
+    local existing_pid = tmux({ "show-option", "-pqv", "-t", pane, pid_option })
+    local has_existing = existing_socket ~= nil and existing_socket ~= ""
+      and existing_pid ~= nil and existing_pid ~= ""
+    if has_existing then
+      table.insert(registrations, { pid = existing_pid, socket = existing_socket })
+    end
   end
-  if tmux({ "set-option", "-p", "-t", pane, pid_option, pid }) == nil then
-    return
+
+  local updated = {}
+  for _, registration in ipairs(registrations) do
+    if registration.pid ~= pid and registration.socket ~= address then
+      table.insert(updated, registration)
+    end
   end
-  tmux({ "set-option", "-p", "-t", pane, socket_option, address })
+  table.insert(updated, { pid = pid, socket = address })
+  write_registrations(pane, updated)
 
   vim.api.nvim_create_autocmd("VimLeavePre", {
     desc = "Remove this Neovim instance's tmux registration",
     group = vim.api.nvim_create_augroup("taw-agent-nvim", { clear = true }),
     callback = function()
-      local current_socket = tmux({ "show-option", "-pqv", "-t", pane, socket_option })
-      local current_pid = tmux({ "show-option", "-pqv", "-t", pane, pid_option })
-      if current_socket ~= address or current_pid ~= pid then
-        return
+      local remaining = {}
+      for _, registration in ipairs(read_registrations(pane)) do
+        if registration.pid ~= pid and registration.socket ~= address then
+          table.insert(remaining, registration)
+        end
       end
-      local has_previous = previous_socket ~= nil and previous_socket ~= ""
-        and previous_pid ~= nil and previous_pid ~= ""
-      if has_previous then
-        tmux({ "set-option", "-p", "-t", pane, pid_option, previous_pid })
-        tmux({ "set-option", "-p", "-t", pane, socket_option, previous_socket })
-      else
-        tmux({ "set-option", "-pu", "-t", pane, socket_option })
-        tmux({ "set-option", "-pu", "-t", pane, pid_option })
-      end
+      write_registrations(pane, remaining)
     end,
   })
 end

@@ -165,22 +165,34 @@ discover_with_lsof() {
 }
 
 discover_candidates() {
-  local pane pane_pid socket pid
+  local pane pane_pid registrations socket pid registered_socket registered_pid pane_format
 
   CANDIDATE_PANES=()
   CANDIDATE_PIDS=()
   CANDIDATE_SOCKETS=()
   CANDIDATE_SOURCES=()
   load_processes
+  pane_format="#{pane_id}"$'\t'"#{pane_pid}"
+  pane_format+=$'\t'"#{@taw_nvim_registrations}"
+  pane_format+=$'\t'"#{@taw_nvim_socket}"$'\t'"#{@taw_nvim_pid}"
 
-  while IFS=$'\t' read -r pane pane_pid socket pid; do
+  while IFS=$'\t' read -r pane pane_pid registrations socket pid; do
     [[ -z "$TARGET_PANE" || "$pane" == "$TARGET_PANE" ]] || continue
+    while IFS=$'\t' read -r registered_pid registered_socket; do
+      [[ -n "$registered_pid" && -n "$registered_socket" ]] || continue
+      valid_socket "$registered_socket" "$registered_pid" || continue
+      add_candidate "$pane" "$registered_pid" "$registered_socket" registered
+    done < <(jq -r '
+      .[]?
+      | select((.pid | type) == "string" and (.socket | type) == "string")
+      | [.pid, .socket]
+      | @tsv
+    ' <<<"$registrations" 2>/dev/null)
     if valid_socket "$socket" "$pid"; then
       add_candidate "$pane" "$pid" "$socket" registered
     fi
     discover_with_lsof "$pane" "$pane_pid"
-  done < <(tmux list-panes -t "$CALLER_WINDOW" -F \
-    "#{pane_id}"$'\t'"#{pane_pid}"$'\t'"#{@taw_nvim_socket}"$'\t'"#{@taw_nvim_pid}")
+  done < <(tmux list-panes -t "$CALLER_WINDOW" -F "$pane_format")
 }
 
 candidate_json() {

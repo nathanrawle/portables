@@ -359,9 +359,9 @@ tmux represents linked windows as one shared object.
 ## Codex Neovim Bridge
 
 Codex can discover and query a live Neovim without MCP when both processes are
-in the same exact tmux window. Neovim publishes its Unix RPC socket and PID on
-its pane; `nvim-tmux` filters panes by the caller's stable `window_id` and
-validates the socket against the published PID before using it.
+in the same exact tmux window. Each Neovim publishes its Unix RPC socket and PID
+in its pane's registration list; `nvim-tmux` filters panes by the caller's
+stable `window_id` and validates each socket against its PID before using it.
 
 The normal `taw` editor-and-agent layout satisfies this relationship, but the
 bridge also works with manually created panes. It never falls back to another
@@ -390,7 +390,8 @@ namespace.
 Pane registration is the normal path. For a Neovim started before this config
 was loaded, the helper can inspect descendant processes and Unix sockets when
 `lsof` is already installed. This fallback never adds a package or searches
-outside the exact window.
+outside the exact window. The registration list also preserves surviving outer
+editors when configured nested Neovims in the same pane exit in any order.
 
 Run the normal symlink step and reinstall the agent hooks after updating:
 
