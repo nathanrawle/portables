@@ -127,7 +127,7 @@ test_agent_status_config_preserves_unrelated_settings() {
     "Stop": [{"hooks": [
       {"type": "command", "command": "keep-this"},
       {"type": "command", "command": "$HOME/.zfuns/taw-agent-status set codex stale"},
-      {"type": "command", "command": "$HOME/.zfuns/nvim-tmux stale"}
+      {"type": "command", "command": "$HOME/.zfuns/nvim-tmux clear-highlights"}
     ]}]
   }
 }
@@ -143,8 +143,8 @@ EOF
     "expected unrelated Codex hook preserved"
   assert_eq 0 "$(jq '[.hooks[][]?.hooks[]? | select(.command? == "$HOME/.zfuns/taw-agent-status set codex stale")] | length' "$codex")" \
     "expected stale owned hook replaced"
-  assert_eq 0 "$(jq '[.hooks[][]?.hooks[]? | select(.command? == "$HOME/.zfuns/nvim-tmux stale")] | length' "$codex")" \
-    "expected stale Neovim hook replaced"
+  assert_eq 1 "$(jq '[.hooks[][]?.hooks[]? | select(.command? == "$HOME/.zfuns/nvim-tmux clear-highlights")] | length' "$codex")" \
+    "expected unrelated Neovim hook preserved"
   assert_eq dark "$(jq -r '.theme' "$claude")" "expected Claude theme preserved"
   assert_eq Read "$(jq -r '.permissions.allow[0]' "$claude")" \
     "expected Claude permissions preserved"
