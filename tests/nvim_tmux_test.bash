@@ -64,6 +64,25 @@ wait_for_pane_option_change() {
   fail "timed out waiting for $option to change on $pane"
 }
 
+wait_for_registration_socket() {
+  local pane="$1"
+  local pid="$2"
+  local registrations socket attempt
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    registrations="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+      show-option -pqv -t "$pane" @taw_nvim_registrations 2>/dev/null)" || registrations=
+    socket="$(jq -r --arg pid "$pid" '.[]? | select(.pid == $pid) | .socket' \
+      <<<"$registrations" 2>/dev/null)"
+    if [[ -n "$socket" ]]; then
+      printf '%s\n' "$socket"
+      return 0
+    fi
+    sleep 0.05
+  done
+  fail "timed out waiting for Neovim PID $pid to register on $pane"
+}
+
 wait_for_file() {
   local path="$1"
   local attempt
@@ -177,6 +196,7 @@ test_nvim_tmux_discovers_and_controls_exact_window() {
   local registered_socket registered_pid registered_registrations no_lsof_path stale_status
   local stale_registrations stdin_guard_path real_nvim extra_socket invalid_highlight_status
   local highlight_row nested_pid nested_socket registered_nested_socket third_pid third_socket
+  local registration_lock registrations_while_locked
 
   command -v tmux >/dev/null 2>&1 || return 0
   command -v nvim >/dev/null 2>&1 || return 0
@@ -276,21 +296,24 @@ EOF
   "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     set-option -p -t "$editor" @taw_nvim_registrations "$registered_registrations"
 
+  registration_lock="taw-agent-nvim-registration-$editor"
+  "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" wait-for -L "$registration_lock"
   TMUX="$tmux_environment" TMUX_PANE="$editor" TAW_NVIM_RUNTIME="$NVIM_RUNTIME" \
     env -u NVIM nvim --headless -u "$init" -i NONE \
     </dev/null >"$TEST_TMPDIR/registered-nested.log" 2>&1 &
   nested_pid=$!
-  wait_for_pane_option_value "$editor" @taw_nvim_pid "$nested_pid"
-  registered_nested_socket="$(wait_for_pane_option_change \
-    "$editor" @taw_nvim_socket "$registered_socket")"
-
   TMUX="$tmux_environment" TMUX_PANE="$editor" TAW_NVIM_RUNTIME="$NVIM_RUNTIME" \
     env -u NVIM nvim --headless -u "$init" -i NONE \
     </dev/null >"$TEST_TMPDIR/registered-third.log" 2>&1 &
   third_pid=$!
-  wait_for_pane_option_value "$editor" @taw_nvim_pid "$third_pid"
-  third_socket="$(wait_for_pane_option_change \
-    "$editor" @taw_nvim_socket "$registered_nested_socket")"
+  sleep 0.2
+  registrations_while_locked="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
+    show-option -pqv -t "$editor" @taw_nvim_registrations)"
+  assert_eq "$registered_registrations" "$registrations_while_locked" \
+    "registration updates should wait for the pane lock"
+  "$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" wait-for -U "$registration_lock"
+  registered_nested_socket="$(wait_for_registration_socket "$editor" "$nested_pid")"
+  third_socket="$(wait_for_registration_socket "$editor" "$third_pid")"
   if PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" \
     --pane "$editor" discover >/dev/null 2>&1; then
     fail "expected registered editors in one pane to be rejected without lsof"

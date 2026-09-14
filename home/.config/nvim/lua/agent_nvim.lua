@@ -76,6 +76,21 @@ local function write_registrations(pane, registrations)
   tmux({ "set-option", "-p", "-t", pane, socket_option, current.socket })
 end
 
+local function update_registrations(pane, update)
+  local lock = "taw-agent-nvim-registration-" .. pane
+  if tmux({ "wait-for", "-L", lock }) == nil then
+    return
+  end
+
+  local ok, result = pcall(function()
+    write_registrations(pane, update(read_registrations(pane)))
+  end)
+  tmux({ "wait-for", "-U", lock })
+  if not ok then
+    error(result)
+  end
+end
+
 local function publish()
   local pane = vim.env.TMUX_PANE
   local address = server_address()
@@ -84,37 +99,40 @@ local function publish()
   end
 
   local pid = tostring(vim.fn.getpid())
-  local registrations = read_registrations(pane)
-  if #registrations == 0 then
-    local existing_socket = tmux({ "show-option", "-pqv", "-t", pane, socket_option })
-    local existing_pid = tmux({ "show-option", "-pqv", "-t", pane, pid_option })
-    local has_existing = existing_socket ~= nil and existing_socket ~= ""
-      and existing_pid ~= nil and existing_pid ~= ""
-    if has_existing then
-      table.insert(registrations, { pid = existing_pid, socket = existing_socket })
+  update_registrations(pane, function(registrations)
+    if #registrations == 0 then
+      local existing_socket = tmux({ "show-option", "-pqv", "-t", pane, socket_option })
+      local existing_pid = tmux({ "show-option", "-pqv", "-t", pane, pid_option })
+      local has_existing = existing_socket ~= nil and existing_socket ~= ""
+        and existing_pid ~= nil and existing_pid ~= ""
+      if has_existing then
+        table.insert(registrations, { pid = existing_pid, socket = existing_socket })
+      end
     end
-  end
 
-  local updated = {}
-  for _, registration in ipairs(registrations) do
-    if registration.pid ~= pid and registration.socket ~= address then
-      table.insert(updated, registration)
+    local updated = {}
+    for _, registration in ipairs(registrations) do
+      if registration.pid ~= pid and registration.socket ~= address then
+        table.insert(updated, registration)
+      end
     end
-  end
-  table.insert(updated, { pid = pid, socket = address })
-  write_registrations(pane, updated)
+    table.insert(updated, { pid = pid, socket = address })
+    return updated
+  end)
 
   vim.api.nvim_create_autocmd("VimLeavePre", {
     desc = "Remove this Neovim instance's tmux registration",
     group = vim.api.nvim_create_augroup("taw-agent-nvim", { clear = true }),
     callback = function()
-      local remaining = {}
-      for _, registration in ipairs(read_registrations(pane)) do
-        if registration.pid ~= pid and registration.socket ~= address then
-          table.insert(remaining, registration)
+      update_registrations(pane, function(registrations)
+        local remaining = {}
+        for _, registration in ipairs(registrations) do
+          if registration.pid ~= pid and registration.socket ~= address then
+            table.insert(remaining, registration)
+          end
         end
-      end
-      write_registrations(pane, remaining)
+        return remaining
+      end)
     end,
   })
 end
