@@ -274,6 +274,9 @@ test_agent_link_bindings_load() {
     || fail "expected C-q to protect windows in agents: $root_binding"
   [[ "$prefix_binding" = *'command-prompt -1'* && "$prefix_binding" = *'confirm-before'* ]] \
     || fail "expected prefix-& to preserve source confirmation: $prefix_binding"
+  [[ "$root_binding" = *'#{==:#{@taw_agent_link_session},1}'* \
+    && "$prefix_binding" = *'#{==:#{@taw_agent_link_session},1}'* ]] \
+    || fail "expected safe bindings to require managed-session ownership"
   assert_eq 1 "$lower" "expected lowercase confirmation"
   assert_eq 1 "$upper" "expected uppercase confirmation"
   assert_eq 0 "$rejected" "expected other confirmation keys to be rejected"
