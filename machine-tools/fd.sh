@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 
-[[ -n "$OS" ]] || OS="$(uname -s)"
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/maintenance.bash" || exit 1
+tool_init "$@"
 
 case "$1" in
   install)
-    case "$OS" in
-      Linux)
-        [[ -n "$ID" ]] || . /etc/os-release
-        case "$ID" in
-          ubuntu|fedora) command -v fdfind >/dev/null 2>&1 || echo "syspkgmgr:fd-find" ;;
-          *) command -v fd >/dev/null 2>&1 || echo "syspkgmgr:fd" ;;
-        esac
-        ;;
-      *) command -v fd >/dev/null 2>&1 || echo "syspkgmgr:fd" ;;
-    esac
+    if ! command -v fd >/dev/null 2>&1 && ! command -v fdfind >/dev/null 2>&1; then
+      case "$OS:$ID" in
+        Linux:ubuntu|Linux:debian|Linux:pop|Linux:fedora) echo syspkgmgr:fd-find ;;
+        *) echo syspkgmgr:fd ;;
+      esac
+    fi
+    ;;
 esac

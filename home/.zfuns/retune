@@ -1,11 +1,29 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 
-export LOG_NAME="retune"
-/usr/bin/env bash "$PORTABLES"/configure $@
-/usr/bin/env bash "$PORTABLES"/symlinks
-unset LOG_NAME
-read -k '?Would you like to replace the shell now? [Y|n] '
-if [[ ! "$REPLY" = n ]]; then
-  echo 'Replacing shell, please wait…'
-  exec $SHELL
+emulate -L zsh
+local -x LOG_NAME=retune
+local result=0 step_result=0 reply
+
+if [[ -z "${PORTABLES:-}" || ! -f "$PORTABLES/configure" ]]; then
+  print -u2 "retune: PORTABLES must identify the repository"
+  return 1
 fi
+command bash "$PORTABLES/configure" "$@" || result=$?
+if (( result != 2 )) && [[ "${1:-}" != --help ]]; then
+  command bash "$PORTABLES/symlinks" || step_result=$?
+  (( step_result == 0 )) || result=1
+fi
+(( result == 0 )) || return $result
+[[ "${1:-}" != --help && -o interactive && -t 0 && -t 1 ]] || return 0
+
+while true; do
+  read 'reply?Would you like to replace the shell now? [Y|n] ' || return 0
+  case "$reply" in
+    ''|y|Y)
+      [[ -n "${SHELL:-}" && -x "$SHELL" ]] || { print -u2 "Cannot execute SHELL"; return 1; }
+      exec "$SHELL"
+      return $?
+      ;;
+    n|N) return 0 ;;
+  esac
+done

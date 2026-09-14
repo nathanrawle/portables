@@ -1,11 +1,25 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 
-export LOG_NAME="relink"
-/usr/bin/env bash "$PORTABLES"/symlinks "$@"
-unset LOG_NAME
-read -k '?Would you like to replace the shell now? [Y|n] '
-if [[ ! "$REPLY" = n ]]; then
-  echo 'Replacing shell, please wait…'
-  exec $SHELL
+emulate -L zsh
+local -x LOG_NAME=relink
+local result=0 step_result=0 reply
+
+if [[ -z "${PORTABLES:-}" || ! -f "$PORTABLES/symlinks" ]]; then
+  print -u2 "relink: PORTABLES must identify the repository"
+  return 1
 fi
+command bash "$PORTABLES/symlinks" "$@" || result=$?
+(( result == 0 )) || return $result
+[[ "${1:-}" != --help && -o interactive && -t 0 && -t 1 ]] || return 0
 
+while true; do
+  read 'reply?Would you like to replace the shell now? [Y|n] ' || return 0
+  case "$reply" in
+    ''|y|Y)
+      [[ -n "${SHELL:-}" && -x "$SHELL" ]] || { print -u2 "Cannot execute SHELL"; return 1; }
+      exec "$SHELL"
+      return $?
+      ;;
+    n|N) return 0 ;;
+  esac
+done

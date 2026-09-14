@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 
-LOG_NAME="${LOG_NAME:+$LOG_NAME.}homebrew:$1"
-functions log >/dev/null 2>&1 || . "$PORTABLES"/log
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/maintenance.bash" || exit 1
+tool_init "$@"
 
-[[ -n "$OS" ]] || OS="$(uname -s)"
 [[ "$OS" = Darwin ]] || exit 0
 case "$1" in
-  install)
-    command -v brew >/dev/null 2>&1 ||
-      [[ -x /opt/homebrew/bin/brew ]] ||
-      echo self-install
-    ;;
+  install) command -v brew >/dev/null 2>&1 || echo self-install ;;
   self-install)
-    log
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    require_commands curl bash
+    temp="$(mktemp -d "${TMPDIR:-/tmp}/portables-brew.XXXXXX")"
+    trap 'rm -rf -- "$temp"' EXIT
+    curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$temp/install"
+    /bin/bash "$temp/install"
     ;;
 esac

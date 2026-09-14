@@ -16,6 +16,7 @@ make_symlinks_fixture() {
   repo="$(cd "$repo" && pwd -P)" || return 1
 
   cp "$REPO_ROOT/symlinks" "$REPO_ROOT/log" "$REPO_ROOT/.gitignore" "$repo/"
+  cp -R "$REPO_ROOT/lib" "$repo/lib"
   git -C "$repo" init -q
   printf '.DS_Store\n' >"$repo/.global-gitignore"
   git -C "$repo" config core.excludesfile "$repo/.global-gitignore"
@@ -236,3 +237,84 @@ test_case "symlinks: symlinked directory trees merge into existing destinations"
   test_symlinked_directory_tree_links_into_existing_destination
 test_case "symlinks: --no-ignore links ignored paths" \
   test_no_ignore_overrides_default_ignore_behavior
+
+test_alias_cannot_damage_source() {
+  local repo home mode
+  repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$home/.config"
+  ln -s "$repo/home/.config/nvim" "$home/.config/nvim"
+  for mode in force backup; do
+    LINK_CONFLICT_MODE="$mode" run_symlinks "$repo" "$home" .config/nvim
+    assert_file_contents "$repo/home/.config/nvim/init.lua" 'repo nvim init'
+    [[ ! -L "$repo/home/.config/nvim/init.lua" ]] || fail 'source replaced with link'
+  done
+}
+
+test_git_negations_and_builtin_ignores() {
+  local repo home
+  repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
+  home="$TEST_TMPDIR/home"
+  git -C "$repo" config core.excludesfile /dev/null
+  printf 'home/*.txt\n!home/keep.txt\n' >>"$repo/.gitignore"
+  printf keep >"$repo/home/keep.txt"
+  printf ignore >"$repo/home/ignore.txt"
+  run_symlinks "$repo" "$home"
+  assert_symlink_to "$home/keep.txt" "$repo/home/keep.txt"
+  assert_not_exists "$home/ignore.txt"
+  assert_not_exists "$home/.DS_Store"
+}
+
+test_link_failure_continues_independent_paths() {
+  local repo home
+  repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$home"
+  printf blocker >"$home/.config"
+  if run_symlinks "$repo" "$home" .config/nvim .bashrc; then fail 'failure hidden'; fi
+  assert_symlink_to "$home/.bashrc" "$repo/home/.bashrc"
+  assert_file_contents "$home/.config" blocker
+}
+
+test_backup_does_not_overwrite_previous_backup() {
+  local repo home
+  repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$home" "$TEST_TMPDIR/bin"
+  printf '#!/bin/sh\nprintf "fixed\\n"\n' >"$TEST_TMPDIR/bin/date"
+  chmod +x "$TEST_TMPDIR/bin/date"
+  printf previous >"$home/.zshrc.bak.fixed"
+  printf current >"$home/.zshrc"
+  PATH="$TEST_TMPDIR/bin:$PATH" LINK_CONFLICT_MODE=backup run_symlinks "$repo" "$home" .zshrc
+  assert_file_contents "$home/.zshrc.bak.fixed" previous
+  assert_file_contents "$home/.zshrc.bak.fixed.1" current
+}
+
+test_unusual_filenames_and_mount_ignores() {
+  local repo home name
+  repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
+  home="$TEST_TMPDIR/home"
+  name=$'a # [file]\twith\nnewlines'
+  printf unusual >"$repo/home/$name"
+  printf 'home/.agent-generics/skills/test-skill/ignored\n' >>"$repo/.gitignore"
+  printf hidden >"$repo/home/.agent-generics/skills/test-skill/ignored"
+  run_symlinks "$repo" "$home"
+  assert_symlink_to "$home/$name" "$repo/home/$name"
+  assert_not_exists "$home/.codex/skills/test-skill/ignored"
+}
+
+test_loop_reports_failure_without_hiding_other_links() {
+  local repo home
+  repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
+  home="$TEST_TMPDIR/home"
+  ln -s . "$repo/home/loop"
+  if run_symlinks "$repo" "$home"; then fail 'loop not reported'; fi
+  assert_symlink_to "$home/.bashrc" "$repo/home/.bashrc"
+}
+
+test_case 'symlinks: directory aliases cannot damage sources in force or backup mode' test_alias_cannot_damage_source
+test_case 'symlinks: negation and built-in ignore rules work independently' test_git_negations_and_builtin_ignores
+test_case 'symlinks: errors preserve independent links and return failure' test_link_failure_continues_independent_paths
+test_case 'symlinks: backup collisions preserve both versions' test_backup_does_not_overwrite_previous_backup
+test_case 'symlinks: NUL records preserve unusual names and mounted ignore rules' test_unusual_filenames_and_mount_ignores
+test_case 'symlinks: loops fail while other links continue' test_loop_reports_failure_without_hiding_other_links

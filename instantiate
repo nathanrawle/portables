@@ -1,318 +1,247 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
-THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
-HERE="$(dirname "$THIS")"
-MACHINE_TOOLS="$HERE/machine-tools"
-PORTABLE_HOME="$HERE/home"
-
-[[ -n "${LOG_NAME-}" ]] || LOG_NAME="instantiate"
-. "$HERE"/log
-
-export LOG_NAME log
-
-log "🎁 ${LOG_NAME%e}ing…"
-bash "$HERE"/symlinks
-
-# --- OS and Package Manager Detection ---
-OS="$(uname -s)"
-PKG_MANAGER_UPDATE=""
-PKG_MANAGER_INSTALL=""
-PKG_MANAGER_EXT_INSTALL=""
-
-if [[ -z "${HOME-}" ]]; then
-  HOME="$(realpath ~)"
+SCRIPT=${BASH_SOURCE[0]}
+for ((hops = 0; hops < 40; hops++)); do
+  [[ -L "$SCRIPT" ]] || break
+  directory="$(cd -- "$(dirname -- "$SCRIPT")" && pwd -P)" || exit 1
+  target="$(readlink "$SCRIPT")" || exit 1
+  case "$target" in /*) SCRIPT="$target" ;; *) SCRIPT="$directory/$target" ;; esac
+done
+[[ ! -L "$SCRIPT" ]] || { printf 'script symlink loop\n' >&2; exit 1; }
+HERE="$(cd -- "$(dirname -- "$SCRIPT")" && pwd -P)" || exit 1
+. "$HERE/lib/maintenance.bash" || exit 1
+LOG_NAME=${LOG_NAME:-instantiate}
+export LOG_NAME
+if [[ ${1:-} = --help && $# = 1 ]]; then
+  printf 'Usage: instantiate\n'
+  exit 0
 fi
+[[ $# = 0 ]] || { log -e "Usage: instantiate"; exit 2; }
 
-if [[ -z "${HOST-}" ]]; then
-  HOST="$(hostname 2>/dev/null)" || HOST=mystery-host
-fi
-
-if [[ $HOST = "mystery-host" ]]; then
-  MACHINE=scoobs-van
-else
-  MACHINE=${HOST%%.*}
-fi
-
-export MACHINE_TOOLS PORTABLE_HOME OS HOME HOST
-
-# bootstrap a .env file for a new machine, or amend an existing one
-machine=$(printf '%s' "$MACHINE" | tr '[:upper:]' '[:lower:]')
-MACHENV="$PORTABLE_HOME/.$machine.env"
-PRTBLS_LN="export PORTABLES=${HERE}"
-
-if [[ -e "$MACHENV" ]]; then
-  if ! grep -Eq "$PRTBLS_LN" "$MACHENV"; then
-    sed -Ei.bak '/^(export )?PORTABLES=/d' "$MACHENV" &&
-      echo "$PRTBLS_LN" >>"$MACHENV" &&
-      rm "$MACHENV".bak ||
-      mv -f "$MACHENV"{.bak,}
-  fi
-else
-  echo "$PRTBLS_LN" >"$MACHENV"
-fi
-
-. "$MACHENV"
-
-log "gathering requirements…"
-case "$OS" in
-Darwin)
-  log .gather "detected macOS"
-  xcode-select -p >/dev/null 2>&1 || xcode-select --install
-  if [[ "$(bash "$HERE"/machine-tools/homebrew.sh install)" = self-install ]]; then
-    bash "$HERE"/machine-tools/homebrew.sh self-install
-  fi
-  export PATH="${PATH}:/opt/homebrew/bin"
-  SYS_PKG_MANAGER="homebrew"
-  PKG_MANAGER_UPDATE="brew update"
-  PKG_MANAGER_INSTALL="brew install"
-  PKG_MANAGER_EXT_INSTALL="brew tap"
-  export HOMEBREW_NO_ENV_HINTS=1
-  ;;
-Linux)
-  log .gather "detected Linux"
-  if [[ -f /etc/os-release ]]; then
-    . /etc/os-release
-    export ID VERSION_ID
-    case "$ID" in
-    ubuntu | debian | pop)
-      log .gather .linux "detected Debian-based distribution ($PRETTY_NAME)"
-      SYS_PKG_MANAGER="apt"
-      PKG_MANAGER_UPDATE="sudo apt-get update"
-      PKG_MANAGER_INSTALL="sudo apt-get install -y"
-      ;;
-    arch)
-      log .gather .linux "detected Arch Linux"
-      SYS_PKG_MANAGER="pacman"
-      PKG_MANAGER_UPDATE="sudo pacman -Syu"
-      PKG_MANAGER_INSTALL="sudo pacman -S --noconfirm"
-      ;;
-    fedora)
-      log .gather .linux "detected Fedora"
-      SYS_PKG_MANAGER="dnf"
-      PKG_MANAGER_UPDATE="sudo dnf check-update"
-      PKG_MANAGER_INSTALL="sudo dnf install -y"
-      ;;
-    *)
-      log -e .gather .linux "unsupported Linux distribution: $ID"
-      exit 1
-      ;;
-    esac
-  else
-    log -e .gather .linux "cannot determine Linux distribution; /etc/os-release not found"
-    exit 1
-  fi
-  ;;
-*)
-  log -e .gather "unsupported operating system: $OS"
-  exit 1
-  ;;
+case "$OS:$ID" in
+  Darwin:*) manager=brew; update=( brew update ); install=( brew install ) ;;
+  Linux:ubuntu|Linux:debian|Linux:pop)
+    manager=apt; update=( sudo apt-get update ); install=( sudo apt-get install -y ) ;;
+  Linux:arch)
+    manager=pacman; update=(); install=( sudo pacman -S --needed --noconfirm ) ;;
+  Linux:fedora)
+    manager=dnf; update=( sudo dnf check-update ); install=( sudo dnf install -y ) ;;
+  *) log -e "unsupported platform: $OS $ID"; exit 1 ;;
 esac
 
-log ."$SYS_PKG_MANAGER" "updating ${SYS_PKG_MANAGER}…"
-if echo "$PKG_MANAGER_INSTALL" | grep -q "sudo"; then
-  log -i ."$SYS_PKG_MANAGER" "$SYS_PKG_MANAGER may request sudo access…"
-fi
-bash -c "$PKG_MANAGER_UPDATE"
-
-for tool in curl git; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    pre_tools="${pre_tools:+$pre_tools }$tool"
+write_machine_env() {
+  local machine target temp
+  machine="$(printf '%s' "${HOST:-$(hostname)}" | tr '[:upper:]' '[:lower:]')"
+  machine=${machine%%.*}
+  case "$machine" in ''|*[!a-z0-9_-]*) log -e "invalid hostname: $machine"; return 1 ;; esac
+  target="$PORTABLE_HOME/.$machine.env"
+  MACHENV="$target"
+  [[ ! -L "$target" ]] || { log -e "machine env must not be a symlink: $target"; return 1; }
+  temp="$(mktemp "$PORTABLE_HOME/.machine-env.XXXXXX")" || return 1
+  if [[ -e "$target" ]]; then
+    cp -p "$target" "$temp" || { rm -f "$temp"; return 1; }
+    awk '!/^[[:space:]]*(export[[:space:]]+)?PORTABLES=/' "$target" >"$temp" ||
+      { rm -f "$temp"; return 1; }
   fi
+  printf 'export PORTABLES=%q\n' "$PORTABLES" >>"$temp" || { rm -f "$temp"; return 1; }
+  mv "$temp" "$target"
+}
+write_machine_env || { failure "machine environment"; finish; exit 1; }
+. "$MACHENV" || { failure "load machine environment"; finish; exit 1; }
+bash "$PORTABLES/symlinks" || failure "initial symlinks"
+
+system_ready=1
+if [[ "$OS" = Darwin ]]; then
+  if ! xcode-select -p >/dev/null 2>&1; then
+    log -e "install Xcode command-line tools with xcode-select --install, then rerun"
+    system_ready=0
+  elif ! command -v brew >/dev/null 2>&1; then
+    bash "$MACHINE_TOOLS/homebrew.sh" self-install || system_ready=0
+  fi
+fi
+if [[ "$system_ready" = 1 && ${#update[@]} -gt 0 ]]; then
+  rc=0
+  "${update[@]}" || rc=$?
+  if [[ "$rc" != 0 && ! ( "$manager" = dnf && "$rc" = 100 ) ]]; then system_ready=0; fi
+fi
+[[ "$system_ready" = 1 ]] || failure "system package prerequisites or metadata"
+
+system_install() {
+  local package="$1"
+  [[ "$system_ready" = 1 ]] || return 1
+  case "$manager" in
+    brew)
+      if [[ "$package" = cask:* ]]; then
+        package=${package#cask:}
+        brew list --cask "$package" >/dev/null 2>&1 || brew install --cask "$package"
+      else
+        brew list --formula "$package" >/dev/null 2>&1 || brew install --formula "$package"
+      fi
+      ;;
+    apt)
+      if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null)" != 'install ok installed' ]]; then
+        "${install[@]}" "$package"
+      fi
+      ;;
+    pacman) pacman -Q "$package" >/dev/null 2>&1 || "${install[@]}" "$package" ;;
+    dnf) rpm -q "$package" >/dev/null 2>&1 || "${install[@]}" "$package" ;;
+  esac
+}
+for command in curl git; do
+  command -v "$command" >/dev/null 2>&1 || system_install "$command" || failure "bootstrap $command"
 done
-[[ -n "${pre_tools-}" ]] &&
-  log "pre-installing: $pre_tools" &&
-  bash -c "$PKG_MANAGER_INSTALL $pre_tools"
 
-log .gather "collecting package dependencies from machine-tools…"
+shopt -s nullglob
+tools=( "$MACHINE_TOOLS"/*.sh )
+owners=()
+tokens=()
+results=()
+blocked=()
+inventory_failed=0
+for ((i = 0; i < ${#tools[@]}; i++)); do
+  blocked[i]=0
+  if ! declarations="$(bash "${tools[i]}" install)"; then
+    failure "requirements ${tools[i]##*/}"
+    inventory_failed=1
+    continue
+  fi
+  while IFS= read -r token; do
+    [[ -n "$token" ]] || continue
+    case "$token" in
+      self-install|syspkgmgr:?*|uv:?*|pip:?*|pipx:?*|nvm:?*|npm:?*) ;;
+      *) failure "unknown requirement: $token"; inventory_failed=1; continue ;;
+    esac
+    if [[ "$token" = *[[:space:]]* || "$token" = syspkgmgr:ext:* ]]; then
+      failure "invalid requirement: $token"
+      inventory_failed=1
+      continue
+    fi
+    owners+=( "$i" )
+    tokens+=( "$token" )
+    results+=( pending )
+  done <<<"$declarations"
+done
+[[ "$inventory_failed" = 0 ]] || { finish; exit 1; }
 
-self_install_scripts=""
-syspkgmgr_install_cmds=""
-uv_install_cmds=""
-pip_install_cmds=""
-pipx_install_cmds=""
-nvm_install_cmds=""
-npm_install_cmds=""
+ensure_uv() {
+  provider_ready uv || return 1
+  command -v uv >/dev/null 2>&1 || bash "$MACHINE_TOOLS/uv.sh" self-install || return 1
+  require_commands uv
+}
 
-syspkgmgr_tool_scripts=""
-uv_tool_scripts=""
-pip_tool_scripts=""
-pipx_tool_scripts=""
-nvm_tool_scripts=""
-npm_tool_scripts=""
+load_nvm() {
+  provider_ready nvm || return 1
+  export NVM_DIR="$HOME/.nvm"
+  [[ -s "$NVM_DIR/nvm.sh" ]] || bash "$MACHINE_TOOLS/nvm.sh" self-install || return 1
+  require_files "$NVM_DIR/nvm.sh" || return 1
+  . "$NVM_DIR/nvm.sh"
+}
 
-for tool_script in "$MACHINE_TOOLS"/*.sh; do
-  install_cmds="$(bash "$tool_script" install)"
-  for install_cmd in $install_cmds; do
-    case "$install_cmd" in
-    "") continue ;;
-    self-install)
-      self_install_scripts="${self_install_scripts:+$self_install_scripts$'\n'}$tool_script"
+provider_ready() {
+  local index
+  for ((index = 0; index < ${#tools[@]}; index++)); do
+    if [[ "${tools[index]##*/}" = "$1.sh" && "${blocked[index]}" = 1 ]]; then
+      log -e "blocked provider: $1"
+      return 1
+    fi
+  done
+}
+
+execute_requirement() (
+  local token="$1" owner="$2" value="${1#*:}" version python_path
+  local args=()
+  case "$token" in
+    syspkgmgr:*) system_install "$value" ;;
+    self-install) bash "${tools[owner]}" self-install ;;
+    uv:python:*)
+      ensure_uv || return 1
+      IFS=: read -r -a args <<<"${value#python:}"
+      if [[ "${args[0]}" = --default ]]; then
+        if python_path="$(uv python find --managed-python 2>/dev/null)"; then
+          version="$("$python_path" -c 'import platform; print(platform.python_version())')" || return 1
+          uv python install "$version" "${args[@]}"
+        else
+          uv python install "${args[@]}"
+        fi
+      else
+        uv python find --managed-python "${args[0]}" >/dev/null 2>&1 ||
+          uv python install "${args[@]}"
+      fi
       ;;
-    syspkgmgr:*)
-      syspkgmgr_install_cmds="${syspkgmgr_install_cmds:+$syspkgmgr_install_cmds }${install_cmd#syspkgmgr:}"
-      syspkgmgr_tool_scripts="${syspkgmgr_tool_scripts:+$syspkgmgr_tool_scripts$'\n'}$tool_script"
-      ;;
-    uv:*)
-      uv_install_cmds="${uv_install_cmds:+$uv_install_cmds }${install_cmd#uv:}"
-      uv_tool_scripts="${uv_tool_scripts:+$uv_tool_scripts$'\n'}$tool_script"
-      ;;
+    uv:*) ensure_uv && uv tool install "$value" ;;
     pip:*)
-      pip_install_cmds="${pip_install_cmds:+$pip_install_cmds }${install_cmd#pip:}"
-      pip_tool_scripts="${pip_tool_scripts:+$pip_tool_scripts$'\n'}$tool_script"
+      require_commands python3 || return 1
+      if ! python3 -m pip --version >/dev/null 2>&1; then
+        case "$manager" in
+          apt|dnf) system_install python3-pip || return 1 ;;
+          pacman) system_install python-pip || return 1 ;;
+          brew) log -e "pip unavailable; configure Python first"; return 1 ;;
+        esac
+      fi
+      python3 -m pip install --user "$value"
       ;;
     pipx:*)
-      pipx_install_cmds="${pipx_install_cmds:+$pipx_install_cmds }${install_cmd#pipx:}"
-      pipx_tool_scripts="${pipx_tool_scripts:+$pipx_tool_scripts$'\n'}$tool_script"
+      command -v pipx >/dev/null 2>&1 || system_install pipx || return 1
+      pipx install "$value"
       ;;
     nvm:*)
-      nvm_install_cmds="${nvm_install_cmds:+$nvm_install_cmds }${install_cmd#nvm:}"
-      nvm_tool_scripts="${nvm_tool_scripts:+$nvm_tool_scripts$'\n'}$tool_script"
+      load_nvm || return 1
+      version="$(nvm version "$value")" || version=N/A
+      [[ "$version" != N/A ]] || nvm install "$value"
       ;;
     npm:*)
-      npm_install_cmds="${npm_install_cmds:+$npm_install_cmds }${install_cmd#npm:}"
-      npm_tool_scripts="${npm_tool_scripts:+$npm_tool_scripts$'\n'}$tool_script"
+      load_nvm || return 1
+      require_commands npm || return 1
+      npm list -g --depth=0 "$value" >/dev/null 2>&1 || npm install -g "$value"
       ;;
-    *) log -w .gather "install command not recognised: $install_cmd" ;;
+  esac
+)
+
+for phase in system self node python uv pip pipx npm; do
+  for ((i = 0; i < ${#tokens[@]}; i++)); do
+    token=${tokens[i]}
+    case "$token" in
+      syspkgmgr:*) category=system ;;
+      self-install) category=self ;;
+      nvm:*) category=node ;;
+      uv:python:*) category=python ;;
+      uv:*) category=uv ;;
+      pip:*) category=pip ;;
+      pipx:*) category=pipx ;;
+      npm:*) category=npm ;;
     esac
+    [[ "$category" = "$phase" ]] || continue
+    reused=0
+    for ((j = 0; j < i; j++)); do
+      if [[ "${tokens[j]}" = "$token" && "${results[j]}" != blocked &&
+          ( "$token" != self-install || "${owners[j]}" = "${owners[i]}" ) ]]; then
+        results[i]=${results[j]}
+        reused=1
+        break
+      fi
+    done
+    if [[ "$reused" = 0 ]]; then
+      log "ensuring $token (${tools[owners[i]]##*/})"
+      results[i]=0
+      if [[ "${blocked[owners[i]]}" = 1 ]]; then
+        results[i]=blocked
+      else
+        execute_requirement "$token" "${owners[i]}" || results[i]=1
+      fi
+    fi
+    if [[ "${results[i]}" != 0 ]]; then
+      blocked[owners[i]]=1
+      failure "$token for ${tools[owners[i]]##*/}"
+    fi
   done
 done
 
-# --- 2. Execution Phase ---
-
-if [[ -n "$self_install_scripts" ]]; then
-  while IFS= read -r tool_script; do
-    bash "$tool_script" self-install
-    bash "$tool_script" config
-  done <<<"$self_install_scripts"
-fi
-
-if [[ -n "$uv_install_cmds" ]] &&
-  ! command -v uv >/dev/null 2>&1 &&
-  [[ ! " $syspkgmgr_install_cmds " = *" uv "* ]]; then
-  if [[ "$OS" = Darwin ]]; then
-    syspkgmgr_install_cmds="${syspkgmgr_install_cmds:+$syspkgmgr_install_cmds }uv"
+for ((i = 0; i < ${#tools[@]}; i++)); do
+  if [[ "${blocked[i]}" = 1 ]]; then
+    failure "blocked config ${tools[i]##*/}"
   else
-    ensure_uv_installed=1
+    bash "${tools[i]}" config || failure "config ${tools[i]##*/}"
   fi
-fi
-
-if [[ -n "$pipx_install_cmds" ]] && [[ ! " $syspkgmgr_install_cmds " = *" pipx "* ]]; then
-  syspkgmgr_install_cmds="${syspkgmgr_install_cmds:+$syspkgmgr_install_cmds }pipx"
-fi
-
-if [[ -n "$syspkgmgr_install_cmds" ]]; then
-  core_tools=""
-  ext_tools=""
-  for item in $syspkgmgr_install_cmds; do
-    case $item in
-    ext:*) ext_tools="${ext_tools:+$ext_tools }${item#*:}" ;;
-    *) core_tools="${core_tools:+$core_tools }$item" ;;
-    esac
-  done
-
-  if [[ -n "$core_tools" ]]; then
-    log ."$SYS_PKG_MANAGER" "installing system packages: $core_tools"
-    bash -c "$PKG_MANAGER_INSTALL $core_tools"
-  fi
-
-  if [[ -n "$ext_tools" ]]; then
-    log ."$SYS_PKG_MANAGER" "tapping extension tools: $ext_tools"
-    for ext_tool in $ext_tools; do
-      bash -c "$PKG_MANAGER_EXT_INSTALL ${ext_tool//:/ }"
-    done
-  fi
-
-  log ."$SYS_PKG_MANAGER" "running system package configurations…"
-  while IFS= read -r tool_script; do
-    [[ -n "$tool_script" ]] && bash "$tool_script" config
-  done <<<"$syspkgmgr_tool_scripts"
-fi
-
-if [[ "${ensure_uv_installed:-0}" -gt 0 ]] && ! command -v uv >/dev/null 2>&1; then
-  log .gather "installing uv…"
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-fi
-
-if [[ -n "$uv_install_cmds" ]]; then
-
-  [[ "$(command -v uv 2>/dev/null)" = *homebrew* ]] || uv self update
-
-  tools=""
-  pythons=""
-  for item in $uv_install_cmds; do
-    case $item in
-    python:*) pythons="${pythons:+$pythons }${item#*:}" ;;
-    *) tools="${tools:+$tools }${item#*:}" ;;
-    esac
-  done
-
-  if [[ -n "$tools" ]]; then
-    tools=$(printf "%s\n" $tools | sort -u | xargs)
-    log .uv "installing uv tools: $tools"
-    for tool in $tools; do
-      uv tool install ${tool//:/ }
-    done
-  fi
-
-  if [[ -n "$pythons" ]]; then
-    pythons=$(printf "%s\n" $pythons | sort -u | xargs)
-    log .uv "installing uv python(s): $pythons"
-    for python in $pythons; do
-      uv python install ${python//:/ }
-    done
-  fi
-
-  log .uv "running uv package configurations…"
-  while IFS= read -r tool_script; do
-    [[ -n "$tool_script" ]] && bash "$tool_script" config
-  done <<<"$uv_tool_scripts"
-fi
-
-if [[ -n "$pip_install_cmds" ]]; then
-  install_list=$(printf "%s\n" $pip_install_cmds | sort -u | xargs)
-  log .pip "installing user-local pip packages: $install_list"
-  python3 -m pip install -U pip
-  python3 -m pip install --user $install_list
-  log .pip "running pip package configurations…"
-  while IFS= read -r tool_script; do
-    [[ -n "$tool_script" ]] && bash "$tool_script" config
-  done <<<"$pip_tool_scripts"
-fi
-
-if [[ -n "$pipx_install_cmds" ]]; then
-  install_list=$(printf "%s\n" $pipx_install_cmds | sort -u | xargs)
-  log .pipx "installing user-local pipx packages: $install_list"
-  pipx install $install_list
-  log .pipx "running pipx package configurations…"
-  while IFS= read -r tool_script; do
-    [[ -n "$tool_script" ]] && bash "$tool_script" config
-  done <<<"$pipx_tool_scripts"
-fi
-
-if [[ -n "$nvm_install_cmds" ]]; then
-  install_list=$(printf "%s\n" $nvm_install_cmds | sort -u | xargs)
-  log .nvm "installing node versions with nvm: $install_list"
-  export NVM_DIR="$HOME/.nvm"
-  [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
-  nvm install "$install_list"
-  log .nvm "checking for node configurations…"
-  while IFS= read -r tool_script; do
-    [[ -n "$tool_script" ]] && bash "$tool_script" config
-  done <<<"$nvm_tool_scripts"
-fi
-
-if [[ -n "$npm_install_cmds" ]]; then
-  install_list=$(printf "%s\n" $npm_install_cmds | sort -u | xargs)
-  log .npm "installing global npm packages: $install_list"
-  export NVM_DIR="$HOME/.nvm"
-  [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
-  npm install -g $install_list
-  log .npm "running npm package configurations…"
-  while IFS= read -r tool_script; do
-    [[ -n "$tool_script" ]] && bash "$tool_script" config
-  done <<<"$npm_tool_scripts"
-fi
-
-log -i "portables ${LOG_NAME}d. GLHFDD 🥡"
+done
+bash "$PORTABLES/symlinks" || failure "final symlinks"
+finish
