@@ -356,6 +356,61 @@ The protection is implemented by those key bindings. Running the literal tmux
 `kill-window` command still destroys a linked window in every session because
 tmux represents linked windows as one shared object.
 
+## Codex Neovim Bridge
+
+Codex can discover and query a live Neovim without MCP when both processes are
+in the same exact tmux window. Each Neovim publishes its Unix RPC socket and PID
+in its pane's registration list; `nvim-tmux` filters panes by the caller's
+stable `window_id` and validates each socket against its PID before using it.
+
+The normal `taw` editor-and-agent layout satisfies this relationship, but the
+bridge also works with manually created panes. It never falls back to another
+window in the tmux session. If more than one Neovim is valid in the window, it
+exits with status 3 rather than guessing. Select a pane with `--pane %N`; if a
+pane contains multiple editors, select one with `--pid PID`.
+
+Available commands are:
+
+```text
+nvim-tmux [--pane %N] [--pid PID] discover
+nvim-tmux [--pane %N] [--pid PID] context
+nvim-tmux [--pane %N] [--pid PID] open PATH [LINE [COLUMN]]
+nvim-tmux [--pane %N] [--pid PID] highlight PATH START:END [START:END ...]
+nvim-tmux [--pane %N] [--pid PID] clear-highlights [PATH]
+```
+
+`discover` and `context` return JSON. Context includes the active file, cursor,
+visual selection, modified state, and current-buffer diagnostics. Selection
+text is capped at 64 KiB and diagnostics at 200 entries, with truncation flags.
+`open` and the highlight commands accept existing files only after their real
+paths have been verified to remain inside the caller's Git worktree. Highlights
+replace the bridge-owned ranges for that buffer and never clear another plugin's
+namespace.
+
+Pane registration is the normal path. For a Neovim started before this config
+was loaded, the helper can inspect descendant processes and Unix sockets when
+`lsof` is already installed. This fallback never adds a package or searches
+outside the exact window. The registration list also preserves surviving outer
+editors when configured nested Neovims in the same pane exit in any order.
+
+Run the normal symlink step and reinstall the agent hooks after updating:
+
+```bash
+./symlinks
+bash ./configure agent-status
+```
+
+Restart Neovim so it publishes its pane metadata, restart Codex, then inspect
+and trust the changed hook with `/hooks`. The Codex `SessionStart` hook adds a
+compact routing and connection summary plus concise usage guidance as developer
+context. Live editor state remains available on demand through `nvim-tmux
+context`. The guidance tells Codex to use the exact Neovim pane conservatively
+for useful visual handoffs and to refresh only after a connection attempt fails.
+
+The hook is advisory and produces no output outside tmux or when no editor is
+available. The helper exposes fixed operations, but it is not a privilege
+boundary: Codex and Neovim already run as the same operating-system user.
+
 ## Examples
 
 ```bash

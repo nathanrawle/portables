@@ -91,6 +91,7 @@ vim.g.picker_no_show = vim.list_extend({
 
 require("netrwopts")
 require("options")
+require("agent_nvim").setup()
 require("autocommands")
 require("lazynvim.init")
 require("keymaps")

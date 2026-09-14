@@ -1,0 +1,418 @@
+#!/usr/bin/env bash
+
+set -u
+
+usage() {
+  printf 'usage: nvim-tmux [--pane %%N] [--pid PID] discover\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] context\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] open PATH [LINE [COLUMN]]\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] highlight PATH START:END [START:END ...]\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] clear-highlights [PATH]\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] codex-context\n' >&2
+}
+
+die() {
+  printf 'nvim-tmux: %s\n' "$1" >&2
+  exit "${2:-2}"
+}
+
+require_commands() {
+  local command
+  for command in tmux nvim jq ps realpath git od tr; do
+    command -v "$command" >/dev/null 2>&1 || die "$command is required"
+  done
+}
+
+resolve_caller() {
+  local line window pane pane_pid pid parent
+
+  [[ -n "${TMUX:-}" ]] || return 1
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    line="$(tmux display-message -p -t "$TMUX_PANE" \
+      "#{window_id}"$'\t'"#{pane_id}" 2>/dev/null)" || line=
+    if [[ -n "$line" ]]; then
+      IFS=$'\t' read -r CALLER_WINDOW CALLER_PANE <<<"$line"
+      return 0
+    fi
+  fi
+
+  pid=$$
+  while [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]]; do
+    while IFS=$'\t' read -r window pane pane_pid; do
+      if [[ "$pane_pid" == "$pid" ]]; then
+        CALLER_WINDOW="$window"
+        CALLER_PANE="$pane"
+        return 0
+      fi
+    done < <(tmux list-panes -a -F \
+      "#{window_id}"$'\t'"#{pane_id}"$'\t'"#{pane_pid}" 2>/dev/null)
+
+    parent="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')"
+    [[ -n "$parent" && "$parent" != "$pid" ]] || break
+    pid="$parent"
+  done
+  return 1
+}
+
+validate_target_pane() {
+  local target_window
+
+  [[ -n "$TARGET_PANE" ]] || return 0
+  [[ "$TARGET_PANE" =~ ^%[0-9]+$ ]] || die "invalid pane id: $TARGET_PANE"
+  target_window="$(tmux display-message -p -t "$TARGET_PANE" '#{window_id}' 2>/dev/null)" \
+    || die "unknown pane: $TARGET_PANE"
+  [[ "$target_window" == "$CALLER_WINDOW" ]] \
+    || die "pane $TARGET_PANE is not in tmux window $CALLER_WINDOW"
+}
+
+rpc() {
+  local socket="$1"
+  local expression="$2"
+
+  nvim --server "$socket" --remote-expr "$expression" </dev/null 2>/dev/null
+}
+
+valid_socket() {
+  local socket="$1"
+  local expected_pid="$2"
+  local actual_pid
+
+  [[ "$socket" == /* && -S "$socket" && "$expected_pid" =~ ^[0-9]+$ ]] || return 1
+  actual_pid="$(rpc "$socket" 'getpid()')" || return 1
+  [[ "$actual_pid" == "$expected_pid" ]]
+}
+
+add_candidate() {
+  local pane="$1"
+  local pid="$2"
+  local socket="$3"
+  local source="$4"
+  local index
+
+  [[ -z "$TARGET_PID" || "$pid" == "$TARGET_PID" ]] || return 0
+  for ((index = 0; index < ${#CANDIDATE_SOCKETS[@]}; index++)); do
+    if [[ "${CANDIDATE_PIDS[index]}" == "$pid" ]] \
+      || [[ "${CANDIDATE_SOCKETS[index]}" == "$socket" ]]; then
+      return 0
+    fi
+  done
+  CANDIDATE_PANES+=("$pane")
+  CANDIDATE_PIDS+=("$pid")
+  CANDIDATE_SOCKETS+=("$socket")
+  CANDIDATE_SOURCES+=("$source")
+}
+
+load_processes() {
+  local pid parent command
+
+  PROCESS_PIDS=()
+  PROCESS_PARENTS=()
+  PROCESS_COMMANDS=()
+  while read -r pid parent command; do
+    [[ "$pid" =~ ^[0-9]+$ && "$parent" =~ ^[0-9]+$ ]] || continue
+    PROCESS_PIDS+=("$pid")
+    PROCESS_PARENTS+=("$parent")
+    PROCESS_COMMANDS+=("$command")
+  done < <(ps -axo pid=,ppid=,comm= 2>/dev/null)
+}
+
+process_parent() {
+  local wanted="$1"
+  local index
+
+  for ((index = 0; index < ${#PROCESS_PIDS[@]}; index++)); do
+    if [[ "${PROCESS_PIDS[index]}" == "$wanted" ]]; then
+      printf '%s\n' "${PROCESS_PARENTS[index]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+is_descendant() {
+  local pid="$1"
+  local root="$2"
+  local parent steps=0
+
+  while [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 && "$steps" -lt 256 ]]; do
+    [[ "$pid" == "$root" ]] && return 0
+    parent="$(process_parent "$pid")" || return 1
+    [[ "$parent" != "$pid" ]] || return 1
+    pid="$parent"
+    ((steps += 1))
+  done
+  return 1
+}
+
+discover_with_lsof() {
+  local pane="$1"
+  local pane_pid="$2"
+  local index pid command line socket
+
+  command -v lsof >/dev/null 2>&1 || return 0
+  for ((index = 0; index < ${#PROCESS_PIDS[@]}; index++)); do
+    pid="${PROCESS_PIDS[index]}"
+    command="${PROCESS_COMMANDS[index]##*/}"
+    [[ "$command" == nvim ]] || continue
+    is_descendant "$pid" "$pane_pid" || continue
+
+    while IFS= read -r line; do
+      [[ "$line" == n/* ]] || continue
+      socket="${line#n}"
+      valid_socket "$socket" "$pid" || continue
+      add_candidate "$pane" "$pid" "$socket" lsof
+    done < <(lsof -a -nP -U -p "$pid" -Fn 2>/dev/null)
+  done
+}
+
+discover_candidates() {
+  local pane pane_pid registrations socket pid registered_socket registered_pid pane_format
+  local field_separator=$'\034'
+
+  CANDIDATE_PANES=()
+  CANDIDATE_PIDS=()
+  CANDIDATE_SOCKETS=()
+  CANDIDATE_SOURCES=()
+  load_processes
+  pane_format="#{pane_id}${field_separator}#{pane_pid}"
+  pane_format+="${field_separator}#{@taw_nvim_registrations}"
+  pane_format+="${field_separator}#{@taw_nvim_socket}${field_separator}#{@taw_nvim_pid}"
+
+  while IFS="$field_separator" read -r pane pane_pid registrations socket pid; do
+    [[ -z "$TARGET_PANE" || "$pane" == "$TARGET_PANE" ]] || continue
+    while IFS=$'\t' read -r registered_pid registered_socket; do
+      [[ -n "$registered_pid" && -n "$registered_socket" ]] || continue
+      valid_socket "$registered_socket" "$registered_pid" || continue
+      add_candidate "$pane" "$registered_pid" "$registered_socket" registered
+    done < <(jq -r '
+      .[]?
+      | select((.pid | type) == "string" and (.socket | type) == "string")
+      | [.pid, .socket]
+      | @tsv
+    ' <<<"$registrations" 2>/dev/null)
+    if valid_socket "$socket" "$pid"; then
+      add_candidate "$pane" "$pid" "$socket" registered
+    fi
+    discover_with_lsof "$pane" "$pane_pid"
+  done < <(tmux list-panes -t "$CALLER_WINDOW" -F "$pane_format")
+}
+
+candidate_json() {
+  local index="$1"
+
+  jq -cn \
+    --arg window_id "$CALLER_WINDOW" \
+    --arg pane_id "${CANDIDATE_PANES[index]}" \
+    --argjson pid "${CANDIDATE_PIDS[index]}" \
+    --arg socket "${CANDIDATE_SOCKETS[index]}" \
+    --arg source "${CANDIDATE_SOURCES[index]}" \
+    '{window_id: $window_id, pane_id: $pane_id, pid: $pid, socket: $socket, source: $source}'
+}
+
+candidate_list_json() {
+  local index output=()
+
+  for ((index = 0; index < ${#CANDIDATE_PANES[@]}; index++)); do
+    output+=("$(candidate_json "$index")")
+  done
+  printf '%s\n' "${output[@]}" | jq -sc .
+}
+
+select_candidate() {
+  case "${#CANDIDATE_PANES[@]}" in
+    0) return 1 ;;
+    1) SELECTED=0 ;;
+    *) return 3 ;;
+  esac
+}
+
+editor_context() {
+  local editor
+
+  editor="$(rpc "${CANDIDATE_SOCKETS[SELECTED]}" \
+    'json_encode(luaeval("require('"'"'agent_nvim'"'"').context()"))')" || return 1
+  jq -e . >/dev/null 2>&1 <<<"$editor" || return 1
+  jq -cn \
+    --argjson connection "$(candidate_json "$SELECTED")" \
+    --argjson editor "$editor" \
+    '{connection: $connection, editor: $editor}'
+}
+
+worktree_file() {
+  local requested="$1"
+  local root path
+
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || die "open and highlight require a Git worktree"
+  root="$(realpath "$root")" || die "could not resolve worktree root"
+  [[ -f "$requested" ]] || die "file does not exist: $requested"
+  path="$(realpath "$requested")" || die "could not resolve file: $requested"
+  case "$path" in
+    "$root"/*) printf '%s\n' "$path" ;;
+    *) die "file is outside the current worktree: $requested" ;;
+  esac
+}
+
+hex_encode() {
+  LC_ALL=C od -An -v -tx1 | tr -d ' \n'
+}
+
+positive_integer() {
+  [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+run_open() {
+  local path line column path_hex editor
+
+  [[ $# -ge 1 && $# -le 3 ]] || { usage; exit 2; }
+  path="$(worktree_file "$1")" || exit $?
+  line="${2:-1}"
+  column="${3:-1}"
+  positive_integer "$line" || die "line must be a positive integer"
+  positive_integer "$column" || die "column must be a positive integer"
+  path_hex="$(printf '%s' "$path" | hex_encode)"
+  editor="$(rpc "${CANDIDATE_SOCKETS[SELECTED]}" \
+    "json_encode(luaeval(\"require('agent_nvim').open(_A[1], _A[2], _A[3])\", ['$path_hex', $line, $column]))")" \
+    || die "Neovim open operation failed" 4
+  jq -e . >/dev/null 2>&1 <<<"$editor" || die "Neovim returned invalid context" 4
+  jq -cn --argjson connection "$(candidate_json "$SELECTED")" --argjson editor "$editor" \
+    '{connection: $connection, editor: $editor}'
+}
+
+run_highlight() {
+  local path path_hex range start end editor ranges=()
+
+  [[ $# -ge 2 ]] || { usage; exit 2; }
+  path="$(worktree_file "$1")" || exit $?
+  shift
+  for range in "$@"; do
+    [[ "$range" =~ ^([1-9][0-9]*):([1-9][0-9]*)$ ]] \
+      || die "invalid highlight range: $range"
+    start="${BASH_REMATCH[1]}"
+    end="${BASH_REMATCH[2]}"
+    ((start <= end)) || die "invalid highlight range: $range"
+    ranges+=("$range")
+  done
+  path_hex="$(printf '%s' "$path" | hex_encode)"
+  local IFS=,
+  editor="$(rpc "${CANDIDATE_SOCKETS[SELECTED]}" \
+    "json_encode(luaeval(\"require('agent_nvim').highlight(_A[1], _A[2])\", ['$path_hex', '${ranges[*]}']))")" \
+    || die "Neovim highlight operation failed" 4
+  jq -e . >/dev/null 2>&1 <<<"$editor" || die "Neovim returned invalid context" 4
+  jq -cn --argjson connection "$(candidate_json "$SELECTED")" --argjson editor "$editor" \
+    '{connection: $connection, editor: $editor}'
+}
+
+run_clear_highlights() {
+  local path path_hex= result
+
+  [[ $# -le 1 ]] || { usage; exit 2; }
+  if [[ $# -eq 1 ]]; then
+    path="$(worktree_file "$1")" || exit $?
+    path_hex="$(printf '%s' "$path" | hex_encode)"
+  fi
+  result="$(rpc "${CANDIDATE_SOCKETS[SELECTED]}" \
+    "json_encode(luaeval(\"require('agent_nvim').clear_highlights(_A)\", '$path_hex'))")" \
+    || die "Neovim clear-highlights operation failed" 4
+  [[ "$result" == true ]] || die "Neovim returned an invalid clear result" 4
+  jq -cn --argjson connection "$(candidate_json "$SELECTED")" \
+    '{connection: $connection, cleared: true}'
+}
+
+run_codex_context() {
+  local selected_status summary pids
+
+  select_candidate
+  selected_status=$?
+  if [[ "$selected_status" -ne 0 ]]; then
+    if [[ "$selected_status" -eq 3 ]]; then
+      local IFS=,
+      pids="${CANDIDATE_PIDS[*]}"
+      printf 'Multiple Neovim instances are available in tmux window %s (PIDs %s). Select one with nvim-tmux --pid PID before relying on editor context.\n' \
+        "$CALLER_WINDOW" "$pids"
+    fi
+    return 0
+  fi
+
+  summary="$(jq -cn --arg codex_pane_id "$CALLER_PANE" \
+    --argjson connection "$(candidate_json "$SELECTED")" \
+    '{
+      routing: {
+        window_id: $connection.window_id,
+        codex_pane_id: $codex_pane_id,
+        nvim_pane_id: $connection.pane_id
+      },
+      connection: {
+        pid: $connection.pid,
+        socket: $connection.socket,
+        source: $connection.source
+      }
+    }')"
+  printf 'A live Neovim is available in this exact tmux window. Connection context: %s\n' "$summary"
+  printf 'Use nvim-tmux --pane %s --pid %s open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send. Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location. Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane %s --pid %s context.\n' \
+    "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PIDS[SELECTED]}" \
+    "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PIDS[SELECTED]}"
+}
+
+TARGET_PANE=
+TARGET_PID=
+while [[ "${1:-}" == --* ]]; do
+  [[ $# -ge 2 ]] || { usage; exit 2; }
+  case "$1" in
+    --pane) TARGET_PANE="$2" ;;
+    --pid) TARGET_PID="$2" ;;
+    *) usage; exit 2 ;;
+  esac
+  shift 2
+done
+[[ -z "$TARGET_PID" || "$TARGET_PID" =~ ^[1-9][0-9]*$ ]] \
+  || die "invalid PID: $TARGET_PID"
+
+COMMAND="${1:-}"
+[[ -n "$COMMAND" ]] || { usage; exit 2; }
+shift
+if [[ "$COMMAND" == codex-context ]]; then
+  [[ -n "${TMUX:-}" ]] || exit 0
+  for command in tmux nvim jq ps realpath git od tr; do
+    command -v "$command" >/dev/null 2>&1 || exit 0
+  done
+fi
+require_commands
+if ! resolve_caller; then
+  [[ "$COMMAND" == codex-context ]] && exit 0
+  die "could not resolve the current tmux pane"
+fi
+validate_target_pane
+discover_candidates
+
+if [[ "$COMMAND" == codex-context ]]; then
+  [[ $# -eq 0 ]] || { usage; exit 2; }
+  run_codex_context
+  exit 0
+fi
+
+select_candidate
+status=$?
+case "$status" in
+  0) ;;
+  1) die "no Neovim instance found in tmux window $CALLER_WINDOW" 1 ;;
+  3)
+    candidate_list_json >&2
+    die "multiple Neovim instances found; select one with --pid" 3
+    ;;
+esac
+
+case "$COMMAND" in
+  discover)
+    [[ $# -eq 0 ]] || { usage; exit 2; }
+    candidate_json "$SELECTED"
+    ;;
+  context)
+    [[ $# -eq 0 ]] || { usage; exit 2; }
+    editor_context || die "Neovim context operation failed" 4
+    ;;
+  open) run_open "$@" ;;
+  highlight) run_highlight "$@" ;;
+  clear-highlights) run_clear_highlights "$@" ;;
+  *) usage; exit 2 ;;
+esac
