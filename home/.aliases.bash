@@ -18,7 +18,7 @@ alias follow='f'
 alias hist=history
 alias rnsort='sort -rn'
 
-alias reshell='exec $0'
+alias reshell='exec $SHELL'
 alias :q=exit
 
 # utilities: python
@@ -36,6 +36,7 @@ alias gsc='git switch -c'
 alias gs-='git switch -'
 alias gsm='git switch main'
 alias glgo='git log --stat --oneline'
+alias gPt='git push --tags'
 
 # dbt
 alias serve-dbtdocs='{ nohup dbt docs serve < /dev/null &> /tmp/dbt-docs-serve-$(date -I) & } && print "docs served in background" || print "something went wrong. Check /tmp/dbt-docs-serve-$(date -I)"'
@@ -46,15 +47,15 @@ alias gauth='gcloud auth'
 
 alias gal-wfid='gcloud auth login --login-config=$HOME/.config/gcloud/blume_login_config.json'
 alias gadl-wfid='gcloud auth application-default login --login-config=$HOME/.config/gcloud/blume_login_config.json'
-alias glogin-wfid='gal-wfid && gadl-wfid'
+alias glogin-wfid='gal-wfid --update-adc'
 
-alias gal-gid='gcloud auth login'
-alias gadl-gid='gcloud auth application-default login'
-alias glogin-gid='gal-gid && gadl-gid'
+alias gal-gid='gcloud auth login nrawle@libertyblume.com'
+alias gadl-gid='gcloud auth application-default login nrawle@libertyblume.com'
+alias glogin-gid='gal-gid --update-adc'
 
-alias gal='() { if [[ $1 = wf ]]; then gal-wfid; else gal-gid; fi }'
-alias gadl='() { if [[ $1 = wf ]]; then gadl-wfid; else gadl-gid; fi }'
-alias glogin='() { if [[ $1 = wf ]]; then glogin-wfid; else glogin-gid; fi }'
+alias gal-lg='gcloud auth login nrawle@libertyglobal.com'
+alias gadl-lg='gcloud auth application-default login --account=nrawle@libertyglobal.com'
+alias glogin-lg='gal-lg --update-adc'
 
 # gcloud config
 alias gconf='gcloud config'
@@ -111,4 +112,3 @@ alias py=' ~/monty/.venv/bin/python'
 alias bpy='~/monty/.venv/bin/bpython'
 alias ipy='~/monty/.venv/bin/ipython'
 alias lzg='lazygit'
-alias gPt='git push --tags'

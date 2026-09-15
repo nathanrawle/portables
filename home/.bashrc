@@ -1,7 +1,7 @@
 # Enable the subsequent settings only in interactive sessions
 case $- in
-  *i*) ;;
-    *) return;;
+*i*) ;;
+*) return ;;
 esac
 
 if [ -z "$HOME" ]; then
@@ -41,4 +41,4 @@ plugins=(
 )
 
 source "$OSH"/oh-my-bash.sh
-source ~/.aliases.sh
+source ~/.aliases.bash

@@ -1,4 +1,4 @@
-[[ -s ~/.aliases.sh ]] && . ~/.aliases.sh
+[[ -s ~/.aliases.bash ]] && . ~/.aliases.bash
 
 alias -g andyes='&& print yes'
 alias -g orno='|| print no'
@@ -37,4 +37,8 @@ alias gconf='() {
     esac
   fi
 }'
+
+alias gal='() { if [[ $1 = wf ]]; then gal-wfid; elif [[ $1 = lg ]]; then gal-lg; else gal-gid; fi }'
+alias gadl='() { if [[ $1 = wf ]]; then gadl-wfid; elif [[ $1 = lg ]]; then gadl-lg; else gadl-gid; fi }'
+alias glogin='() { if [[ $1 = wf ]]; then glogin-wfid; elif [[ $1 = lg ]]; then glogin-lg; else glogin-gid; fi }'
 
