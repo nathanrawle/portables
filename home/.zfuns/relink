@@ -2,15 +2,21 @@
 
 emulate -L zsh
 local -x LOG_NAME=relink
-local result=0 reply shell
+local result=0 reply shell arg help=0
 
 if [[ -z "${PORTABLES:-}" || ! -f "$PORTABLES/symlinks" ]]; then
   print -u2 "relink: PORTABLES must identify the repository"
   return 1
 fi
+for arg in "$@"; do
+  case "$arg" in
+    --help) help=1; break ;;
+    --) break ;;
+  esac
+done
 command bash "$PORTABLES/symlinks" "$@" || result=$?
 (( result == 0 )) || return $result
-[[ "${1:-}" != --help && -o interactive && -t 0 && -t 1 ]] || return 0
+(( help == 0 )) && [[ -o interactive && -t 0 && -t 1 ]] || return 0
 
 while true; do
   read 'reply?Would you like to replace the shell now? [y|N] ' || return 0

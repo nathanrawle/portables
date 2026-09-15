@@ -107,6 +107,26 @@ EOF
   if grep -q BAD "$TRACE"; then fail 'failed owner configured'; fi
 }
 
+test_maintenance_requirement_hook_failure_blocks_only_owner() {
+  maintenance_fixture
+  cat >"$FIXTURE/machine-tools/a.sh" <<'EOF'
+case "$1" in
+  install) exit 7 ;;
+  config) echo BAD >>"$TRACE" ;;
+esac
+EOF
+  cat >"$FIXTURE/machine-tools/b.sh" <<'EOF'
+case "$1" in
+  install) echo syspkgmgr:good ;;
+  config) echo independent >>"$TRACE" ;;
+esac
+EOF
+  if bash "$FIXTURE/instantiate"; then fail 'requirement-hook failure hidden'; fi
+  grep -q '^brew install --formula good$' "$TRACE" || fail 'independent install skipped'
+  grep -q '^independent$' "$TRACE" || fail 'independent config skipped'
+  if grep -q BAD "$TRACE"; then fail 'failed inventory owner configured'; fi
+}
+
 test_maintenance_unknown_requirement_blocks_installation() {
   maintenance_fixture
   printf '[[ "$1" != install ]] || echo magic:package\n' >"$FIXTURE/machine-tools/a.sh"
@@ -278,6 +298,7 @@ test_case 'maintenance: configuration initializes context and continues independ
 test_case 'maintenance: validates complete invocation before work' test_maintenance_validation_precedes_work
 test_case 'maintenance: bootstrap configures existing tools once after installation' test_maintenance_bootstrap_configures_once_after_install
 test_case 'maintenance: failed installations block only their owner' test_maintenance_install_failure_blocks_only_owner
+test_case 'maintenance: failed requirement hooks block only their owner' test_maintenance_requirement_hook_failure_blocks_only_owner
 test_case 'maintenance: unknown requirements block installation' test_maintenance_unknown_requirement_blocks_installation
 test_case 'maintenance: casks use brew install' test_maintenance_cask_dispatch
 test_case 'maintenance: system packages use deduplicated batches' test_maintenance_batches_system_packages
@@ -553,6 +574,36 @@ EOF
   ' _ "$TEST_TMPDIR"
 }
 
+test_maintenance_relink_help_skips_restart() {
+  maintenance_fixture
+  export WRAPPER_REPO="$REPO_ROOT" PORTABLES="$FIXTURE"
+  cat >"$TEST_TMPDIR/wrapper-help.zsh" <<'EOF'
+fpath=( "$WRAPPER_REPO/home/.zfuns" $fpath )
+autoload -Uz relink
+relink --force --help
+print "RESULT:return:${?}:end"
+EOF
+  zsh -fc '
+    zmodload zsh/zpty || exit 1
+    zpty -b worker zsh -fi "$1/wrapper-help.zsh"
+    output= ready=0 chunk=
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      chunk=
+      zpty -r worker chunk
+      output+=$chunk
+      [[ "$output" != *"replace the shell now?"* ]] || {
+        zpty -d worker
+        print -u2 "help prompted for shell replacement: $output"
+        exit 1
+      }
+      if [[ "$output" = *RESULT:return:0:end* ]]; then ready=1; break; fi
+      sleep 0.05
+    done
+    zpty -d worker
+    (( ready )) || { print -u2 "help invocation did not return: $output"; exit 1; }
+  ' _ "$TEST_TMPDIR"
+}
+
 zsh_config_fixture() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/zsh.sh" "$FIXTURE/machine-tools/"
@@ -604,6 +655,7 @@ test_case 'maintenance: machine environment source must be a regular file' test_
 test_case 'maintenance: symlinked entrypoints find their repository' test_maintenance_symlinked_entrypoints
 test_case 'maintenance: Git never writes runtime settings into the repository' test_maintenance_git_refuses_source_writes
 test_case 'maintenance: interactive restart accepts y/Y and declines Enter/n/N' test_maintenance_restart_responses
+test_case 'maintenance: relink help after options skips restart' test_maintenance_relink_help_skips_restart
 test_case 'maintenance: Zsh migrates only recognized function links' test_maintenance_zsh_migrates_managed_function_links
 test_case 'maintenance: Zsh preserves unmanaged function links' test_maintenance_zsh_preserves_unmanaged_function_links
 

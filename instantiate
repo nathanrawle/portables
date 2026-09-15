@@ -141,7 +141,7 @@ for ((i = 0; i < ${#tools[@]}; i++)); do
   blocked[i]=0
   if ! declarations="$(bash "${tools[i]}" install)"; then
     failure "requirements ${tools[i]##*/}"
-    inventory_failed=1
+    blocked[i]=1
     continue
   fi
   while IFS= read -r token; do
