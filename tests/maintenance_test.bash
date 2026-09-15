@@ -499,6 +499,8 @@ test_maintenance_go_removes_partial_tree_before_restore() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/go.sh" "$FIXTURE/machine-tools/"
   export GO_BACKUP="$TEST_TMPDIR/go-backup"
+  export GO_INSTALL_ROOT="$TEST_TMPDIR/usr-local-go"
+  mkdir -p "$GO_INSTALL_ROOT"
   cat >"$TEST_TMPDIR/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 while [[ $# -gt 0 ]]; do
@@ -523,7 +525,7 @@ printf 'sudo %s\n' "$*" >>"$TRACE"
 case "$1" in
   mktemp) mkdir -p "$GO_BACKUP/go"; printf '%s\n' "$GO_BACKUP" ;;
   mv)
-    if [[ "$2" != /usr/local/go && "$2" != "$GO_BACKUP/go" && "$3" = /usr/local/go ]]; then
+    if [[ "$2" != "$GO_INSTALL_ROOT" && "$2" != "$GO_BACKUP/go" && "$3" = "$GO_INSTALL_ROOT" ]]; then
       exit 1
     fi
     ;;
@@ -532,8 +534,8 @@ EOF
   chmod +x "$TEST_TMPDIR/bin/curl" "$TEST_TMPDIR/bin/tar" "$TEST_TMPDIR/bin/sudo"
   if bash "$FIXTURE/machine-tools/go.sh" self-install; then fail 'failed Go install returned success'; fi
   local remove_line restore_line
-  remove_line="$(grep -n '^sudo rm -rf -- /usr/local/go$' "$TRACE" | cut -d: -f1)"
-  restore_line="$(grep -n "^sudo mv $GO_BACKUP/go /usr/local/go$" "$TRACE" | cut -d: -f1)"
+  remove_line="$(grep -Fn "sudo rm -rf -- $GO_INSTALL_ROOT" "$TRACE" | cut -d: -f1)"
+  restore_line="$(grep -Fn "sudo mv $GO_BACKUP/go $GO_INSTALL_ROOT" "$TRACE" | cut -d: -f1)"
   [[ -n "$remove_line" && -n "$restore_line" && "$remove_line" -lt "$restore_line" ]] ||
     fail 'previous Go tree restored before removing partial destination'
 }

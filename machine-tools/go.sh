@@ -4,6 +4,7 @@
 tool_init "$@"
 
 GO_VERSION=${GO_VERSION:-1.26.0}
+GO_INSTALL_ROOT=${GO_INSTALL_ROOT:-/usr/local/go}
 case "$1" in
   install) command -v go >/dev/null 2>&1 || echo self-install ;;
   self-install)
@@ -22,14 +23,14 @@ case "$1" in
     [[ -x "$temp/go/bin/go" ]] || { log -e "invalid Go archive"; exit 1; }
     require_commands sudo
     backup=
-    if [[ -e /usr/local/go || -L /usr/local/go ]]; then
-      backup="$(sudo mktemp -d /usr/local/go.backup.XXXXXX)"
-      sudo mv /usr/local/go "$backup/go"
+    if [[ -e "$GO_INSTALL_ROOT" || -L "$GO_INSTALL_ROOT" ]]; then
+      backup="$(sudo mktemp -d "$GO_INSTALL_ROOT.backup.XXXXXX")"
+      sudo mv "$GO_INSTALL_ROOT" "$backup/go"
       log -i "previous Go installation preserved at $backup/go"
     fi
-    if ! sudo mv "$temp/go" /usr/local/go; then
-      sudo rm -rf -- /usr/local/go || { log -e "failed to remove partial Go installation"; exit 1; }
-      if [[ -n "$backup" ]] && ! sudo mv "$backup/go" /usr/local/go; then
+    if ! sudo mv "$temp/go" "$GO_INSTALL_ROOT"; then
+      sudo rm -rf -- "$GO_INSTALL_ROOT" || { log -e "failed to remove partial Go installation"; exit 1; }
+      if [[ -n "$backup" ]] && ! sudo mv "$backup/go" "$GO_INSTALL_ROOT"; then
         log -e "failed to restore previous Go installation from $backup/go"
       fi
       exit 1
