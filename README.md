@@ -110,7 +110,9 @@ separately. The obsolete `syspkgmgr:ext:` encoding and unknown backends fail val
 Pip/pipx remain supported extension points even though no current hook requests them.
 Pip does not upgrade itself or bypass externally managed Python protections.
 System requirements retain their owning hooks while formulas, casks, or distribution
-packages are passed to the package manager in the smallest appropriate batches.
+packages are passed to the package manager in the smallest appropriate batches. If a
+batch fails, only packages still missing are retried individually so one unavailable
+package does not block otherwise satisfiable tools.
 
 `OS`, `ID`, and `VERSION_ID` may be supplied for controlled environments/tests.
 Otherwise the scripts detect them from the platform. Repository paths always come from

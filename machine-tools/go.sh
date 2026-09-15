@@ -28,7 +28,10 @@ case "$1" in
       log -i "previous Go installation preserved at $backup/go"
     fi
     if ! sudo mv "$temp/go" /usr/local/go; then
-      [[ -z "$backup" ]] || sudo mv "$backup/go" /usr/local/go
+      sudo rm -rf -- /usr/local/go || { log -e "failed to remove partial Go installation"; exit 1; }
+      if [[ -n "$backup" ]] && ! sudo mv "$backup/go" /usr/local/go; then
+        log -e "failed to restore previous Go installation from $backup/go"
+      fi
       exit 1
     fi
     ;;

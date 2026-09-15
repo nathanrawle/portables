@@ -112,6 +112,16 @@ system_install_batch() {
   return "$rc"
 }
 
+system_install_batch_with_fallback() {
+  local package
+  system_install_batch "$@" && return 0
+  for package in "$@"; do
+    system_package_installed "$package" && continue
+    system_install_batch "$package" || true
+  done
+  return 1
+}
+
 system_install() {
   local package="$1"
   system_package_installed "$package" && return 0
@@ -124,7 +134,7 @@ for command in curl git; do
   command -v "$command" >/dev/null 2>&1 || bootstrap_packages+=( "$command" )
 done
 if [[ ${#bootstrap_packages[@]} -gt 0 ]]; then
-  system_install_batch "${bootstrap_packages[@]}" || true
+  system_install_batch_with_fallback "${bootstrap_packages[@]}" || true
   for command in "${bootstrap_packages[@]}"; do
     command -v "$command" >/dev/null 2>&1 || failure "bootstrap $command"
   done
@@ -253,7 +263,7 @@ for ((i = 0; i < ${#tokens[@]}; i++)); do
   done
   [[ "$seen" = 1 ]] || system_packages+=( "$value" )
 done
-system_install_batch "${system_packages[@]}" || true
+system_install_batch_with_fallback "${system_packages[@]}" || true
 for ((i = 0; i < ${#tokens[@]}; i++)); do
   token=${tokens[i]}
   [[ "$token" = syspkgmgr:* ]] || continue

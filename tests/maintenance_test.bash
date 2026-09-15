@@ -157,6 +157,43 @@ EOF
   grep -q '^brew install --cask first second$' "$TRACE" || fail 'cask batch missing or reordered'
 }
 
+test_maintenance_failed_batch_retries_missing_packages() {
+  maintenance_fixture
+  export OS=Linux ID=ubuntu
+  cat >"$TEST_TMPDIR/bin/sudo" <<'EOF'
+#!/bin/sh
+exec "$@"
+EOF
+  cat >"$TEST_TMPDIR/bin/apt-get" <<'EOF'
+#!/usr/bin/env bash
+printf 'apt-get %s\n' "$*" >>"$TRACE"
+[[ "$1" = install ]] || exit 0
+shift
+packages=()
+for package in "$@"; do [[ "$package" = -* ]] || packages+=( "$package" ); done
+if [[ ${#packages[@]} -gt 1 ]]; then exit 100; fi
+[[ "${packages[0]}" != broken ]] || exit 100
+printf 'apt:%s\n' "${packages[0]}" >>"$PACKAGE_STATE"
+EOF
+  cat >"$TEST_TMPDIR/bin/dpkg-query" <<'EOF'
+#!/usr/bin/env bash
+grep -qx "apt:${!#}" "$PACKAGE_STATE" && printf 'install ok installed'
+EOF
+  chmod +x "$TEST_TMPDIR/bin/sudo" "$TEST_TMPDIR/bin/apt-get" "$TEST_TMPDIR/bin/dpkg-query"
+  cat >"$FIXTURE/machine-tools/a.sh" <<'EOF'
+case "$1" in install) echo syspkgmgr:broken ;; config) echo BAD >>"$TRACE" ;; esac
+EOF
+  cat >"$FIXTURE/machine-tools/b.sh" <<'EOF'
+case "$1" in install) echo syspkgmgr:good ;; config) echo independent >>"$TRACE" ;; esac
+EOF
+  if bash "$FIXTURE/instantiate"; then fail 'unavailable package accepted'; fi
+  grep -q '^apt-get install -y broken good$' "$TRACE" || fail 'initial package batch missing'
+  grep -q '^apt-get install -y broken$' "$TRACE" || fail 'missing package was not retried'
+  grep -q '^apt-get install -y good$' "$TRACE" || fail 'valid package was not recovered'
+  grep -q '^independent$' "$TRACE" || fail 'recovered package owner remained blocked'
+  if grep -q BAD "$TRACE"; then fail 'unavailable package owner configured'; fi
+}
+
 test_maintenance_batches_bootstrap_packages() {
   maintenance_fixture
   local original_path="$PATH" command_path command
@@ -302,6 +339,7 @@ test_case 'maintenance: failed requirement hooks block only their owner' test_ma
 test_case 'maintenance: unknown requirements block installation' test_maintenance_unknown_requirement_blocks_installation
 test_case 'maintenance: casks use brew install' test_maintenance_cask_dispatch
 test_case 'maintenance: system packages use deduplicated batches' test_maintenance_batches_system_packages
+test_case 'maintenance: failed package batches retry only missing packages' test_maintenance_failed_batch_retries_missing_packages
 test_case 'maintenance: bootstrap packages share one transaction' test_maintenance_batches_bootstrap_packages
 test_case 'maintenance: Git defaults follow OS and preserve custom helpers' test_maintenance_git_defaults_and_custom_helpers
 test_case 'maintenance: Git migrates exact legacy pair and preserves host helpers' test_maintenance_git_migrates_only_legacy_pair
@@ -402,7 +440,7 @@ nvm() {
 }
 EOF
   cat >"$TEST_TMPDIR/bin/npm" <<'EOF'
-#!/bin/sh
+#!/usr/bin/env bash
 [[ "${NODE_ACTIVE:-}" = 1 ]] || exit 7
 printf 'npm %s\n' "$*" >>"$TRACE"
 [[ "$1" != list ]]
@@ -457,12 +495,56 @@ EOF
   assert_not_exists "$FIXTURE/home/.bashrc"
 }
 
+test_maintenance_go_removes_partial_tree_before_restore() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/go.sh" "$FIXTURE/machine-tools/"
+  export GO_BACKUP="$TEST_TMPDIR/go-backup"
+  cat >"$TEST_TMPDIR/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" = -o ]]; then : >"$2"; exit 0; fi
+  shift
+done
+exit 2
+EOF
+  cat >"$TEST_TMPDIR/bin/tar" <<'EOF'
+#!/usr/bin/env bash
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" = -C ]]; then directory=$2; break; fi
+  shift
+done
+mkdir -p "$directory/go/bin"
+printf '#!/bin/sh\nexit 0\n' >"$directory/go/bin/go"
+chmod +x "$directory/go/bin/go"
+EOF
+  cat >"$TEST_TMPDIR/bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+printf 'sudo %s\n' "$*" >>"$TRACE"
+case "$1" in
+  mktemp) mkdir -p "$GO_BACKUP/go"; printf '%s\n' "$GO_BACKUP" ;;
+  mv)
+    if [[ "$2" != /usr/local/go && "$2" != "$GO_BACKUP/go" && "$3" = /usr/local/go ]]; then
+      exit 1
+    fi
+    ;;
+esac
+EOF
+  chmod +x "$TEST_TMPDIR/bin/curl" "$TEST_TMPDIR/bin/tar" "$TEST_TMPDIR/bin/sudo"
+  if bash "$FIXTURE/machine-tools/go.sh" self-install; then fail 'failed Go install returned success'; fi
+  local remove_line restore_line
+  remove_line="$(grep -n '^sudo rm -rf -- /usr/local/go$' "$TRACE" | cut -d: -f1)"
+  restore_line="$(grep -n "^sudo mv $GO_BACKUP/go /usr/local/go$" "$TRACE" | cut -d: -f1)"
+  [[ -n "$remove_line" && -n "$restore_line" && "$remove_line" -lt "$restore_line" ]] ||
+    fail 'previous Go tree restored before removing partial destination'
+}
+
 test_case 'maintenance: existing Linux package managers dispatch without blanket upgrades' test_maintenance_linux_package_backends
 test_case 'maintenance: language backends preserve requests and configure last' test_maintenance_language_backends_and_ordering
 test_case 'maintenance: NVM activates Node for the npm phase' test_maintenance_nvm_activates_node_for_npm
 test_case 'maintenance: bootstrap runs with system Bash' test_maintenance_bash32_bootstrap
 test_case 'maintenance: every hook validates actions and supports help' test_maintenance_hook_protocol
 test_case 'maintenance: configuration completes missing setup without upgrades' test_maintenance_configs_do_not_upgrade_or_rewrite_payload
+test_case 'maintenance: failed Go install removes partial tree before restore' test_maintenance_go_removes_partial_tree_before_restore
 
 test_maintenance_skipped_requirement_does_not_block_independent_owner() {
   maintenance_fixture
