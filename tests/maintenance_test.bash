@@ -389,6 +389,37 @@ EOF
   if grep -qE 'self update|install -U|pipx install one two' "$TRACE"; then fail 'unexpected upgrade or batching'; fi
 }
 
+test_maintenance_nvm_activates_node_for_npm() {
+  maintenance_fixture
+  mkdir -p "$HOME/.nvm"
+  cat >"$HOME/.nvm/nvm.sh" <<'EOF'
+nvm() {
+  printf 'nvm %s\n' "$*" >>"$TRACE"
+  case "$1" in
+    version) printf 'v24.0.0\n' ;;
+    use) export NODE_ACTIVE=1 ;;
+  esac
+}
+EOF
+  cat >"$TEST_TMPDIR/bin/npm" <<'EOF'
+#!/bin/sh
+[[ "${NODE_ACTIVE:-}" = 1 ]] || exit 7
+printf 'npm %s\n' "$*" >>"$TRACE"
+[[ "$1" != list ]]
+EOF
+  chmod +x "$TEST_TMPDIR/bin/npm"
+  cat >"$FIXTURE/machine-tools/a.sh" <<'EOF'
+case "$1" in
+  install) printf '%s\n' nvm:--lts npm:example ;;
+  config) echo configured >>"$TRACE" ;;
+esac
+EOF
+  bash "$FIXTURE/instantiate"
+  grep -q '^nvm use --lts$' "$TRACE" || fail 'installed Node version was not activated'
+  grep -q '^npm install -g example$' "$TRACE" || fail 'npm did not inherit the active Node environment'
+  assert_eq configured "$(tail -1 "$TRACE")"
+}
+
 test_maintenance_bash32_bootstrap() {
   maintenance_fixture
   ln -s /bin/bash "$TEST_TMPDIR/bin/bash"
@@ -428,6 +459,7 @@ EOF
 
 test_case 'maintenance: existing Linux package managers dispatch without blanket upgrades' test_maintenance_linux_package_backends
 test_case 'maintenance: language backends preserve requests and configure last' test_maintenance_language_backends_and_ordering
+test_case 'maintenance: NVM activates Node for the npm phase' test_maintenance_nvm_activates_node_for_npm
 test_case 'maintenance: bootstrap runs with system Bash' test_maintenance_bash32_bootstrap
 test_case 'maintenance: every hook validates actions and supports help' test_maintenance_hook_protocol
 test_case 'maintenance: configuration completes missing setup without upgrades' test_maintenance_configs_do_not_upgrade_or_rewrite_payload

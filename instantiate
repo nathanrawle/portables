@@ -186,7 +186,7 @@ provider_ready() {
   done
 }
 
-execute_requirement() (
+execute_requirement() {
   local token="$1" owner="$2" value="${1#*:}" version python_path
   local args=()
   case "$token" in
@@ -227,6 +227,7 @@ execute_requirement() (
       load_nvm || return 1
       version="$(nvm version "$value")" || version=N/A
       [[ "$version" != N/A ]] || nvm install "$value"
+      nvm use "$value"
       ;;
     npm:*)
       load_nvm || return 1
@@ -234,7 +235,7 @@ execute_requirement() (
       npm list -g --depth=0 "$value" >/dev/null 2>&1 || npm install -g "$value"
       ;;
   esac
-)
+}
 
 system_packages=()
 for ((i = 0; i < ${#tokens[@]}; i++)); do
