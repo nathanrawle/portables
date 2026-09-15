@@ -1,27 +1,25 @@
 #!/usr/bin/env bash
 
-LOG_NAME="${LOG_NAME:+$LOG_NAME.}python:$1"
-functions log >/dev/null 2>&1 || . "$PORTABLES"/log
-
-[[ -n "$OS" ]] || OS="$(uname -s)"
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/maintenance.bash" || exit 1
+tool_init "$@"
 
 case "$1" in
   install)
-    case "$OS" in
-      # on macOS, I only really need brew python to get the essential system deps, like
-      # openssl & readline
-      Darwin) [[ -x "$(brew --prefix)/bin/python3" ]] || echo "syspkgmgr:python3" ;;
-      *) echo "syspkgmgr:python3-venv" ;;
+    case "$OS:$ID" in
+      Darwin:*) command -v python3 >/dev/null 2>&1 || echo syspkgmgr:python3 ;;
+      Linux:arch) echo syspkgmgr:python ;;
+      Linux:fedora) echo syspkgmgr:python3 ;;
+      Linux:*) echo syspkgmgr:python3-venv ;;
     esac
-    echo "uv:python:--default:--preview-features:python-install-default"
+    echo uv:python:--default:--preview-features:python-install-default
     ;;
   config)
-    mkdir -p ~/monty
-    if [[ ! -d ~/monty/.venv ]]; then
-      log "creating centralised python environment (monty) for sketching"
-      uv venv --directory ~/monty --allow-existing --prompt monty
+    require_commands uv
+    require_files "$HOME/.config/python/monty"
+    if [[ ! -x "$HOME/monty/.venv/bin/python" ]]; then
+      mkdir -p "$HOME/monty"
+      uv venv --directory "$HOME/monty" --allow-existing --prompt monty
     fi
-    log "kitting-out monty"
-    uv pip install -U --directory ~/monty -r ~/.config/python/monty
+    uv pip install --python "$HOME/monty/.venv/bin/python" -r "$HOME/.config/python/monty"
     ;;
 esac

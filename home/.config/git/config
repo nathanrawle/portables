@@ -5,11 +5,7 @@
   defaultBranch = main
 [include]
   path = gitbutler_config
-[credential]
-  helper = manager
-  helper = oauth
+  path = local.conf
+  path = portables-credentials.conf
 [credential "https://dev.azure.com"]
   useHttpPath = true
-[core]
-	excludesfile = /Users/nathan/.gitignore
-	excludesfile = /Users/nathan/.config/git/ignore

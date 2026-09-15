@@ -1,78 +1,52 @@
 #!/usr/bin/env bash
 
-LOG_NAME="${LOG_NAME:+$LOG_NAME.}zsh:$1"
-functions log >/dev/null 2>&1 || . "$PORTABLES"/log
-
-# Installs Zsh and its configurations.
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/maintenance.bash" || exit 1
+tool_init "$@"
 
 case "$1" in
-  install)
-    if ! command -v zsh >/dev/null 2>&1; then
-      echo syspkgmgr:zsh
-    fi
-    ;;
+  install) command -v zsh >/dev/null 2>&1 || echo syspkgmgr:zsh ;;
   config)
-    # activate some off-by-default builtin behaviours
-    export ZMV="$(zsh -c 'find $fpath -name zmv 2>/dev/null')"
-    zsh -c 'ln -sf "$ZMV" "$PORTABLES/home/.zfuns/zcp"'
-    zsh -c 'ln -sf "$ZMV" "$PORTABLES/home/.zfuns/zln"'
-    # Install Oh My Zsh if it's not already installed
-    if [ ! -d "$HOME/.oh-my-zsh" ]; then
-      log "installing Oh My Zsh…"
-      sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    require_commands zsh git
+    clone_missing https://github.com/ohmyzsh/ohmyzsh.git "$HOME/.oh-my-zsh"
+    require_files "$HOME/.oh-my-zsh/oh-my-zsh.sh"
+    custom="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+    for plugin in zsh-syntax-highlighting zsh-completions zsh-autosuggestions; do
+      clone_missing "https://github.com/zsh-users/$plugin.git" "$custom/plugins/$plugin" ||
+        failure "plugin $plugin"
+    done
+    clone_missing https://github.com/marlonrichert/zsh-autocomplete.git "$custom/plugins/zsh-autocomplete" ||
+      failure "plugin zsh-autocomplete"
+    clone_missing https://github.com/romkatv/powerlevel10k.git "$custom/themes/powerlevel10k" ||
+      failure "theme powerlevel10k"
+    zmv="$(zsh -fc 'for dir in $fpath; do if [[ -r "$dir/zmv" ]]; then print -r -- "$dir/zmv"; break; fi; done')"
+    require_files "$zmv"
+    if [[ ! -d "$HOME/.zfuns" ]]; then
+      require_external_destination "$HOME/.zfuns/zcp"
+      mkdir -p "$HOME/.zfuns"
     fi
-
-    # Define the custom directory for OMZ plugins and themes
-    ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
-
-    # zsh-syntax-highlighting
-    ZSH_SYNTAX_HIGHLIGHT_DIR="$ZSH_CUSTOM/plugins/zsh-syntax-highlighting"
-    if [ -d "$ZSH_SYNTAX_HIGHLIGHT_DIR" ]; then
-      log "updating zsh-syntax-highlighting"
-      git -C "$ZSH_SYNTAX_HIGHLIGHT_DIR" pull
-    else
-      log "installing zsh-syntax-highlighting"
-      git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_SYNTAX_HIGHLIGHT_DIR"
-    fi
-
-    # zsh-completions
-    ZSH_COMPLETIONS_DIR="$ZSH_CUSTOM/plugins/zsh-completions"
-    if [ -d "$ZSH_COMPLETIONS_DIR" ]; then
-      log "updating zsh-completions"
-      git -C "$ZSH_COMPLETIONS_DIR" pull
-    else
-      log "installing zsh-completions"
-      git clone --depth=1 https://github.com/zsh-users/zsh-completions.git "$ZSH_COMPLETIONS_DIR"
-    fi
-
-    # zsh-autosuggestions
-    ZSH_AUTOSUGGEST_DIR="$ZSH_CUSTOM/plugins/zsh-autosuggestions"
-    if [ -d "$ZSH_AUTOSUGGEST_DIR" ]; then
-      log "updating zsh-autosuggestions"
-      git -C "$ZSH_AUTOSUGGEST_DIR" pull
-    else
-      log "installing zsh-autosuggestions"
-      git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_AUTOSUGGEST_DIR"
-    fi
-
-    # zsh-autocomplete
-    ZSH_AUTOCOMPLETE_DIR="$ZSH_CUSTOM/plugins/zsh-autocomplete"
-    if [ -d "$ZSH_AUTOCOMPLETE_DIR" ]; then
-      log "updating zsh-autocomplete"
-      git -C "$ZSH_AUTOCOMPLETE_DIR" pull
-    else
-      log "installing zsh-autocomplete"
-      git clone --depth=1 https://github.com/marlon-richert/zsh-autocomplete.git "$ZSH_AUTOCOMPLETE_DIR"
-    fi
-
-    # Powerlevel10k theme
-    P10K_DIR="$ZSH_CUSTOM/themes/powerlevel10k"
-    if [ -d "$P10K_DIR" ]; then
-      log "updating powerlevel10k"
-      git -C "$P10K_DIR" pull
-    else
-      log "installing powerlevel10k"
-      git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$P10K_DIR"
-    fi
+    for name in zcp zln; do
+      destination="$HOME/.zfuns/$name"
+      managed=0
+      if [[ ! -e "$destination" && ! -L "$destination" ]]; then
+        managed=1
+      elif [[ -L "$destination" ]]; then
+        target="$(readlink "$destination")"
+        if [[ "$target" = "$PORTABLE_HOME/.zfuns/$name" ]]; then
+          managed=1
+        elif [[ ! -e "$destination" && "$target" = */share/zsh/*/functions/zmv ]]; then
+          managed=1
+        fi
+      fi
+      if [[ "$managed" = 1 ]]; then
+        if require_external_destination "$HOME/.zfuns/$name"; then
+          ln -sfn "$zmv" "$destination" || failure "function $name"
+        else
+          failure "function $name destination is inside repository"
+        fi
+      elif [[ ! -e "$destination" ]]; then
+        failure "broken function link: $destination"
+      fi
+    done
+    finish
     ;;
 esac

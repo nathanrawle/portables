@@ -1,34 +1,27 @@
 #!/usr/bin/env bash
 
-LOG_NAME="${LOG_NAME:+$LOG_NAME.}git:$1"
-functions log >/dev/null 2>&1 || . "$PORTABLES"/log
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/maintenance.bash" || exit 1
+tool_init "$@"
 
 case "$1" in
-  install)
-    command -v git >/dev/null 2>&1 \
-    || case "$OS" in
-      Darwin)
-        echo xcode
-        ;;
-      *) echo syspkgmgr:git ;;
-    esac
-    ;;
-  xcode)
-    log "installing xcode command-line tools"
-    xcode-select --install
-    ;;
+  install) command -v git >/dev/null 2>&1 || echo syspkgmgr:git ;;
   config)
-    log "configuring…"
-    if [[ -z "$(git config --global user.name)" ]]; then
-      [[ -n "$GIT_NAME" ]] || read -p 'What name should appear on your commits? ' GIT_NAME
-      git config --global user.name "$GIT_NAME"
-    fi
-    if [[ -z "$(git config --global user.email)" ]]; then
-      [[ -n "$GIT_EMAIL" ]] || read -p 'What email should git use? ' GIT_EMAIL
-      git config --global user.email "$GIT_EMAIL"
-    fi
-    git config --global --unset-all core.excludesfile 2>/dev/null || true # Ignore error if not set
-    git config --global --add core.excludesfile "$HOME/.gitignore"
-    git config --global --add core.excludesfile "$HOME/.config/git/ignore"
+    require_commands git
+    require_unmasked_xdg_git_config
+    for field in name email; do
+      if ! git config --global --includes --get "user.$field" >/dev/null; then
+        case "$field" in
+          name) value=${GIT_NAME:-}; variable=GIT_NAME ;;
+          email) value=${GIT_EMAIL:-}; variable=GIT_EMAIL ;;
+        esac
+        if [[ -z "$value" ]]; then
+          [[ -t 0 ]] || { log -e "set $variable or configure user.$field before retrying"; exit 1; }
+          read -r -p "Git $field: " value
+        fi
+        [[ -n "$value" ]] || { log -e "Git $field cannot be empty"; exit 1; }
+        user_git_file
+        git config --file "$GIT_USER_FILE" "user.$field" "$value"
+      fi
+    done
     ;;
 esac

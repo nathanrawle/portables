@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
 
-LOG_NAME="${LOG_NAME:+$LOG_NAME.}curl:$1"
-functions log >/dev/null 2>&1 || . "$PORTABLES"/log
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/maintenance.bash" || exit 1
+tool_init "$@"
 
 case "$1" in
-install)
-  command -v curl >/dev/null 2>&1 ||
-    case "$OS" in
-    Darwin)
-      echo xcode
-      ;;
-    *) echo syspkgmgr:curl ;;
-    esac
-  ;;
-xcode)
-  log "installing xcode command-line tools"
-  xcode-select --install
-  ;;
+  install) command -v curl >/dev/null 2>&1 || echo syspkgmgr:curl ;;
 esac

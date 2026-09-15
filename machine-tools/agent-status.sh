@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/maintenance.bash" || exit 1
+tool_init "$@"
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -50,9 +53,7 @@ merge_hooks() (
 
 case "${1:-}" in
   install)
-    if command -v jq >/dev/null 2>&1; then
-      echo self-install
-    else
+    if ! command -v jq >/dev/null 2>&1; then
       echo syspkgmgr:jq
     fi
     ;;

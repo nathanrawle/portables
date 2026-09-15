@@ -1,34 +1,20 @@
 #!/usr/bin/env bash
 
-[[ -n "${OS-}" ]] || OS="$(uname -s)"
-if [[ "$OS" = Linux ]]; then
-  [[ -n "${PRETTY_NAME-}" ]] || . /etc/os-release
-fi
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)/lib/maintenance.bash" || exit 1
+tool_init "$@"
+
 case "$1" in
-    install)
-      if ! command -v starship >/dev/null 2>&1; then
-      case "$OS" in
-        Darwin) echo syspkgmgr:starship ;;
-        Linux)
-          case "$ID" in
-            ubuntu)
-              if [[ $VERSION_ID -ge 25.04 ]]; then
-                echo syspkgmgr:starship
-              else
-                echo self-install
-              fi
-              ;;
-            debian)
-              if [[ $VERSION_ID -ge 13 ]]; then
-                echo syspkgmgr:starship
-              else
-                echo self-install
-              fi
-              ;;
-          esac
-          ;;
-      esac
-      fi
-      ;;
-    self-install) curl -sS https://starship.rs/install.sh | sh ;;
+  install)
+    if ! command -v starship >/dev/null 2>&1; then
+      if package_available starship; then echo syspkgmgr:starship; else echo self-install; fi
+    fi
+    ;;
+  self-install)
+    require_commands curl sh
+    temp="$(mktemp -d "${TMPDIR:-/tmp}/portables-starship.XXXXXX")"
+    trap 'rm -rf -- "$temp"' EXIT
+    curl -fsSL https://starship.rs/install.sh -o "$temp/install"
+    mkdir -p "$HOME/.local/bin"
+    sh "$temp/install" --yes --bin-dir "$HOME/.local/bin"
+    ;;
 esac

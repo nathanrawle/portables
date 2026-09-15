@@ -1,18 +1,41 @@
 #!/usr/bin/env bash
 
-THIS="$(realpath "$0" 2>/dev/null || command -v "$0")"
-HERE="$(dirname "$THIS")"
+SCRIPT=${BASH_SOURCE[0]}
+for ((hops = 0; hops < 40; hops++)); do
+  [[ -L "$SCRIPT" ]] || break
+  directory="$(cd -- "$(dirname -- "$SCRIPT")" && pwd -P)" || exit 1
+  target="$(readlink "$SCRIPT")" || exit 1
+  case "$target" in /*) SCRIPT="$target" ;; *) SCRIPT="$directory/$target" ;; esac
+done
+[[ ! -L "$SCRIPT" ]] || { printf 'script symlink loop\n' >&2; exit 1; }
+HERE="$(cd -- "$(dirname -- "$SCRIPT")" && pwd -P)" || exit 1
+. "$HERE/lib/maintenance.bash" || exit 1
+LOG_NAME=${LOG_NAME:-configure}
+export LOG_NAME
 
-[[ -n "$LOG_NAME" ]] || LOG_NAME="configure"
-. "$HERE"/log
-export log
-
-if [[ $# -gt 0 ]]; then
-  for tool in $@; do
-    bash "${HERE}/machine-tools/${tool}.sh" config
-  done
+if [[ ${1:-} = --help && $# = 1 ]]; then
+  printf 'Usage: configure [--] [tool...]\n'
+  exit 0
+fi
+[[ ${1:-} != -- ]] || shift
+tools=()
+if [[ $# = 0 ]]; then
+  shopt -s nullglob
+  tools=( "$MACHINE_TOOLS"/*.sh )
 else
-  for tool_script in "$HERE"/machine-tools/*.sh; do
-    bash "$tool_script" config
+  for tool in "$@"; do
+    case "$tool" in
+      ''|*[!a-zA-Z0-9_-]*) log -e "invalid tool name: $tool"; exit 2 ;;
+    esac
+    [[ -f "$MACHINE_TOOLS/$tool.sh" ]] || { log -e "unknown tool: $tool"; exit 2; }
+    duplicate=0
+    for existing in "${tools[@]}"; do
+      [[ "$existing" != "$MACHINE_TOOLS/$tool.sh" ]] || duplicate=1
+    done
+    [[ "$duplicate" = 1 ]] || tools+=( "$MACHINE_TOOLS/$tool.sh" )
   done
 fi
+for tool in "${tools[@]}"; do
+  bash "$tool" config || failure "config ${tool##*/}"
+done
+finish

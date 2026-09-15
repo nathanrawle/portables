@@ -1,10 +1,27 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 
-export LOG_NAME="reinstantiate"
-/usr/bin/env bash "$PORTABLES"/instantiate
-unset LOG_NAME
-read -k '?Would you like to replace the shell now? [Y|n] '
-if [[ ! "$REPLY" = n ]]; then
-  echo 'Replacing shell, please wait…'
-  exec $SHELL
+emulate -L zsh
+local -x LOG_NAME=reinstantiate
+local result=0 reply shell
+
+if [[ -z "${PORTABLES:-}" || ! -f "$PORTABLES/instantiate" ]]; then
+  print -u2 "reinstantiate: PORTABLES must identify the repository"
+  return 1
 fi
+command bash "$PORTABLES/instantiate" "$@" || result=$?
+(( result == 0 )) || return $result
+[[ "${1:-}" != --help && -o interactive && -t 0 && -t 1 ]] || return 0
+
+while true; do
+  read 'reply?Would you like to replace the shell now? [y|N] ' || return 0
+  case "$reply" in
+    y|Y)
+      shell=${SHELL:-}
+      [[ -n "$shell" && -x "$shell" ]] || shell=${commands[zsh]:-}
+      [[ -n "$shell" && -x "$shell" ]] || { print -u2 "Cannot find executable Zsh"; return 1; }
+      exec "$shell"
+      return $?
+      ;;
+    ''|n|N) return 0 ;;
+  esac
+done
