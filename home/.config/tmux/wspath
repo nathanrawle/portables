@@ -7,13 +7,41 @@
 abrvdir=${(D)${~1}}
 dirarry=("${(@s:/:)${abrvdir}}")
 
+trees=(🌲 🌳 🌴 🪾 🎄 🎋)
+integer tree_hash=0 char_code worktree_index=0 i
+
+for (( i = 1; i <= $#dirarry; i++ )); do
+  if [[ ${dirarry[i]} == .worktrees ]]; then
+    worktree_index=$i
+    break
+  fi
+done
+
+if (( worktree_index )); then
+  # A path-derived choice keeps tmux refreshes from changing the displayed tree.
+  for char in ${(s::)1}; do
+    printf -v char_code '%d' "'$char"
+    (( tree_hash = (tree_hash * 31 + char_code) % 2147483647 ))
+  done
+  tree=${trees[$(( tree_hash % $#trees + 1 ))]}
+
+  for (( i = 1; i <= $#dirarry; i++ )); do
+    [[ ${dirarry[i]} == .worktrees ]] && dirarry[i]=$tree
+  done
+fi
+
 if (( $#dirarry <= 3 )); then
-  print "$abrvdir"
+  print "${(j:/:)dirarry}"
   exit
 fi
+
+if (( worktree_index > 1 && worktree_index < $#dirarry - 1 )); then
+  print "${dirarry[1]}/$tree/${(j:/:)dirarry[-2,-1]}"
+  exit
+fi
+
 print "${dirarry[1]}/…/${(j:/:)dirarry[-2,-1]}"
 exit
 
 # bash-friendly snippet if I ever decide to implement a fallback
 # sed -E "s@^$HOME@~@; s@([^/])[^/]*/@\1/@g" <<< $1
-
