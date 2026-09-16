@@ -263,6 +263,10 @@ Layout on a new window:
 - with an agent and shells: the first shell goes below the agent, later shells split to the right
 - without an agent and with shells: the first shell goes to the right of the editor, later shells split to the right
 
+A new tmux session keeps its project-derived session name and names its first
+window `main` followed by a randomly selected tree emoji. Windows added to an
+existing session keep their branch- or directory-derived names.
+
 ## Peer Mode
 
 `--peer` preserves normal project, branch, and worktree resolution, but puts

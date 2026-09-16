@@ -2034,12 +2034,14 @@ _taw_can_reuse_existing_window() {
 
 _taw_create_tmux_window() {
   local _taw_created _taw_created_window _taw_created_pane _taw_window_id _taw_initial_pane
+  local _taw_tmux_window_name="$_taw_window_name"
   local _taw_editor_pane _taw_focus_pane _taw_shell_is_initial=false
   local _taw_created_session_id _taw_created_session_name _taw_session_status
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
   local _taw_shell_anchor_pane
-  local _taw_existing_session_id _taw_existing_window_id
+  local _taw_existing_session_id _taw_existing_window_id _taw_tree
   local -a _taw_initial_cmd_args
+  local -a _taw_trees=(🌲 🌳 🌴 🪾 🎄 🎋)
 
   if [[ "$_taw_editor_enabled" == true ]]; then
     _taw_initial_cmd_args=( "$_taw_editor_cmd" )
@@ -2097,9 +2099,11 @@ _taw_create_tmux_window() {
       _taw_die "could not resolve tmux session: $_taw_session_name"
       return 1
     else
+      _taw_tree="${_taw_trees[$(( RANDOM % $#_taw_trees + 1 ))]}"
+      _taw_tmux_window_name="main $_taw_tree"
       _taw_created="$(tmux new-session -d -P \
         -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}' \
-        -s "$_taw_session_name" -n "$_taw_window_name" -c "$_taw_window_dir" \
+        -s "$_taw_session_name" -n "$_taw_tmux_window_name" -c "$_taw_window_dir" \
         "${_taw_initial_cmd_args[@]}")" || {
         _taw_die "could not create tmux session: $_taw_session_name"
         return 1
@@ -2128,7 +2132,7 @@ _taw_create_tmux_window() {
   fi
   tmux set-window-option -t "$_taw_window_id" automatic-rename off >/dev/null || return 1
   tmux set-window-option -t "$_taw_window_id" allow-rename off >/dev/null || return 1
-  tmux rename-window -t "$_taw_window_id" "$_taw_window_name" >/dev/null || return 1
+  tmux rename-window -t "$_taw_window_id" "$_taw_tmux_window_name" >/dev/null || return 1
 
   _taw_shell_anchor_pane="$_taw_initial_pane"
   if [[ "$_taw_agent_enabled" == true && "$_taw_editor_enabled" == true ]]; then
