@@ -41,25 +41,24 @@ cmd-semicolon = 'mode service'
 cmd-shift-1 = 'mode kick'
 cmd-shift-2 = 'mode distribute'
 
-alt-slash = 'layout tiles horizontal vertical'
-alt-comma = 'layout accordion horizontal vertical'
-alt-period = 'layout tiles accordion'
+alt-comma = 'layout accordion tiles'
+alt-period = 'layout horizontal vertical'
+cmd-shift-f = ['layout floating tiling', 'mode main']
 
 cmd-shift-h = 'move left'
 cmd-shift-j = 'move down'
 cmd-shift-k = 'move up'
 cmd-shift-l = 'move right'
 
+cmd-ctrl-h = 'focus left --boundaries-action wrap-around-the-workspace'
+cmd-ctrl-j = 'focus down --boundaries-action wrap-around-the-workspace'
+cmd-ctrl-k = 'focus up --boundaries-action wrap-around-the-workspace'
+cmd-ctrl-l = 'focus right --boundaries-action wrap-around-the-workspace'
+
 cmd-ctrl-alt-h = 'join-with left'
 cmd-ctrl-alt-j = 'join-with down'
 cmd-ctrl-alt-k = 'join-with up'
 cmd-ctrl-alt-l = 'join-with right'
-
-alt-h = 'focus left --boundaries-action wrap-around-the-workspace'
-cmd-alt-h = 'focus left --boundaries-action wrap-around-the-workspace'
-cmd-alt-j = 'focus down --boundaries-action wrap-around-the-workspace'
-cmd-alt-k = 'focus up --boundaries-action wrap-around-the-workspace'
-cmd-alt-l = 'focus right --boundaries-action wrap-around-the-workspace'
 
 cmd-shift-minus = 'resize smart -50'
 cmd-shift-equal = 'resize smart +50'
@@ -84,13 +83,13 @@ alt-e = 'workspace E'
 alt-f = 'workspace F'
 alt-g = 'workspace G'
 alt-i = 'workspace I'
-alt-m = 'workspace M'
+cmd-alt-m = 'workspace M'
 alt-n = 'workspace N'
 alt-o = 'workspace O'
 alt-p = 'workspace P'
 alt-q = 'workspace Q'
 cmd-alt-r = 'workspace R' # alt-r = excalidraw view-mode
-alt-s = 'workspace S'     # alt-s = excalidraw Snap to objects
+cmd-alt-s = 'workspace S' # alt-s = excalidraw Snap to objects
 alt-t = 'workspace T'
 alt-u = 'workspace U'
 alt-v = 'workspace V'
@@ -134,7 +133,6 @@ alt-shift-z = ['move-node-to-workspace Z', 'workspace Z'] # excalidraw
 [mode.service.binding]
 esc = ['reload-config', 'mode main']
 r = ['flatten-workspace-tree', 'mode main']
-f = ['layout floating tiling', 'mode main']
 backspace = ['close-all-windows-but-current', 'mode main']
 
 [mode.distribute.binding]
@@ -205,16 +203,29 @@ y = ['move-node-to-workspace Y', 'mode main']
 z = ['move-node-to-workspace Z', 'mode main']
 
 [workspace-to-monitor-force-assignment]
-1 = ['DELL P3424WEB', 'dell p2724deb', 'dell p2425he']
-2 = ['DELL P3424WEB', 'dell p2723d', 'dell s2425hsm', 'dell p2425he']
-V = ['DELL P3424WEB', 'dell p2723d', 'dell s2425hsm', 'dell p2425he']
+1 = ['DELL P3424WEB', 'DELL P3426WEB', 'dell p2724deb', 'dell p2425he']
+2 = [
+  'DELL P3424WEB',
+  'DELL P3426WEB',
+  'dell p2723d',
+  'dell s2425hsm',
+  'dell p2425he',
+  'dell p2724deb',
+]
+V = [
+  'DELL P3424WEB',
+  'DELL P3426WEB',
+  'dell p2723d',
+  'dell s2425hsm',
+  'dell p2425he',
+  'dell p2724deb',
+]
 
 [[on-window-detected]]
 if.app-id = 'com.apple.finder'
 run = ['layout floating']
 
 [[on-window-detected]]
-if.during-aerospace-startup = true
 if.app-id = 'company.thebrowser.Browser'
 run = ['move-node-to-workspace 1']
 
