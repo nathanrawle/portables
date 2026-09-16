@@ -140,27 +140,27 @@ test_tmux_status_formats_show_agent_state_and_priority() {
       -p -t agent-status:agents '#{E:window-status-current-format}'
   )"
   assert_tmux_status_contains "$window_tab" '󰹇' \
-    "expected the window icon in the flag slot"
-  assert_tmux_status_not_contains "$window_tab" '*' \
-    "expected the window icon to replace tmux flags"
+    "expected the window icon alongside the window name"
+  assert_tmux_status_contains "$window_tab" '*' \
+    "expected tmux flags alongside the window icon"
   inactive_window_tab="$(
     "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" display-message \
       -p -t agent-status:agents '#{E:window-status-format}'
   )"
   assert_tmux_status_contains "$inactive_window_tab" '󰹇' \
-    "expected the inactive-format icon in the flag slot"
-  assert_tmux_status_not_contains "$inactive_window_tab" '*' \
-    "expected the inactive-format icon to replace tmux flags"
+    "expected the inactive-format icon alongside the window name"
+  assert_tmux_status_contains "$inactive_window_tab" '*' \
+    "expected inactive-format tmux flags alongside the window icon"
 
   set_tmux_agent_status "$second" codex thinking
   pane_tabs="$(
     "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" display-message \
       -p -t agent-status:agents '#{E:status-format[1]}'
   )"
-  assert_tmux_status_contains "$pane_tabs" '"sleep 120" 󰹇' \
-    "expected the active pane icon after its title"
-  assert_tmux_status_contains "$pane_tabs" '"sleep 120" 󰔟' \
-    "expected the inactive pane icon after its title"
+  assert_tmux_status_contains "$pane_tabs" '󰹇 "sleep 120"' \
+    "expected the active pane icon before its title"
+  assert_tmux_status_contains "$pane_tabs" '󰔟 "sleep 120"' \
+    "expected the inactive pane icon before its title"
 }
 
 test_case "tmux agent status: formats show pane state and window priority" \
