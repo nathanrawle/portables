@@ -54,6 +54,7 @@ cmd-ctrl-h = 'focus left --boundaries-action wrap-around-the-workspace'
 cmd-ctrl-j = 'focus down --boundaries-action wrap-around-the-workspace'
 cmd-ctrl-k = 'focus up --boundaries-action wrap-around-the-workspace'
 cmd-ctrl-l = 'focus right --boundaries-action wrap-around-the-workspace'
+cmd-shift-backtick = 'focus right --boundaries-action wrap-around-the-workspace'
 
 cmd-ctrl-alt-h = 'join-with left'
 cmd-ctrl-alt-j = 'join-with down'
@@ -83,13 +84,13 @@ alt-e = 'workspace E'
 alt-f = 'workspace F'
 alt-g = 'workspace G'
 alt-i = 'workspace I'
-cmd-alt-m = 'workspace M'
+alt-m = 'workspace M'
 alt-n = 'workspace N'
 alt-o = 'workspace O'
 alt-p = 'workspace P'
 alt-q = 'workspace Q'
 cmd-alt-r = 'workspace R' # alt-r = excalidraw view-mode
-cmd-alt-s = 'workspace S' # alt-s = excalidraw Snap to objects
+alt-s = 'workspace S'     # alt-s = excalidraw Snap to objects
 alt-t = 'workspace T'
 alt-u = 'workspace U'
 alt-v = 'workspace V'
