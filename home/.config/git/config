@@ -2,6 +2,8 @@
   name = "Nathan Rawle"
 [init]
   defaultBranch = main
+[worktree]
+  guessRemote = true
 [include]
   path = gitbutler_config
   path = local.conf
