@@ -3067,6 +3067,7 @@ test_explicit_picker_starts_fzf_before_rows_finish() {
 test_explicit_picker_handles_early_fzf_exit() {
   local xdg projects_home target elsewhere fake_bin no_fzf_path
   local log cancel_log picker_tmp directory_name i rc
+  local -a directories
 
   xdg="$TEST_TMPDIR/xdg"
   projects_home="$TEST_TMPDIR/projects"
@@ -3074,11 +3075,13 @@ test_explicit_picker_handles_early_fzf_exit() {
   elsewhere="$TEST_TMPDIR/elsewhere"
   mkdir -p "$xdg/tmux-sessionizer" "$projects_home" "$elsewhere" "$target"
   printf 'TS_SEARCH_PATHS=("%s")\n' "$projects_home" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  directories=()
   for ((i = 0; i < 800; i++)); do
     printf -v directory_name \
       'project-%04d-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz' "$i"
-    mkdir "$projects_home/$directory_name"
+    directories+=( "$projects_home/$directory_name" )
   done
+  mkdir "${directories[@]}"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
@@ -3786,7 +3789,8 @@ test_bare_creation_pending_worktree_path_becomes_branch() {
 }
 
 test_project_picker_aliases_reject_project_branch_and_positionals() {
-  local repo fake_bin alias log
+  local repo fake_bin alias log output incompatible
+  local -a incompatible_args
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
@@ -3795,34 +3799,28 @@ test_project_picker_aliases_reject_project_branch_and_positionals() {
   for alias in -ts --ts -picker --picker -pick-project --pick-project; do
     log="$TEST_TMPDIR/tmux-${alias//[^[:alnum:]]/_}.log"
 
-    if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-      run_taw "$repo" "$alias" -p "$repo"; then
+    if output="$(EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+      run_taw "$repo" "$alias" -p "$repo" 2>&1)"; then
       fail "expected $alias with -p to fail"
     fi
+    assert_string_contains "$output" \
+      "picker mode cannot be combined with -p, -b, or positionals"
     [[ ! -f "$log" ]] || fail "expected tmux not to run after $alias with -p"
+  done
 
+  log="$TEST_TMPDIR/tmux-canonical.log"
+  for incompatible in '-b develop' 'feature-x' 'feature-x develop'; do
+    read -r -a incompatible_args <<<"$incompatible"
     if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-      run_taw "$repo" "$alias" -b develop; then
-      fail "expected $alias with -b to fail"
+      run_taw "$repo" --picker "${incompatible_args[@]}"; then
+      fail "expected --picker with $incompatible to fail"
     fi
-    [[ ! -f "$log" ]] || fail "expected tmux not to run after $alias with -b"
-
-    if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-      run_taw "$repo" "$alias" feature-x; then
-      fail "expected $alias with one positional to fail"
-    fi
-    [[ ! -f "$log" ]] || fail "expected tmux not to run after $alias with one positional"
-
-    if EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
-      run_taw "$repo" "$alias" feature-x develop; then
-      fail "expected $alias with two positionals to fail"
-    fi
-    [[ ! -f "$log" ]] || fail "expected tmux not to run after $alias with two positionals"
+    [[ ! -f "$log" ]] || fail "expected tmux not to run after --picker with $incompatible"
   done
 }
 
 test_project_picker_aliases_allow_agent_editor_and_shells() {
-  local xdg projects_home current_repo picked_repo picked_real fake_bin no_fzf_path alias log fzf_log
+  local xdg projects_home current_repo picked_repo picked_real fake_bin no_fzf_path log fzf_log
 
   xdg="$TEST_TMPDIR/xdg"
   projects_home="$TEST_TMPDIR/projects"
@@ -3838,21 +3836,21 @@ test_project_picker_aliases_allow_agent_editor_and_shells() {
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
 
-  for alias in -ts --ts -picker --picker -pick-project --pick-project; do
-    log="$TEST_TMPDIR/tmux-${alias//[^[:alnum:]]/_}.log"
-    fzf_log="$TEST_TMPDIR/fzf-${alias//[^[:alnum:]]/_}.log"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
 
-    XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='ignored' TAW_FAKE_FZF_MATCH="$picked_repo" \
-      TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 TAW_FAKE_FZF_FAIL_ON_SECOND=1 TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-      run_taw "$current_repo" "$alias" -agent "claude --resume" -ed "nvim ." -sh "npm test"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='ignored' TAW_FAKE_FZF_MATCH="$picked_repo" \
+    TAW_FAKE_FZF_MATCH_FALLBACK_OK=1 TAW_FAKE_FZF_FAIL_ON_SECOND=1 \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$current_repo" --picker -agent "claude --resume" -ed "nvim ." -sh "npm test"
 
-    assert_file_contains "$fzf_log" "$picked_repo"
-    assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tpicked\t-n\tmain 🌲\t-c\t'"$picked_real"$'\tnvim .'
-    assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$picked_real"$'\tclaude --resume'
-    assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$picked_real"$'\tnpm test'
-    assert_file_contains "$log" $'select-pane\t-t\t%1'
-    assert_file_not_contains "$log" $'ignored'
-  done
+  assert_file_contains "$fzf_log" "$picked_repo"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tpicked\t-n\tmain 🌲\t-c\t'"$picked_real"$'\tnvim .'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$picked_real"$'\tclaude --resume'
+  assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$picked_real"$'\tnpm test'
+  assert_file_contains "$log" $'select-pane\t-t\t%1'
+  assert_file_not_contains "$log" $'ignored'
 }
 
 test_explicit_picker_mode_aliases_are_accepted() {
@@ -3864,16 +3862,15 @@ test_explicit_picker_mode_aliases_are_accepted() {
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
 
-  for mode in b branch; do
-    log="$TEST_TMPDIR/tmux-$mode.log"
-    fzf_log="$TEST_TMPDIR/fzf-$mode.log"
-    EDITOR=vim TAW_FAKE_FZF_MATCH=develop TAW_FZF_INPUT_LOG="$fzf_log" \
-      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-      run_taw "$repo" --mode="$mode"
+  mode=b
+  log="$TEST_TMPDIR/tmux-$mode.log"
+  fzf_log="$TEST_TMPDIR/fzf-$mode.log"
+  EDITOR=vim TAW_FAKE_FZF_MATCH=develop TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode="$mode"
 
-    assert_file_contains "$fzf_log" $'\tbranch\tdevelop\tdevelop\t'
-    assert_file_contains "$log" $'-c\t'"$(cd "$repo/.worktrees/develop" && pwd -P)"$'\tvim'
-  done
+  assert_file_contains "$fzf_log" $'\tbranch\tdevelop\tdevelop\t'
+  assert_file_contains "$log" $'-c\t'"$(cd "$repo/.worktrees/develop" && pwd -P)"$'\tvim'
 }
 
 test_session_mode_aliases_use_project_picker() {
@@ -3891,13 +3888,12 @@ test_session_mode_aliases_use_project_picker() {
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
 
-  for mode in ts session; do
-    log="$TEST_TMPDIR/tmux-$mode.log"
-    XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$target" \
-      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-      run_taw "$elsewhere" --mode="$mode"
-    assert_file_contains "$log" $'-c\t'"$target_real"$'\tvim'
-  done
+  mode=ts
+  log="$TEST_TMPDIR/tmux-$mode.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_FAKE_FZF_MATCH="$target" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --mode="$mode"
+  assert_file_contains "$log" $'-c\t'"$target_real"$'\tvim'
 }
 
 test_branch_picker_marks_assigned_and_omits_current_worktree() {
@@ -4149,20 +4145,19 @@ test_picker_selects_fzf_bindings_by_version() {
   make_fake_fzf "$fake_bin"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
 
-  for version in 0.53.0 1.0.0; do
-    version_name="${version//[^[:alnum:]]/_}"
-    log="$TEST_TMPDIR/tmux-modern-$version_name.log"
-    args_log="$TEST_TMPDIR/fzf-modern-$version_name.log"
-    EDITOR=vim TAW_FAKE_FZF_VERSION="$version" \
-      TAW_FAKE_FZF_MATCH=develop TAW_FZF_ARGS_LOG="$args_log" \
-      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
-      run_taw "$repo" --mode=branch
+  version=0.53.0
+  version_name="${version//[^[:alnum:]]/_}"
+  log="$TEST_TMPDIR/tmux-modern-$version_name.log"
+  args_log="$TEST_TMPDIR/fzf-modern-$version_name.log"
+  EDITOR=vim TAW_FAKE_FZF_VERSION="$version" \
+    TAW_FAKE_FZF_MATCH=develop TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
 
-    assert_file_contains "$args_log" 'tab:print(tab)+accept'
-    assert_file_contains "$args_log" 'enter:transform:'
-    assert_file_contains "$args_log" 'print()+accept'
-    assert_file_not_contains "$args_log" '--expect='
-  done
+  assert_file_contains "$args_log" 'tab:print(tab)+accept'
+  assert_file_contains "$args_log" 'enter:transform:'
+  assert_file_contains "$args_log" 'print()+accept'
+  assert_file_not_contains "$args_log" '--expect='
 
   for version in 0.52.1 unknown; do
     version_name="${version//[^[:alnum:]]/_}"

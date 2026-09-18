@@ -7,11 +7,177 @@ REPO_ROOT="$(cd -- "$TESTS_DIR/.." && pwd)"
 
 export TESTS_DIR REPO_ROOT
 
-. "$TESTS_DIR/lib/harness.bash"
+TESTS_PARALLEL_TMP=
 
-if [[ $# -gt 0 ]]; then
-  test_files=( "$@" )
-else
+cleanup_parallel_tests() {
+  [[ -n "$TESTS_PARALLEL_TMP" && -d "$TESTS_PARALLEL_TMP" ]] \
+    && rm -rf "$TESTS_PARALLEL_TMP"
+}
+
+usage() {
+  cat <<'EOF'
+Usage: tests/run [--filter TEXT]... [--jobs N] [test_file ...]
+       tests/run --list [--filter TEXT]... [test_file ...]
+
+With no files or filters, the full suite uses the available logical cores.
+Explicit files and filters run sequentially unless --jobs or TEST_JOBS is set.
+EOF
+}
+
+detect_test_jobs() {
+  local jobs
+
+  jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+  if [[ ! "$jobs" =~ ^[1-9][0-9]*$ ]] && command -v sysctl >/dev/null 2>&1; then
+    jobs="$(sysctl -n hw.logicalcpu 2>/dev/null || true)"
+  fi
+  [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=1
+  printf '%s\n' "$jobs"
+}
+
+run_parallel() {
+  local jobs="$1"
+  shift
+  local results_parent results_dir worker_index worker_status
+  local expected_discovered=-1 expected_matched=-1
+  local discovered matched run failed result_count=0 total_run=0 total_failed=0
+  local result status name
+  local -a worker_args pids logs
+
+  results_parent="${TMPDIR:-/tmp}"
+  results_parent="${results_parent%/}"
+  results_dir="$(mktemp -d "$results_parent/portables-test-results.XXXXXX")"
+  TESTS_PARALLEL_TMP="$results_dir"
+  trap cleanup_parallel_tests EXIT
+
+  worker_args=( "$@" )
+  for ((worker_index = 0; worker_index < jobs; worker_index++)); do
+    logs[$worker_index]="$results_dir/worker-$worker_index.log"
+    TESTS_WORKER=1 TESTS_SHARD_COUNT="$jobs" TESTS_SHARD_INDEX="$worker_index" \
+      TESTS_RESULTS_DIR="$results_dir" \
+      "$TESTS_DIR/run" "${worker_args[@]}" >"${logs[$worker_index]}" 2>&1 &
+    pids[$worker_index]=$!
+  done
+
+  worker_status=0
+  for ((worker_index = 0; worker_index < jobs; worker_index++)); do
+    wait "${pids[$worker_index]}" || worker_status=1
+  done
+
+  for ((worker_index = 0; worker_index < jobs; worker_index++)); do
+    if [[ ! -f "$results_dir/stats-$worker_index" ]]; then
+      printf 'test worker %d did not report results\n' "$worker_index" >&2
+      [[ ! -s "${logs[$worker_index]}" ]] || sed 's/^/    /' "${logs[$worker_index]}" >&2
+      worker_status=1
+      continue
+    fi
+
+    read -r discovered matched run failed <"$results_dir/stats-$worker_index"
+    if [[ $expected_discovered -eq -1 ]]; then
+      expected_discovered="$discovered"
+      expected_matched="$matched"
+    elif [[ "$discovered $matched" != "$expected_discovered $expected_matched" ]]; then
+      printf 'test workers discovered different test sets\n' >&2
+      worker_status=1
+    fi
+    total_run=$((total_run + run))
+    total_failed=$((total_failed + failed))
+  done
+
+  shopt -s nullglob
+  for result in "$results_dir"/result-*; do
+    result_count=$((result_count + 1))
+    IFS=$'\t' read -r status name <"$result"
+    if [[ "$status" = ok ]]; then
+      printf 'ok %d - %s\n' "$result_count" "$name"
+    else
+      printf 'not ok %d - %s\n' "$result_count" "$name"
+      sed '1d; s/^/    /' "$result"
+    fi
+  done
+  shopt -u nullglob
+
+  if [[ $expected_matched -lt 1 ]]; then
+    printf 'no tests matched the requested selection\n' >&2
+    return 1
+  fi
+  if [[ $result_count -ne $expected_matched || $total_run -ne $expected_matched ]]; then
+    printf 'expected %d test result(s), received %d\n' \
+      "$expected_matched" "$result_count" >&2
+    worker_status=1
+  fi
+
+  printf '\n%d test(s), %d failure(s)\n' "$result_count" "$total_failed"
+  [[ $worker_status -eq 0 && $total_failed -eq 0 ]]
+}
+
+TEST_FILTERS=()
+test_files=()
+jobs="${TEST_JOBS:-}"
+jobs_set=0
+list_only=0
+files_supplied=0
+
+[[ -z "$jobs" ]] || jobs_set=1
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --filter)
+      [[ $# -ge 2 ]] || { printf '%s\n' '--filter requires text' >&2; exit 2; }
+      TEST_FILTERS+=( "$2" )
+      shift 2
+      ;;
+    --filter=*)
+      TEST_FILTERS+=( "${1#*=}" )
+      shift
+      ;;
+    --jobs)
+      [[ $# -ge 2 ]] || { printf '%s\n' '--jobs requires a count' >&2; exit 2; }
+      jobs="$2"
+      jobs_set=1
+      shift 2
+      ;;
+    --jobs=*)
+      jobs="${1#*=}"
+      jobs_set=1
+      shift
+      ;;
+    --list)
+      list_only=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        test_files+=( "$1" )
+        files_supplied=1
+        shift
+      done
+      ;;
+    -*)
+      printf 'unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      test_files+=( "$1" )
+      files_supplied=1
+      shift
+      ;;
+  esac
+done
+
+if [[ ${#TEST_FILTERS[@]} -gt 0 ]]; then
+  for filter in "${TEST_FILTERS[@]}"; do
+    [[ -n "$filter" ]] || { printf '%s\n' '--filter text cannot be empty' >&2; exit 2; }
+  done
+fi
+
+if [[ ${#test_files[@]} -eq 0 ]]; then
   shopt -s nullglob
   test_files=( "$TESTS_DIR"/*_test.bash )
   shopt -u nullglob
@@ -21,6 +187,41 @@ if [[ ${#test_files[@]} -eq 0 ]]; then
   printf 'no test files found\n' >&2
   exit 1
 fi
+for test_file in "${test_files[@]}"; do
+  [[ -f "$test_file" ]] || { printf 'test file not found: %s\n' "$test_file" >&2; exit 1; }
+done
+
+if [[ $list_only -eq 1 && $jobs_set -eq 1 ]]; then
+  printf '%s\n' '--jobs cannot be used with --list' >&2
+  exit 2
+fi
+
+if [[ $jobs_set -eq 0 ]]; then
+  if [[ $files_supplied -eq 0 && ${#TEST_FILTERS[@]} -eq 0 && $list_only -eq 0 ]]; then
+    jobs="$(detect_test_jobs)"
+  else
+    jobs=1
+  fi
+fi
+[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { printf 'invalid test job count: %s\n' "$jobs" >&2; exit 2; }
+
+parallel_args=()
+if [[ ${#TEST_FILTERS[@]} -gt 0 ]]; then
+  for filter in "${TEST_FILTERS[@]}"; do
+    parallel_args+=( --filter "$filter" )
+  done
+fi
+parallel_args+=( --jobs 1 -- "${test_files[@]}" )
+
+if [[ "$jobs" -gt 1 && -z "${TESTS_WORKER:-}" ]]; then
+  run_parallel "$jobs" "${parallel_args[@]}"
+  exit
+fi
+
+TESTS_LIST_ONLY="$list_only"
+export TESTS_LIST_ONLY
+
+. "$TESTS_DIR/lib/harness.bash"
 
 for test_file in "${test_files[@]}"; do
   . "$test_file"
