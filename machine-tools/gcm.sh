@@ -13,9 +13,8 @@ case "$1" in
     ;;
   config)
     require_commands git
-    require_unmasked_xdg_git_config
     case "$OS" in
-      Darwin) defaults=( manager ) ;;
+      Darwin) defaults=( manager osxkeychain ) ;;
       Linux) defaults=( 'cache --timeout 21600' oauth ) ;;
       *) log -e "unsupported credential platform: $OS"; exit 1 ;;
     esac
@@ -29,23 +28,64 @@ case "$1" in
     require_external_destination "$managed"
     mkdir -p "$config_dir"
     user_git_file
-    legacy_pair=0
+    migrate_helpers=0
+    migrate_excludes=0
+    migrate_include=0
+    migrate_gh_hosts=()
+    gh_path="$(command -v gh || true)"
     if [[ -f "$GIT_USER_FILE" ]]; then
       legacy="$(git config --file "$GIT_USER_FILE" --get-all credential.helper || true)"
-      if [[ "$legacy" = $'manager\noauth' ]]; then
-        legacy_pair=1
+      if { [[ "$OS" = Darwin ]] && [[ "$legacy" = manager ]]; } ||
+        [[ "$legacy" = $'manager\noauth' ]]; then
+        migrate_helpers=1
+      fi
+      legacy_excludes="$(git config --file "$GIT_USER_FILE" --get-all core.excludesFile || true)"
+      if [[ "$legacy_excludes" = "$HOME/.gitignore"$'\n'"$config_dir/ignore" ]]; then
+        migrate_excludes=1
+      fi
+      if [[ -z "${GIT_CONFIG_GLOBAL:-}" ]] &&
+        git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null |
+          grep -Fxq "$managed"; then
+        migrate_include=1
+      fi
+      if [[ -n "$gh_path" ]]; then
+        for host in github.com gist.github.com; do
+          legacy_host="$(git config --file "$GIT_USER_FILE" \
+            --get-all "credential.https://$host.helper" || true)"
+          if [[ "$legacy_host" = $'\n'"!$gh_path auth git-credential" ]]; then
+            migrate_gh_hosts+=( "$host" )
+          fi
+        done
       fi
     fi
     temp="$(mktemp -d "$config_dir/.portables-credentials.XXXXXX")"
     trap 'rm -rf -- "$temp"' EXIT
-    rc=0
-    git config --global --includes --show-origin -z --get-all credential.helper >"$temp/helpers" || rc=$?
-    [[ "$rc" -le 1 ]] || exit "$rc"
     custom=0
-    while IFS= read -r -d '' origin && IFS= read -r -d '' helper; do
-      if [[ "$legacy_pair" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then continue; fi
-      [[ "$origin" = "file:$managed" || "${origin#file:}" -ef "$managed" ]] || custom=1
-    done <"$temp/helpers"
+    custom_helpers=()
+    if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
+      sources=( "$GIT_USER_FILE" )
+    else
+      sources=( "$config_dir/config" "$HOME/.gitconfig" )
+    fi
+    for source in "${sources[@]}"; do
+      [[ -r "$source" ]] || continue
+      rc=0
+      git config --file "$source" --includes --show-origin -z \
+        --get-all credential.helper >"$temp/helpers" || rc=$?
+      [[ "$rc" -le 1 ]] || exit "$rc"
+      while IFS= read -r -d '' origin && IFS= read -r -d '' helper; do
+        if [[ "$migrate_helpers" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
+          continue
+        fi
+        if [[ "$origin" = "file:$managed" || "${origin#file:}" -ef "$managed" ]]; then
+          continue
+        fi
+        custom=1
+        found=0
+        for existing in "${custom_helpers[@]}"; do [[ "$existing" != "$helper" ]] || found=1; done
+        [[ "$found" = 1 ]] || custom_helpers+=( "$helper" )
+      done <"$temp/helpers"
+    done
     printf '%s\n' "$marker" >"$temp/config"
     if [[ "$custom" = 0 ]]; then
       case "$OS" in
@@ -55,17 +95,42 @@ case "$1" in
       for helper in "${defaults[@]}"; do
         git config --file "$temp/config" --add credential.helper "$helper"
       done
+      fallbacks=( "${defaults[@]}" )
     else
       log -i "preserving custom credential helpers"
+      fallbacks=( "${custom_helpers[@]}" )
     fi
-    if [[ "$legacy_pair" = 1 ]]; then
-      backup="$(mktemp "$GIT_USER_FILE.bak.XXXXXX")"
-      cp -p "$GIT_USER_FILE" "$backup"
-      git config --file "$GIT_USER_FILE" --unset-all credential.helper
-      log -i "legacy helper pair backed up to $backup"
+    if [[ -n "$gh_path" ]]; then
+      for host in github.com gist.github.com; do
+        git config --file "$temp/config" --add "credential.https://$host.helper" ''
+        git config --file "$temp/config" --add "credential.https://$host.helper" \
+          "!$gh_path auth git-credential"
+        for helper in "${fallbacks[@]}"; do
+          git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
+        done
+      done
     fi
     chmod 600 "$temp/config"
     mv "$temp/config" "$managed"
+    backup=
+    if [[ "$migrate_helpers" = 1 || "$migrate_excludes" = 1 || "$migrate_include" = 1 ||
+      ${#migrate_gh_hosts[@]} -gt 0 ]]; then
+      backup="$(mktemp "$GIT_USER_FILE.bak.XXXXXX")"
+      cp -p "$GIT_USER_FILE" "$backup"
+    fi
+    if [[ "$migrate_helpers" = 1 ]]; then
+      git config --file "$GIT_USER_FILE" --unset-all credential.helper
+    fi
+    if [[ "$migrate_excludes" = 1 ]]; then
+      git config --file "$GIT_USER_FILE" --unset-all core.excludesFile
+    fi
+    if [[ "$migrate_include" = 1 ]]; then
+      git config --file "$GIT_USER_FILE" --unset-all --fixed-value include.path "$managed"
+    fi
+    for host in "${migrate_gh_hosts[@]}"; do
+      git config --file "$GIT_USER_FILE" --unset-all "credential.https://$host.helper"
+    done
+    [[ -z "$backup" ]] || log -i "legacy Git settings backed up to $backup"
     if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
       includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"
       found=0
