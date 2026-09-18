@@ -13,7 +13,9 @@ This repository is a personal machine bootstrap and dotfiles kit.
 
 ## Build, Test, and Development Commands
 
-- `tests/run` runs the full test suite.
+- `tests/run --list tests/<script>_test.bash` lists focused test names.
+- `tests/run --filter '<behavior>' tests/<script>_test.bash` runs focused tests.
+- `tests/run` runs the full suite in parallel across the available logical cores.
 - `bash -n symlinks instantiate configure machine-tools/*.sh` performs shell syntax checks.
 - `bash ./configure <tool>` runs config for one tool, for example `bash ./configure git`.
 - `bash ./instantiate` bootstraps the current machine. Treat this as side-effectful: it can install packages and modify home-directory config.
@@ -28,7 +30,27 @@ Keep install declarations machine-readable: emit tokens such as `syspkgmgr:jq`, 
 
 The test system is intentionally dependency-free. Add new tests as `tests/<script>_test.bash` and register cases with `test_case`. Tests should run scripts as black boxes, isolate `$HOME` with temp directories, and assert observable filesystem behavior. Passing tests should stay quiet except for `ok` lines; failure output should include captured diagnostics.
 
-Run `tests/run` before changing bootstrap behavior.
+During ordinary implementation and investigation, run only the smallest relevant test
+files and `--filter` selections. Use `--list` to find focused cases instead of running a
+large module speculatively.
+
+Coding agents must run the full `tests/run` suite only at the final intended tip,
+immediately before either:
+
+- opening a pull request; or
+- pushing substantive new commits to an already-open pull request.
+
+Substantive commits include changes to executable scripts, configuration behavior, the
+test harness, dependency declarations, symlinking, or bootstrap behavior. Do not run the
+full suite after ordinary edits or local commits, or for documentation-only updates to an
+open pull request. If the tip changes substantively after a full run, rerun it immediately
+before the external action.
+
+Start new coverage with representative happy paths and equivalence classes. Add broader
+boundary coverage when failures could cause data loss, destructive mutation, corrupted
+state, broken bootstrap or process lifecycle, or a compatibility regression. Avoid
+Cartesian products of aliases, inputs, and environments when a cheaper parser check plus
+one canonical end-to-end scenario provides the same confidence.
 
 ## Commit & Pull Request Guidelines
 
