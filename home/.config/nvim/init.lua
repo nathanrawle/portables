@@ -86,6 +86,7 @@ vim.g.never_show = {
 vim.g.picker_no_show = vim.list_extend({
   ".git/",
   ".venv/",
+  ".worktrees/",
   "node_modules/",
 }, vim.g.never_show)
 
