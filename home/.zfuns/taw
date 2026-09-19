@@ -2100,7 +2100,7 @@ _taw_create_tmux_window() {
       return 1
     else
       _taw_tree="${_taw_trees[$(( RANDOM % $#_taw_trees + 1 ))]}"
-      _taw_tmux_window_name="main $_taw_tree"
+      _taw_tmux_window_name="${_taw_tree}main"
       _taw_created="$(tmux new-session -d -P \
         -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}' \
         -s "$_taw_session_name" -n "$_taw_tmux_window_name" -c "$_taw_window_dir" \
