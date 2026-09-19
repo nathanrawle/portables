@@ -332,7 +332,7 @@ test_maintenance_git_manages_gh_helpers_and_legacy_root_settings() {
   git config --file "$HOME/.gitconfig" --add credential.helper manager
   git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.gitignore"
   git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.config/git/ignore"
-  git config --file "$HOME/.gitconfig" --add include.path "$HOME/.config/git/portables-credentials.conf"
+  git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
   for host in github.com gist.github.com; do
     git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" ''
     git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" \
@@ -436,6 +436,29 @@ test_maintenance_git_does_not_replay_root_overlay_helpers() {
   assert_eq root-custom "$(git config --global --includes --get-all credential.helper)"
 }
 
+test_maintenance_git_recognizes_equivalent_managed_includes() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
+  chmod +x "$TEST_TMPDIR/bin/gh"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
+  mkdir -p "$HOME/.config/git"
+  local config included managed
+  managed="$HOME/.config/git/portables-credentials.conf"
+  for included in '~/.config/git/portables-credentials.conf' \
+    '.config/git/portables-credentials.conf'; do
+    config="$HOME/${included%%/*}.gitconfig"
+    printf '[credential]\n  helper = before-include\n[include]\n  path = %s\n[credential]\n  helper = after-include\n' \
+      "$included" >"$config"
+    GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm
+    assert_eq 1 "$(git config --file "$config" --get-all include.path | wc -l | tr -d ' ')"
+    assert_eq "$included" "$(git config --file "$config" --get include.path)"
+    assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential"$'\nbefore-include' \
+      "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  done
+}
+
 test_maintenance_wrappers_preserve_failure_and_scope() {
   maintenance_fixture
   cat >"$TEST_TMPDIR/bin/bash" <<'EOF'
@@ -485,6 +508,7 @@ test_case 'maintenance: Git preserves the machine-specific overlay' test_mainten
 test_case 'maintenance: Git manages gh helpers and legacy root settings' test_maintenance_git_manages_gh_helpers_and_legacy_root_settings
 test_case 'maintenance: Git preserves custom GitHub helpers' test_maintenance_git_preserves_custom_github_helpers
 test_case 'maintenance: Git does not replay root overlay helpers' test_maintenance_git_does_not_replay_root_overlay_helpers
+test_case 'maintenance: Git recognizes equivalent managed includes' test_maintenance_git_recognizes_equivalent_managed_includes
 test_case 'maintenance: Zsh wrappers preserve failures and caller state' test_maintenance_wrappers_preserve_failure_and_scope
 test_case 'maintenance: wrapper help does not relink or prompt' test_maintenance_wrappers_help_has_no_followup
 

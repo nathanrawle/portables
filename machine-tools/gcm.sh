@@ -27,10 +27,22 @@ case "$1" in
     fi
     require_external_destination "$managed"
     mkdir -p "$config_dir"
+    is_managed_include() {
+      local included="$1" including_file="$2" candidate candidate_dir managed_dir
+      case "$included" in
+        "~/"*) candidate="$HOME/${included#\~/}" ;;
+        /*) candidate="$included" ;;
+        *) candidate="$(dirname -- "$including_file")/$included" ;;
+      esac
+      if [[ -e "$candidate" && "$candidate" -ef "$managed" ]]; then return 0; fi
+      candidate_dir="$(cd -- "$(dirname -- "$candidate")" 2>/dev/null && pwd -P)" || return 1
+      managed_dir="$(cd -- "$(dirname -- "$managed")" && pwd -P)" || return 1
+      [[ "$candidate_dir/${candidate##*/}" = "$managed_dir/${managed##*/}" ]]
+    }
     user_git_file
     migrate_helpers=0
     migrate_excludes=0
-    migrate_include=0
+    migrate_includes=()
     migrate_gh_hosts=()
     gh_path="$(command -v gh || true)"
     gh_helper=
@@ -49,9 +61,12 @@ case "$1" in
         migrate_excludes=1
       fi
       if [[ -z "${GIT_CONFIG_GLOBAL:-}" ]] &&
-        git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null |
-          grep -Fxq "$managed"; then
-        migrate_include=1
+        includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"; then
+        while IFS= read -r included; do
+          if is_managed_include "$included" "$GIT_USER_FILE"; then
+            migrate_includes+=( "$included" )
+          fi
+        done <<<"$includes"
       fi
       if [[ -n "$gh_path" ]]; then
         for host in github.com gist.github.com; do
@@ -84,9 +99,7 @@ case "$1" in
         key=${entry%%$'\n'*}
         helper=${entry#*$'\n'}
         if [[ "$key" = include.path ]]; then
-          if [[ "$helper" = "$managed" ||
-            ( "$helper" = "${managed##*/}" &&
-              "$(dirname -- "${origin#file:}")" = "$config_dir" ) ]]; then
+          if is_managed_include "$helper" "${origin#file:}"; then
             managed_seen=1
           fi
           continue
@@ -146,9 +159,7 @@ case "$1" in
             key=${entry%%$'\n'*}
             helper=${entry#*$'\n'}
             if [[ "$key" = include.path ]]; then
-              if [[ "$helper" = "$managed" ||
-                ( "$helper" = "${managed##*/}" &&
-                  "$(dirname -- "${origin#file:}")" = "$config_dir" ) ]]; then
+              if is_managed_include "$helper" "${origin#file:}"; then
                 managed_seen=1
               fi
               continue
@@ -188,7 +199,7 @@ case "$1" in
     chmod 600 "$temp/config"
     mv "$temp/config" "$managed"
     backup=
-    if [[ "$migrate_helpers" = 1 || "$migrate_excludes" = 1 || "$migrate_include" = 1 ||
+    if [[ "$migrate_helpers" = 1 || "$migrate_excludes" = 1 || ${#migrate_includes[@]} -gt 0 ||
       ${#migrate_gh_hosts[@]} -gt 0 ]]; then
       backup="$(mktemp "$GIT_USER_FILE.bak.XXXXXX")"
       cp -p "$GIT_USER_FILE" "$backup"
@@ -199,9 +210,9 @@ case "$1" in
     if [[ "$migrate_excludes" = 1 ]]; then
       git config --file "$GIT_USER_FILE" --unset-all core.excludesFile
     fi
-    if [[ "$migrate_include" = 1 ]]; then
-      git config --file "$GIT_USER_FILE" --unset-all --fixed-value include.path "$managed"
-    fi
+    for included in "${migrate_includes[@]}"; do
+      git config --file "$GIT_USER_FILE" --unset-all --fixed-value include.path "$included"
+    done
     for host in "${migrate_gh_hosts[@]}"; do
       git config --file "$GIT_USER_FILE" --unset-all "credential.https://$host.helper"
     done
@@ -209,7 +220,9 @@ case "$1" in
     if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
       includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"
       found=0
-      while IFS= read -r included; do [[ "$included" != "$managed" ]] || found=1; done <<<"$includes"
+      while IFS= read -r included; do
+        is_managed_include "$included" "$GIT_USER_FILE" && found=1
+      done <<<"$includes"
       [[ "$found" = 1 ]] || git config --file "$GIT_USER_FILE" --add include.path "$managed"
     fi
     ;;
