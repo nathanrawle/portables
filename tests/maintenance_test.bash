@@ -246,6 +246,32 @@ test_maintenance_git_defaults_and_custom_helpers() {
   assert_eq custom "$(git config --global --includes --get-all credential.helper)"
 }
 
+test_maintenance_git_requires_supported_version() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/git.sh" "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  cat >"$TEST_TMPDIR/bin/git" <<'EOF'
+#!/bin/sh
+if [ "$1" = version ]; then
+  printf 'git version 2.29.9\n'
+  exit 0
+fi
+exit 99
+EOF
+  chmod +x "$TEST_TMPDIR/bin/git"
+  local hook script action output rc
+  for hook in "$FIXTURE/machine-tools/git.sh install" \
+    "$FIXTURE/machine-tools/git.sh config" "$FIXTURE/machine-tools/gcm.sh config"; do
+    script=${hook% *}
+    action=${hook##* }
+    rc=0
+    output="$(bash "$script" "$action" 2>&1)" || rc=$?
+    assert_eq 1 "$rc"
+    [[ "$output" = *'Git 2.30 or newer required (found 2.29.9)'* ]] ||
+      fail "unsupported Git failure was unclear: $output"
+  done
+  assert_not_exists "$HOME/.config/git/portables-credentials.conf"
+}
+
 test_maintenance_gh_declares_system_package() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/gh.sh" "$FIXTURE/machine-tools/"
@@ -503,6 +529,7 @@ test_case 'maintenance: failed package batches retry only missing packages' test
 test_case 'maintenance: bootstrap packages share one transaction' test_maintenance_batches_bootstrap_packages
 test_case 'maintenance: gh declares its system package when missing' test_maintenance_gh_declares_system_package
 test_case 'maintenance: Git defaults follow OS and preserve custom helpers' test_maintenance_git_defaults_and_custom_helpers
+test_case 'maintenance: Git requires version 2.30 or newer' test_maintenance_git_requires_supported_version
 test_case 'maintenance: Git migrates exact legacy pair and preserves host helpers' test_maintenance_git_migrates_only_legacy_pair
 test_case 'maintenance: Git writes generated settings through XDG fragments' test_maintenance_git_uses_xdg_fragments
 test_case 'maintenance: Git preserves the machine-specific overlay' test_maintenance_git_preserves_machine_overlay

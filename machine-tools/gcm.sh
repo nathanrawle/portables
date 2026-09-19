@@ -12,7 +12,7 @@ case "$1" in
     esac
     ;;
   config)
-    require_commands git
+    require_git_version 2 30
     case "$OS" in
       Darwin) defaults=( manager osxkeychain ) ;;
       Linux) defaults=( 'cache --timeout 21600' oauth ) ;;

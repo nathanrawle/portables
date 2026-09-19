@@ -4,9 +4,15 @@
 tool_init "$@"
 
 case "$1" in
-  install) command -v git >/dev/null 2>&1 || echo syspkgmgr:git ;;
+  install)
+    if command -v git >/dev/null 2>&1; then
+      require_git_version 2 30
+    else
+      echo syspkgmgr:git
+    fi
+    ;;
   config)
-    require_commands git
+    require_git_version 2 30
     for field in name email; do
       if ! git config --includes --show-scope --get-all "user.$field" 2>/dev/null |
         grep -q '^global[[:space:]]'; then

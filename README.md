@@ -3,6 +3,8 @@
 Personal machine setup for dotfiles, shell tooling, editor configuration, and developer utilities.
 macOS is the primary target; Debian, Ubuntu/Pop, Arch, and Fedora have package-manager support.
 The bootstrap scripts run with Bash 3.2 or newer and use no additional orchestration dependency.
+Git 2.30 or newer is required. Upgrade Git separately on distributions whose standard package
+repositories provide an older version; maintenance does not add third-party package sources.
 
 ## Maintenance commands
 
@@ -56,7 +58,7 @@ operational failures, but return failure and do not offer a shell restart.
 
 1. Detect platform context and create/update the current machine's environment file.
 2. Establish home links.
-3. Prepare the package manager, refresh metadata, and ensure curl/Git are available.
+3. Prepare the package manager, refresh metadata, and ensure curl and Git 2.30+ are available.
 4. Collect and validate all tool requirements.
 5. Install missing system packages in package-manager batches and self-installed providers, then Node, managed Python,
    uv tools, pip, pipx, and npm requirements.
