@@ -4,5 +4,12 @@
 tool_init "$@"
 
 case "$1" in
-  install) command -v gh >/dev/null 2>&1 || echo syspkgmgr:gh ;;
+  install)
+    if ! command -v gh >/dev/null 2>&1; then
+      case "$OS:$ID" in
+        Linux:arch) echo syspkgmgr:github-cli ;;
+        *) echo syspkgmgr:gh ;;
+      esac
+    fi
+    ;;
 esac

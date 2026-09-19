@@ -251,6 +251,8 @@ test_maintenance_gh_declares_system_package() {
   cp "$REPO_ROOT/machine-tools/gh.sh" "$FIXTURE/machine-tools/"
   assert_eq syspkgmgr:gh \
     "$(OS=Linux ID=ubuntu PATH=/usr/bin:/bin bash "$FIXTURE/machine-tools/gh.sh" install)"
+  assert_eq syspkgmgr:github-cli \
+    "$(OS=Linux ID=arch PATH=/usr/bin:/bin bash "$FIXTURE/machine-tools/gh.sh" install)"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
   chmod +x "$TEST_TMPDIR/bin/gh"
   assert_eq '' \
