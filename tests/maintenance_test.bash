@@ -229,12 +229,14 @@ EOF
 test_maintenance_git_defaults_and_custom_helpers() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-oauth"
   chmod +x "$TEST_TMPDIR/bin/"*
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
   export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
   bash "$FIXTURE/configure" gcm
-  assert_eq manager "$(git config --global --includes --get-all credential.helper)"
+  assert_eq $'manager\nosxkeychain' "$(git config --global --includes --get-all credential.helper)"
   OS=Linux ID=ubuntu bash "$FIXTURE/configure" gcm
   assert_eq $'cache --timeout 21600\noauth' "$(git config --global --includes --get-all credential.helper)"
   OS=Linux ID=ubuntu bash "$FIXTURE/configure" gcm
@@ -244,17 +246,58 @@ test_maintenance_git_defaults_and_custom_helpers() {
   assert_eq custom "$(git config --global --includes --get-all credential.helper)"
 }
 
+test_maintenance_git_requires_supported_version() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/git.sh" "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  cat >"$TEST_TMPDIR/bin/git" <<'EOF'
+#!/bin/sh
+if [ "$1" = version ]; then
+  printf 'git version 2.29.9\n'
+  exit 0
+fi
+exit 99
+EOF
+  chmod +x "$TEST_TMPDIR/bin/git"
+  local hook script action output rc
+  for hook in "$FIXTURE/machine-tools/git.sh install" \
+    "$FIXTURE/machine-tools/git.sh config" "$FIXTURE/machine-tools/gcm.sh config"; do
+    script=${hook% *}
+    action=${hook##* }
+    rc=0
+    output="$(bash "$script" "$action" 2>&1)" || rc=$?
+    assert_eq 1 "$rc"
+    [[ "$output" = *'Git 2.30 or newer required (found 2.29.9)'* ]] ||
+      fail "unsupported Git failure was unclear: $output"
+  done
+  assert_not_exists "$HOME/.config/git/portables-credentials.conf"
+}
+
+test_maintenance_gh_declares_system_package() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gh.sh" "$FIXTURE/machine-tools/"
+  assert_eq syspkgmgr:gh \
+    "$(OS=Linux ID=ubuntu PATH=/usr/bin:/bin bash "$FIXTURE/machine-tools/gh.sh" install)"
+  assert_eq syspkgmgr:github-cli \
+    "$(OS=Linux ID=arch PATH=/usr/bin:/bin bash "$FIXTURE/machine-tools/gh.sh" install)"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
+  chmod +x "$TEST_TMPDIR/bin/gh"
+  assert_eq '' \
+    "$(OS=Linux ID=ubuntu PATH="$TEST_TMPDIR/bin:/usr/bin:/bin" bash "$FIXTURE/machine-tools/gh.sh" install)"
+}
+
 test_maintenance_git_migrates_only_legacy_pair() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
   chmod +x "$TEST_TMPDIR/bin/git-credential-manager"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
   export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
   git config --file "$HOME/.gitconfig" --add credential.helper manager
   git config --file "$HOME/.gitconfig" --add credential.helper oauth
   git config --file "$HOME/.gitconfig" credential.https://example.com.helper custom-host
   bash "$FIXTURE/configure" gcm
-  assert_eq manager "$(git config --global --includes --get-all credential.helper)"
+  assert_eq $'manager\nosxkeychain' "$(git config --global --includes --get-all credential.helper)"
   assert_eq custom-host "$(git config --global --includes --get credential.https://example.com.helper)"
   local backups=( "$HOME"/.gitconfig.bak.* )
   assert_eq $'manager\noauth' "$(git config --file "${backups[0]}" --get-all credential.helper)"
@@ -263,22 +306,24 @@ test_maintenance_git_migrates_only_legacy_pair() {
 test_maintenance_git_uses_xdg_fragments() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/git.sh" "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
   mkdir -p "$FIXTURE/home/.config/git"
   cp "$REPO_ROOT/home/.config/git/config" "$FIXTURE/home/.config/git/config"
   git config --file "$FIXTURE/home/.config/git/config" --unset-all user.name
-  git config --file "$FIXTURE/home/.config/git/config" --unset-all user.email
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
   chmod +x "$TEST_TMPDIR/bin/git-credential-manager"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
   bash "$FIXTURE/symlinks" .config/git/config
   unset GIT_CONFIG_GLOBAL
   GIT_NAME='Portable User' GIT_EMAIL=portable@example.com bash "$FIXTURE/configure" git gcm
-  assert_not_exists "$HOME/.gitconfig"
-  assert_eq 'Portable User' "$(git config --global --includes --get user.name)"
-  assert_eq portable@example.com "$(git config --global --includes --get user.email)"
-  assert_eq manager "$(git config --global --includes --get-all credential.helper)"
-  assert_eq 'Portable User' "$(git config --file "$HOME/.config/git/local.conf" --get user.name)"
+  assert_eq 'Portable User' "$(git config --file "$HOME/.gitconfig" --get user.name)"
+  assert_eq portable@example.com "$(git config --file "$HOME/.gitconfig" --get user.email)"
+  assert_eq $'manager\nosxkeychain' \
+    "$(git config --file "$HOME/.config/git/portables-credentials.conf" --get-all credential.helper)"
   assert_eq $'gitbutler_config\nlocal.conf\nportables-credentials.conf' \
     "$(git config --file "$HOME/.config/git/config" --get-all include.path)"
+  assert_eq true \
+    "$(git config --file "$HOME/.config/git/config" --get credential.https://dev.azure.com.useHttpPath)"
   printf 'ignored-by-xdg\n' >"$HOME/.config/git/ignore"
   mkdir "$TEST_TMPDIR/git-repo"
   git -C "$TEST_TMPDIR/git-repo" init -q
@@ -286,18 +331,173 @@ test_maintenance_git_uses_xdg_fragments() {
   git -C "$TEST_TMPDIR/git-repo" check-ignore -q ignored-by-xdg || fail 'standard XDG ignore file not used'
 }
 
-test_maintenance_git_reports_masking_root_config() {
+test_maintenance_git_preserves_machine_overlay() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/git.sh" "$FIXTURE/machine-tools/"
   unset GIT_CONFIG_GLOBAL
-  printf '[user]\n  name = legacy\n' >"$HOME/.gitconfig"
-  local output rc=0
-  output="$(bash "$FIXTURE/configure" git 2>&1)" || rc=$?
-  assert_eq 1 "$rc"
-  [[ "$output" = *'.gitconfig masks the XDG global config; move or remove it before retrying'* ]] ||
-    fail 'masking Git config diagnostic missing'
-  assert_file_contents "$HOME/.gitconfig" $'[user]\n  name = legacy'
-  assert_not_exists "$HOME/.config/git/local.conf"
+  printf '[user]\n  name = Work User\n  email = work@example.com\n  signingKey = key-id\n' >"$HOME/.gitconfig"
+  bash "$FIXTURE/configure" git
+  assert_file_contents "$HOME/.gitconfig" \
+    $'[user]\n  name = Work User\n  email = work@example.com\n  signingKey = key-id'
+}
+
+test_maintenance_git_manages_gh_helpers_and_legacy_root_settings() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  mkdir -p "$FIXTURE/home/.config/git" "$HOME/.config/git"
+  cp "$REPO_ROOT/home/.config/git/config" "$FIXTURE/home/.config/git/config"
+  ln -s "$FIXTURE/home/.config/git/config" "$HOME/.config/git/config"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
+  unset GIT_CONFIG_GLOBAL
+  git config --file "$HOME/.gitconfig" user.email work@example.com
+  git config --file "$HOME/.gitconfig" user.signingKey key-id
+  git config --file "$HOME/.gitconfig" --add credential.helper manager
+  git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.gitignore"
+  git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.config/git/ignore"
+  git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
+  git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
+  for host in github.com gist.github.com; do
+    git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" ''
+    git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" \
+      "!$TEST_TMPDIR/bin/gh auth git-credential"
+  done
+  bash "$FIXTURE/configure" gcm
+  local managed="$HOME/.config/git/portables-credentials.conf"
+  assert_eq $'manager\nosxkeychain' "$(git config --file "$managed" --get-all credential.helper)"
+  for host in github.com gist.github.com; do
+    assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential"$'\nmanager\nosxkeychain' \
+      "$(git config --file "$managed" --get-all "credential.https://$host.helper")"
+    if git config --file "$HOME/.gitconfig" --get-all "credential.https://$host.helper" >/dev/null; then
+      fail "legacy $host helper remained in machine overlay"
+    fi
+  done
+  assert_eq work@example.com "$(git config --file "$HOME/.gitconfig" --get user.email)"
+  assert_eq key-id "$(git config --file "$HOME/.gitconfig" --get user.signingKey)"
+  if git config --file "$HOME/.gitconfig" --get-all credential.helper >/dev/null; then
+    fail 'legacy generic helper remained in machine overlay'
+  fi
+  if git config --file "$HOME/.gitconfig" --get-all core.excludesFile >/dev/null; then
+    fail 'legacy excludes files remained in machine overlay'
+  fi
+  if git config --file "$HOME/.gitconfig" --get-all include.path >/dev/null; then
+    fail 'duplicate managed include remained in machine overlay'
+  fi
+  local backups=( "$HOME"/.gitconfig.bak.* )
+  assert_eq 1 "${#backups[@]}"
+}
+
+test_maintenance_git_preserves_custom_github_helpers() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
+  local gh_dir="$FIXTURE/bin-é with ' quote" gh_path quoted_gh_path gh_helper credential
+  mkdir -p "$gh_dir"
+  gh_path="$gh_dir/gh"
+  cat >"$gh_path" <<'EOF'
+#!/bin/sh
+if [ "$1 $2 $3" = 'auth git-credential get' ]; then
+  cat >/dev/null
+  printf 'username=space-user\npassword=space-password\n'
+fi
+EOF
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$gh_path"
+  cd "$FIXTURE"
+  export LC_ALL=C PATH="bin-é with ' quote:$TEST_TMPDIR/bin:/usr/bin:/bin"
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper stale
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper ''
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper custom-shared
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com.helper custom-shared
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com/.helper custom-slash
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://GitHub.com.helper custom-case
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com:443.helper custom-port
+  git config --file "$GIT_CONFIG_GLOBAL" credential.useHttpPath true
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.https://github.com/org.helper ''
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.https://github.com/org.helper custom-shared
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.https://github.com/org.helper custom-path
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://alice@github.com.helper custom-user
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://gist.github.com.helper custom-gist
+  bash "$FIXTURE/configure" gcm
+  cat >>"$GIT_CONFIG_GLOBAL" <<'EOF'
+
+[credential "https://github.com"]
+  helper = after-include
+
+[credential]
+  helper = generic-after-include
+EOF
+  bash "$FIXTURE/configure" gcm
+  local managed="$HOME/.config/git/portables-credentials.conf"
+  quoted_gh_path=${gh_path//\'/\'\\\'\'}
+  gh_helper="!'$quoted_gh_path' auth git-credential"
+  assert_eq generic-after-include \
+    "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.helper | tail -n 1)"
+  assert_eq $'\n'"$gh_helper"$'\ncustom-shared\ncustom-slash\ncustom-case\ncustom-port' \
+    "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  assert_eq $'\ncustom-shared\ncustom-path' \
+    "$(git config --file "$managed" --get-all credential.https://github.com/org.helper)"
+  assert_eq custom-user \
+    "$(git config --file "$managed" --get-all credential.https://alice@github.com.helper)"
+  assert_eq $'\n'"$gh_helper"$'\ncustom-gist\ncustom-shared' \
+    "$(git config --file "$managed" --get-all credential.https://gist.github.com.helper)"
+  assert_eq $'custom-shared\nafter-include' \
+    "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://github.com.helper)"
+  assert_eq custom-gist \
+    "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://gist.github.com.helper)"
+  cd "$HOME"
+  credential="$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill)"
+  [[ "$credential" = *$'username=space-user\npassword=space-password'* ]] ||
+    fail 'quoted GitHub CLI helper did not provide credentials'
+}
+
+test_maintenance_git_does_not_replay_root_overlay_helpers() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  mkdir -p "$FIXTURE/home/.config/git" "$HOME/.config/git"
+  cp "$REPO_ROOT/home/.config/git/config" "$FIXTURE/home/.config/git/config"
+  ln -s "$FIXTURE/home/.config/git/config" "$HOME/.config/git/config"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
+  unset GIT_CONFIG_GLOBAL
+  git config --file "$HOME/.gitconfig" credential.helper root-custom
+  bash "$FIXTURE/configure" gcm
+  local managed="$HOME/.config/git/portables-credentials.conf"
+  if git config --file "$managed" --get-all credential.helper >/dev/null; then
+    fail 'root overlay helper was copied into managed generic helpers'
+  fi
+  assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential" \
+    "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  assert_eq root-custom "$(git config --global --includes --get-all credential.helper)"
+}
+
+test_maintenance_git_recognizes_equivalent_managed_includes() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
+  chmod +x "$TEST_TMPDIR/bin/gh"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
+  mkdir -p "$HOME/.config/git"
+  local config included managed
+  managed="$HOME/.config/git/portables-credentials.conf"
+  for included in '~/.config/git/portables-credentials.conf' \
+    '.config/git/portables-credentials.conf'; do
+    config="$HOME/${included%%/*}.gitconfig"
+    printf '[credential]\n  helper = before-include\n[include]\n  path = %s\n[credential]\n  helper = after-include\n' \
+      "$included" >"$config"
+    GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm
+    assert_eq 1 "$(git config --file "$config" --get-all include.path | wc -l | tr -d ' ')"
+    assert_eq "$included" "$(git config --file "$config" --get include.path)"
+    assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential"$'\nbefore-include' \
+      "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  done
 }
 
 test_maintenance_wrappers_preserve_failure_and_scope() {
@@ -341,10 +541,16 @@ test_case 'maintenance: casks use brew install' test_maintenance_cask_dispatch
 test_case 'maintenance: system packages use deduplicated batches' test_maintenance_batches_system_packages
 test_case 'maintenance: failed package batches retry only missing packages' test_maintenance_failed_batch_retries_missing_packages
 test_case 'maintenance: bootstrap packages share one transaction' test_maintenance_batches_bootstrap_packages
+test_case 'maintenance: gh declares its system package when missing' test_maintenance_gh_declares_system_package
 test_case 'maintenance: Git defaults follow OS and preserve custom helpers' test_maintenance_git_defaults_and_custom_helpers
+test_case 'maintenance: Git requires version 2.30 or newer' test_maintenance_git_requires_supported_version
 test_case 'maintenance: Git migrates exact legacy pair and preserves host helpers' test_maintenance_git_migrates_only_legacy_pair
 test_case 'maintenance: Git writes generated settings through XDG fragments' test_maintenance_git_uses_xdg_fragments
-test_case 'maintenance: Git reports a root config that masks XDG' test_maintenance_git_reports_masking_root_config
+test_case 'maintenance: Git preserves the machine-specific overlay' test_maintenance_git_preserves_machine_overlay
+test_case 'maintenance: Git manages gh helpers and legacy root settings' test_maintenance_git_manages_gh_helpers_and_legacy_root_settings
+test_case 'maintenance: Git preserves custom GitHub helpers' test_maintenance_git_preserves_custom_github_helpers
+test_case 'maintenance: Git does not replay root overlay helpers' test_maintenance_git_does_not_replay_root_overlay_helpers
+test_case 'maintenance: Git recognizes equivalent managed includes' test_maintenance_git_recognizes_equivalent_managed_includes
 test_case 'maintenance: Zsh wrappers preserve failures and caller state' test_maintenance_wrappers_preserve_failure_and_scope
 test_case 'maintenance: wrapper help does not relink or prompt' test_maintenance_wrappers_help_has_no_followup
 

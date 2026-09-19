@@ -1,8 +1,9 @@
 [user]
   name = "Nathan Rawle"
-  email = nathan.rawle@gmail.com
 [init]
   defaultBranch = main
+[worktree]
+  guessRemote = true
 [include]
   path = gitbutler_config
   path = local.conf
