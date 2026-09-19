@@ -352,11 +352,14 @@ create_git_repo() {
 make_git_repo() {
   local repo="$1"
   local primary_branch="${2:-main}"
-  local cache_key seed
+  local cache_key= byte i seed
+  local LC_ALL=C
 
-  # Escape separators and the escape marker so each branch owns one cache directory.
-  cache_key="${primary_branch//%/%25}"
-  cache_key="${cache_key//\//%2F}"
+  # Hex bytes keep branch cache keys distinct on case-insensitive filesystems.
+  for ((i = 0; i < ${#primary_branch}; i++)); do
+    printf -v byte '%02x' "'${primary_branch:i:1}"
+    cache_key+="$byte"
+  done
   seed="$TESTS_TMP_ROOT/fixtures/git/$cache_key"
 
   if [[ ! -d "$seed/.git" ]]; then

@@ -3,7 +3,7 @@
 . "$TESTS_DIR/lib/taw_test_helpers.bash"
 
 test_git_fixture_copies_are_independent() {
-  local first second slash_branch prefix nested prefix_copy
+  local first second slash_branch prefix nested prefix_copy uppercase
 
   first="$TEST_TMPDIR/first"
   second="$TEST_TMPDIR/second"
@@ -11,6 +11,7 @@ test_git_fixture_copies_are_independent() {
   prefix="$TEST_TMPDIR/prefix"
   nested="$TEST_TMPDIR/nested"
   prefix_copy="$TEST_TMPDIR/prefix-copy"
+  uppercase="$TEST_TMPDIR/uppercase"
 
   make_git_repo "$first"
   printf 'changed\n' >"$first/README.md"
@@ -30,6 +31,10 @@ test_git_fixture_copies_are_independent() {
   assert_not_exists "$prefix_copy/child"
   assert_eq topic/child "$(git -C "$nested" branch --show-current)" \
     "expected prefix branch fixtures to remain independent"
+
+  make_git_repo "$uppercase" MAIN
+  assert_eq MAIN "$(git -C "$uppercase" branch --show-current)" \
+    "expected case-distinct branch fixtures to remain independent"
 }
 
 test_case 'taw helpers: Git fixture copies are clean and independent' \
