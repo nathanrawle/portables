@@ -174,6 +174,23 @@ EOF
   esac
 }
 
+test_runner_does_not_leak_job_override() {
+  local test_file output
+
+  test_file="$TEST_TMPDIR/jobs_test.bash"
+  cat >"$test_file" <<'EOF'
+test_fixture_no_job_override() {
+  [[ -z "${TEST_JOBS+x}" ]] || fail 'TEST_JOBS leaked into test case'
+}
+
+test_case 'fixture: runner controls are isolated' test_fixture_no_job_override
+EOF
+
+  output="$(TEST_JOBS=2 "$RUNNER_UNDER_TEST" "$test_file")"
+  assert_runner_output_contains "$output" \
+    'ok 1 - fixture: runner controls are isolated'
+}
+
 test_case 'test runner: lists without executing tests' \
   test_runner_lists_without_executing
 test_case 'test runner: combines literal filters' \
@@ -186,3 +203,5 @@ test_case 'test runner: reports worker crashes' \
   test_runner_reports_worker_crashes
 test_case 'test runner: interrupts parallel workers' \
   test_runner_interrupts_parallel_workers
+test_case 'test runner: does not leak job override' \
+  test_runner_does_not_leak_job_override

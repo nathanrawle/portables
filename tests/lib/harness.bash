@@ -114,7 +114,7 @@ test_case() {
     {
       set -euo pipefail
       export TEST_TMPDIR="$test_tmp"
-      unset TESTS_WORKER TESTS_SHARD_COUNT TESTS_SHARD_INDEX TESTS_RESULTS_DIR
+      unset TEST_JOBS TESTS_WORKER TESTS_SHARD_COUNT TESTS_SHARD_INDEX TESTS_RESULTS_DIR
       "$fn"
     } 2>&1
   )"
