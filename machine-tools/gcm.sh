@@ -101,10 +101,44 @@ case "$1" in
       fallbacks=( "${custom_helpers[@]}" )
     fi
     if [[ -n "$gh_path" ]]; then
+      if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
+        host_sources=( "$GIT_USER_FILE" )
+      else
+        host_sources=( "$config_dir/config" )
+      fi
       for host in github.com gist.github.com; do
+        preserved_helpers=()
+        migrating=0
+        for migrated_host in "${migrate_gh_hosts[@]}"; do
+          [[ "$migrated_host" != "$host" ]] || migrating=1
+        done
+        for source in "${host_sources[@]}"; do
+          [[ -r "$source" ]] || continue
+          rc=0
+          git config --file "$source" --includes --show-origin -z \
+            --get-all "credential.https://$host.helper" >"$temp/host-helpers" || rc=$?
+          [[ "$rc" -le 1 ]] || exit "$rc"
+          while IFS= read -r -d '' origin && IFS= read -r -d '' helper; do
+            if [[ "$origin" = "file:$managed" || "${origin#file:}" -ef "$managed" ]]; then
+              continue
+            fi
+            if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
+              continue
+            fi
+            [[ -n "$helper" && "$helper" != "!$gh_path auth git-credential" ]] || continue
+            found=0
+            for existing in "${preserved_helpers[@]}"; do
+              [[ "$existing" != "$helper" ]] || found=1
+            done
+            [[ "$found" = 1 ]] || preserved_helpers+=( "$helper" )
+          done <"$temp/host-helpers"
+        done
         git config --file "$temp/config" --add "credential.https://$host.helper" ''
         git config --file "$temp/config" --add "credential.https://$host.helper" \
           "!$gh_path auth git-credential"
+        for helper in "${preserved_helpers[@]}"; do
+          git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
+        done
         for helper in "${fallbacks[@]}"; do
           git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
         done

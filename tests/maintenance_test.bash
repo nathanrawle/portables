@@ -363,6 +363,29 @@ test_maintenance_git_manages_gh_helpers_and_legacy_root_settings() {
   assert_eq 1 "${#backups[@]}"
 }
 
+test_maintenance_git_preserves_custom_github_helpers() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com.helper custom-github
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://gist.github.com.helper custom-gist
+  bash "$FIXTURE/configure" gcm
+  bash "$FIXTURE/configure" gcm
+  local managed="$HOME/.config/git/portables-credentials.conf"
+  assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential"$'\ncustom-github\nmanager\nosxkeychain' \
+    "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential"$'\ncustom-gist\nmanager\nosxkeychain' \
+    "$(git config --file "$managed" --get-all credential.https://gist.github.com.helper)"
+  assert_eq custom-github \
+    "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://github.com.helper)"
+  assert_eq custom-gist \
+    "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://gist.github.com.helper)"
+}
+
 test_maintenance_wrappers_preserve_failure_and_scope() {
   maintenance_fixture
   cat >"$TEST_TMPDIR/bin/bash" <<'EOF'
@@ -410,6 +433,7 @@ test_case 'maintenance: Git migrates exact legacy pair and preserves host helper
 test_case 'maintenance: Git writes generated settings through XDG fragments' test_maintenance_git_uses_xdg_fragments
 test_case 'maintenance: Git preserves the machine-specific overlay' test_maintenance_git_preserves_machine_overlay
 test_case 'maintenance: Git manages gh helpers and legacy root settings' test_maintenance_git_manages_gh_helpers_and_legacy_root_settings
+test_case 'maintenance: Git preserves custom GitHub helpers' test_maintenance_git_preserves_custom_github_helpers
 test_case 'maintenance: Zsh wrappers preserve failures and caller state' test_maintenance_wrappers_preserve_failure_and_scope
 test_case 'maintenance: wrapper help does not relink or prompt' test_maintenance_wrappers_help_has_no_followup
 
