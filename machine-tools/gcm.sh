@@ -44,7 +44,10 @@ case "$1" in
     migrate_excludes=0
     migrate_includes=()
     migrate_gh_hosts=()
-    gh_path="$(command -v gh || true)"
+    gh_path="$(type -P gh || true)"
+    if [[ -n "$gh_path" && "$gh_path" != /* ]]; then
+      gh_path="$(cd -- "$(dirname -- "$gh_path")" && pwd -P)/${gh_path##*/}"
+    fi
     gh_helper=
     if [[ -n "$gh_path" ]]; then
       printf -v quoted_gh_path '%q' "$gh_path"

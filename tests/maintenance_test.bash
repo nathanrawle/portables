@@ -395,7 +395,7 @@ test_maintenance_git_preserves_custom_github_helpers() {
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
   ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
-  local gh_dir="$HOME/bin with spaces" gh_path quoted_gh_path gh_helper credential
+  local gh_dir="$FIXTURE/bin with spaces" gh_path quoted_gh_path gh_helper credential
   mkdir -p "$gh_dir"
   gh_path="$gh_dir/gh"
   cat >"$gh_path" <<'EOF'
@@ -406,7 +406,8 @@ if [ "$1 $2 $3" = 'auth git-credential get' ]; then
 fi
 EOF
   chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$gh_path"
-  export PATH="$gh_dir:$TEST_TMPDIR/bin:/usr/bin:/bin"
+  cd "$FIXTURE"
+  export PATH="bin with spaces:$TEST_TMPDIR/bin:/usr/bin:/bin"
   git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper stale
   git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper ''
   git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper custom-shared
@@ -435,6 +436,7 @@ EOF
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://github.com.helper)"
   assert_eq custom-gist \
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://gist.github.com.helper)"
+  cd "$HOME"
   credential="$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill)"
   [[ "$credential" = *$'username=space-user\npassword=space-password'* ]] ||
     fail 'quoted GitHub CLI helper did not provide credentials'
