@@ -129,6 +129,51 @@ test_runner_reports_worker_crashes() {
   assert_runner_output_contains "$output" 'did not report results'
 }
 
+test_runner_interrupts_parallel_workers() {
+  local test_file marker output rc terminated
+
+  test_file="$TEST_TMPDIR/interrupt_test.bash"
+  marker="$TEST_TMPDIR/interrupt-marker"
+  cat >"$test_file" <<'EOF'
+test_fixture_wait() {
+  trap 'printf "terminated\n" >>"$RUNNER_MARKER"; exit 143' TERM
+  printf 'ready\n' >>"$RUNNER_MARKER"
+  sleep 5
+}
+
+test_case 'fixture: first worker waits' test_fixture_wait
+test_case 'fixture: second worker waits' test_fixture_wait
+EOF
+
+  if output="$(
+    RUNNER_UNDER_TEST="$RUNNER_UNDER_TEST" TEST_FILE="$test_file" \
+      RUNNER_MARKER="$marker" bash -c '
+        target=$$
+        (
+          attempts=0
+          while [[ $(grep -c "^ready$" "$RUNNER_MARKER" 2>/dev/null || true) -lt 2 ]] \
+            && [[ $attempts -lt 500 ]]; do
+            sleep 0.01
+            attempts=$((attempts + 1))
+          done
+          kill -INT "$target"
+        ) &
+        exec "$RUNNER_UNDER_TEST" --jobs 2 "$TEST_FILE"
+      ' 2>&1
+  )"; then
+    rc=0
+  else
+    rc=$?
+  fi
+
+  assert_eq 130 "$rc" "unexpected interrupted runner status"
+  terminated="$(grep -c '^terminated$' "$marker" 2>/dev/null || true)"
+  assert_eq 2 "$terminated" "parallel workers were not terminated"
+  case "$output" in
+    *'test(s),'*) fail "interrupted runner reported a completed suite" ;;
+  esac
+}
+
 test_case 'test runner: lists without executing tests' \
   test_runner_lists_without_executing
 test_case 'test runner: combines literal filters' \
@@ -139,3 +184,5 @@ test_case 'test runner: orders parallel results and failures' \
   test_runner_orders_parallel_results_and_failures
 test_case 'test runner: reports worker crashes' \
   test_runner_reports_worker_crashes
+test_case 'test runner: interrupts parallel workers' \
+  test_runner_interrupts_parallel_workers

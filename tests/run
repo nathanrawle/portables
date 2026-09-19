@@ -8,10 +8,25 @@ REPO_ROOT="$(cd -- "$TESTS_DIR/.." && pwd)"
 export TESTS_DIR REPO_ROOT
 
 TESTS_PARALLEL_TMP=
+TESTS_PARALLEL_PIDS=()
 
 cleanup_parallel_tests() {
   [[ -n "$TESTS_PARALLEL_TMP" && -d "$TESTS_PARALLEL_TMP" ]] \
     && rm -rf "$TESTS_PARALLEL_TMP"
+}
+
+interrupt_parallel_tests() {
+  local exit_status="$1"
+  local pid
+
+  trap - INT TERM
+  for pid in "${TESTS_PARALLEL_PIDS[@]}"; do
+    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  done
+  for pid in "${TESTS_PARALLEL_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  exit "$exit_status"
 }
 
 usage() {
@@ -38,7 +53,7 @@ detect_test_jobs() {
 run_parallel() {
   local jobs="$1"
   shift
-  local results_parent results_dir worker_index worker_status
+  local results_parent results_dir worker_index worker_status monitor_mode=0
   local expected_discovered=-1 expected_matched=-1
   local discovered matched run failed result_count=0 total_run=0 total_failed=0
   local result status name
@@ -49,20 +64,31 @@ run_parallel() {
   results_dir="$(mktemp -d "$results_parent/portables-test-results.XXXXXX")"
   TESTS_PARALLEL_TMP="$results_dir"
   trap cleanup_parallel_tests EXIT
+  trap 'interrupt_parallel_tests 130' INT
+  trap 'interrupt_parallel_tests 143' TERM
 
   worker_args=( "$@" )
+  # Separate process groups let signal handlers stop nested test commands.
+  case "$-" in
+    *m*) monitor_mode=1 ;;
+    *) set -m ;;
+  esac
   for ((worker_index = 0; worker_index < jobs; worker_index++)); do
     logs[$worker_index]="$results_dir/worker-$worker_index.log"
     TESTS_WORKER=1 TESTS_SHARD_COUNT="$jobs" TESTS_SHARD_INDEX="$worker_index" \
       TESTS_RESULTS_DIR="$results_dir" \
       "$TESTS_DIR/run" "${worker_args[@]}" >"${logs[$worker_index]}" 2>&1 &
     pids[$worker_index]=$!
+    TESTS_PARALLEL_PIDS[$worker_index]="${pids[$worker_index]}"
   done
+  [[ $monitor_mode -eq 1 ]] || set +m
 
   worker_status=0
   for ((worker_index = 0; worker_index < jobs; worker_index++)); do
     wait "${pids[$worker_index]}" || worker_status=1
   done
+  TESTS_PARALLEL_PIDS=()
+  trap - INT TERM
 
   for ((worker_index = 0; worker_index < jobs; worker_index++)); do
     if [[ ! -f "$results_dir/stats-$worker_index" ]]; then
