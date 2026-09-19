@@ -171,7 +171,9 @@ case "$1" in
               fi
               continue
             fi
-            [[ "$managed_seen" = 0 && "$key" = "credential.https://$host.helper" ]] || continue
+            [[ "$managed_seen" = 0 ]] || continue
+            [[ "$key" = "credential.https://$host.helper" ||
+              "$key" = "credential.https://$host/.helper" ]] || continue
             if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
               continue
             fi
