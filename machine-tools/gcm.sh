@@ -64,7 +64,11 @@ case "$1" in
         includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"; then
         while IFS= read -r included; do
           if is_managed_include "$included" "$GIT_USER_FILE"; then
-            migrate_includes+=( "$included" )
+            found=0
+            for existing in "${migrate_includes[@]}"; do
+              [[ "$existing" != "$included" ]] || found=1
+            done
+            [[ "$found" = 1 ]] || migrate_includes+=( "$included" )
           fi
         done <<<"$includes"
       fi

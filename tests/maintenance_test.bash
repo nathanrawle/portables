@@ -333,6 +333,7 @@ test_maintenance_git_manages_gh_helpers_and_legacy_root_settings() {
   git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.gitignore"
   git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.config/git/ignore"
   git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
+  git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
   for host in github.com gist.github.com; do
     git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" ''
     git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" \
