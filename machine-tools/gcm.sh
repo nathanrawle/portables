@@ -87,6 +87,10 @@ case "$1" in
           continue
         fi
         custom=1
+        if [[ -z "$helper" ]]; then
+          custom_helpers=()
+          continue
+        fi
         found=0
         for existing in "${custom_helpers[@]}"; do [[ "$existing" != "$helper" ]] || found=1; done
         [[ "$found" = 1 ]] || custom_helpers+=( "$helper" )
@@ -122,17 +126,30 @@ case "$1" in
           [[ -r "$source" ]] || continue
           rc=0
           git config --file "$source" --includes --show-origin -z \
-            --get-all "credential.https://$host.helper" >"$temp/host-helpers" || rc=$?
+            --get-regexp '^(include\.path|credential\..*\.helper)$' \
+            >"$temp/host-helpers" || rc=$?
           [[ "$rc" -le 1 ]] || exit "$rc"
-          while IFS= read -r -d '' origin && IFS= read -r -d '' helper; do
-            if [[ "$origin" = "file:$managed" || "${origin#file:}" -ef "$managed" ]]; then
+          managed_seen=0
+          while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
+            key=${entry%%$'\n'*}
+            helper=${entry#*$'\n'}
+            if [[ "$key" = include.path ]]; then
+              if [[ "$helper" = "$managed" ||
+                ( "$helper" = "${managed##*/}" &&
+                  "$(dirname -- "${origin#file:}")" = "$config_dir" ) ]]; then
+                managed_seen=1
+              fi
               continue
             fi
+            [[ "$managed_seen" = 0 && "$key" = "credential.https://$host.helper" ]] || continue
             if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
               continue
             fi
-            [[ -n "$helper" && "$helper" != "!$gh_path auth git-credential" &&
-              "$helper" != "$gh_helper" ]] || continue
+            if [[ -z "$helper" ]]; then
+              preserved_helpers=()
+              continue
+            fi
+            [[ "$helper" != "!$gh_path auth git-credential" && "$helper" != "$gh_helper" ]] || continue
             found=0
             for existing in "${preserved_helpers[@]}"; do
               [[ "$existing" != "$helper" ]] || found=1

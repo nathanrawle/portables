@@ -380,10 +380,13 @@ fi
 EOF
   chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$gh_path"
   export PATH="$gh_dir:$TEST_TMPDIR/bin:/usr/bin:/bin"
-  git config --file "$GIT_CONFIG_GLOBAL" credential.helper custom-shared
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper stale
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper ''
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper custom-shared
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com.helper custom-shared
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://gist.github.com.helper custom-gist
   bash "$FIXTURE/configure" gcm
+  printf '\n[credential "https://github.com"]\n  helper = after-include\n' >>"$GIT_CONFIG_GLOBAL"
   bash "$FIXTURE/configure" gcm
   local managed="$HOME/.config/git/portables-credentials.conf"
   printf -v quoted_gh_path '%q' "$gh_path"
@@ -392,7 +395,7 @@ EOF
     "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
   assert_eq $'\n'"$gh_helper"$'\ncustom-gist\ncustom-shared' \
     "$(git config --file "$managed" --get-all credential.https://gist.github.com.helper)"
-  assert_eq custom-shared \
+  assert_eq $'custom-shared\nafter-include' \
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://github.com.helper)"
   assert_eq custom-gist \
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://gist.github.com.helper)"
