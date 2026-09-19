@@ -398,7 +398,6 @@ EOF
   local managed="$HOME/.config/git/portables-credentials.conf"
   printf -v quoted_gh_path '%q' "$gh_path"
   gh_helper="!$quoted_gh_path auth git-credential"
-  assert_eq custom-shared "$(git config --file "$managed" --get-all credential.helper)"
   assert_eq generic-after-include \
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.helper | tail -n 1)"
   assert_eq $'\n'"$gh_helper"$'\ncustom-shared' \
@@ -412,6 +411,29 @@ EOF
   credential="$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill)"
   [[ "$credential" = *$'username=space-user\npassword=space-password'* ]] ||
     fail 'quoted GitHub CLI helper did not provide credentials'
+}
+
+test_maintenance_git_does_not_replay_root_overlay_helpers() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  mkdir -p "$FIXTURE/home/.config/git" "$HOME/.config/git"
+  cp "$REPO_ROOT/home/.config/git/config" "$FIXTURE/home/.config/git/config"
+  ln -s "$FIXTURE/home/.config/git/config" "$HOME/.config/git/config"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
+  unset GIT_CONFIG_GLOBAL
+  git config --file "$HOME/.gitconfig" credential.helper root-custom
+  bash "$FIXTURE/configure" gcm
+  local managed="$HOME/.config/git/portables-credentials.conf"
+  if git config --file "$managed" --get-all credential.helper >/dev/null; then
+    fail 'root overlay helper was copied into managed generic helpers'
+  fi
+  assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential" \
+    "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  assert_eq root-custom "$(git config --global --includes --get-all credential.helper)"
 }
 
 test_maintenance_wrappers_preserve_failure_and_scope() {
@@ -462,6 +484,7 @@ test_case 'maintenance: Git writes generated settings through XDG fragments' tes
 test_case 'maintenance: Git preserves the machine-specific overlay' test_maintenance_git_preserves_machine_overlay
 test_case 'maintenance: Git manages gh helpers and legacy root settings' test_maintenance_git_manages_gh_helpers_and_legacy_root_settings
 test_case 'maintenance: Git preserves custom GitHub helpers' test_maintenance_git_preserves_custom_github_helpers
+test_case 'maintenance: Git does not replay root overlay helpers' test_maintenance_git_does_not_replay_root_overlay_helpers
 test_case 'maintenance: Zsh wrappers preserve failures and caller state' test_maintenance_wrappers_preserve_failure_and_scope
 test_case 'maintenance: wrapper help does not relink or prompt' test_maintenance_wrappers_help_has_no_followup
 

@@ -73,13 +73,13 @@ case "$1" in
     else
       sources=( "$config_dir/config" "$HOME/.gitconfig" )
     fi
+    managed_seen=0
     for source in "${sources[@]}"; do
       [[ -r "$source" ]] || continue
       rc=0
       git config --file "$source" --includes --show-origin -z \
         --get-regexp '^(include\.path|credential\.helper)$' >"$temp/helpers" || rc=$?
       [[ "$rc" -le 1 ]] || exit "$rc"
-      managed_seen=0
       while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
         key=${entry%%$'\n'*}
         helper=${entry#*$'\n'}
