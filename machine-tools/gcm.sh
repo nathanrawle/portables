@@ -50,8 +50,8 @@ case "$1" in
     fi
     gh_helper=
     if [[ -n "$gh_path" ]]; then
-      printf -v quoted_gh_path '%q' "$gh_path"
-      gh_helper="!$quoted_gh_path auth git-credential"
+      quoted_gh_path=${gh_path//\'/\'\\\'\'}
+      gh_helper="!'$quoted_gh_path' auth git-credential"
     fi
     if [[ -f "$GIT_USER_FILE" ]]; then
       legacy="$(git config --file "$GIT_USER_FILE" --get-all credential.helper || true)"
@@ -254,12 +254,25 @@ case "$1" in
           git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
           emitted_helpers+=( "$helper" )
         done
+        reset_scopes=()
         for index in "${!scoped_keys[@]}"; do
+          key=${scoped_keys[index]}
           helper=${scoped_helpers[index]}
+          if [[ -z "$helper" ]]; then
+            git config --file "$temp/config" --add "$key" ''
+            reset_scopes+=( "$key" )
+            continue
+          fi
+          reset_seen=0
+          for existing in "${reset_scopes[@]}"; do [[ "$existing" != "$key" ]] || reset_seen=1; done
+          if [[ "$reset_seen" = 1 ]]; then
+            git config --file "$temp/config" --add "$key" "$helper"
+            continue
+          fi
           found=0
           for existing in "${emitted_helpers[@]}"; do [[ "$existing" != "$helper" ]] || found=1; done
           [[ "$found" = 0 ]] || continue
-          git config --file "$temp/config" --add "${scoped_keys[index]}" "$helper"
+          git config --file "$temp/config" --add "$key" "$helper"
         done
       done
     fi

@@ -369,7 +369,7 @@ test_maintenance_git_manages_gh_helpers_and_legacy_root_settings() {
   local managed="$HOME/.config/git/portables-credentials.conf"
   assert_eq $'manager\nosxkeychain' "$(git config --file "$managed" --get-all credential.helper)"
   for host in github.com gist.github.com; do
-    assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential"$'\nmanager\nosxkeychain' \
+    assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential"$'\nmanager\nosxkeychain' \
       "$(git config --file "$managed" --get-all "credential.https://$host.helper")"
     if git config --file "$HOME/.gitconfig" --get-all "credential.https://$host.helper" >/dev/null; then
       fail "legacy $host helper remained in machine overlay"
@@ -395,7 +395,7 @@ test_maintenance_git_preserves_custom_github_helpers() {
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
   ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
-  local gh_dir="$FIXTURE/bin with spaces" gh_path quoted_gh_path gh_helper credential
+  local gh_dir="$FIXTURE/bin-é with ' quote" gh_path quoted_gh_path gh_helper credential
   mkdir -p "$gh_dir"
   gh_path="$gh_dir/gh"
   cat >"$gh_path" <<'EOF'
@@ -407,7 +407,7 @@ fi
 EOF
   chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$gh_path"
   cd "$FIXTURE"
-  export PATH="bin with spaces:$TEST_TMPDIR/bin:/usr/bin:/bin"
+  export LC_ALL=C PATH="bin-é with ' quote:$TEST_TMPDIR/bin:/usr/bin:/bin"
   git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper stale
   git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper ''
   git config --file "$GIT_CONFIG_GLOBAL" --add credential.helper custom-shared
@@ -417,6 +417,7 @@ EOF
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com:443.helper custom-port
   git config --file "$GIT_CONFIG_GLOBAL" credential.useHttpPath true
   git config --file "$GIT_CONFIG_GLOBAL" --add credential.https://github.com/org.helper ''
+  git config --file "$GIT_CONFIG_GLOBAL" --add credential.https://github.com/org.helper custom-shared
   git config --file "$GIT_CONFIG_GLOBAL" --add credential.https://github.com/org.helper custom-path
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://alice@github.com.helper custom-user
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://gist.github.com.helper custom-gist
@@ -431,13 +432,13 @@ EOF
 EOF
   bash "$FIXTURE/configure" gcm
   local managed="$HOME/.config/git/portables-credentials.conf"
-  printf -v quoted_gh_path '%q' "$gh_path"
-  gh_helper="!$quoted_gh_path auth git-credential"
+  quoted_gh_path=${gh_path//\'/\'\\\'\'}
+  gh_helper="!'$quoted_gh_path' auth git-credential"
   assert_eq generic-after-include \
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.helper | tail -n 1)"
   assert_eq $'\n'"$gh_helper"$'\ncustom-shared\ncustom-slash\ncustom-case\ncustom-port' \
     "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
-  assert_eq $'\ncustom-path' \
+  assert_eq $'\ncustom-shared\ncustom-path' \
     "$(git config --file "$managed" --get-all credential.https://github.com/org.helper)"
   assert_eq custom-user \
     "$(git config --file "$managed" --get-all credential.https://alice@github.com.helper)"
@@ -471,7 +472,7 @@ test_maintenance_git_does_not_replay_root_overlay_helpers() {
   if git config --file "$managed" --get-all credential.helper >/dev/null; then
     fail 'root overlay helper was copied into managed generic helpers'
   fi
-  assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential" \
+  assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential" \
     "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
   assert_eq root-custom "$(git config --global --includes --get-all credential.helper)"
 }
@@ -494,7 +495,7 @@ test_maintenance_git_recognizes_equivalent_managed_includes() {
     GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm
     assert_eq 1 "$(git config --file "$config" --get-all include.path | wc -l | tr -d ' ')"
     assert_eq "$included" "$(git config --file "$config" --get include.path)"
-    assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential"$'\nbefore-include' \
+    assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential"$'\nbefore-include' \
       "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
   done
 }
