@@ -415,6 +415,8 @@ EOF
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com/.helper custom-slash
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://GitHub.com.helper custom-case
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com:443.helper custom-port
+  git config --file "$GIT_CONFIG_GLOBAL" credential.useHttpPath true
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com/org.helper custom-path
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://gist.github.com.helper custom-gist
   bash "$FIXTURE/configure" gcm
   cat >>"$GIT_CONFIG_GLOBAL" <<'EOF'
@@ -433,6 +435,8 @@ EOF
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.helper | tail -n 1)"
   assert_eq $'\n'"$gh_helper"$'\ncustom-shared\ncustom-slash\ncustom-case\ncustom-port' \
     "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  assert_eq custom-path \
+    "$(git config --file "$managed" --get-all credential.https://github.com/org.helper)"
   assert_eq $'\n'"$gh_helper"$'\ncustom-gist\ncustom-shared' \
     "$(git config --file "$managed" --get-all credential.https://gist.github.com.helper)"
   assert_eq $'custom-shared\nafter-include' \

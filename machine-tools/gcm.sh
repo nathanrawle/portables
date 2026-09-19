@@ -88,13 +88,25 @@ case "$1" in
     fi
     temp="$(mktemp -d "$config_dir/.portables-credentials.XXXXXX")"
     trap 'rm -rf -- "$temp"' EXIT
-    host_helper_matches() {
-      local key="$1" host="$2" matched
+    host_helper_context() {
+      local key="$1" host="$2" context remainder authority base matched
+      context=${key#credential.}
+      context=${context%.helper}
+      [[ "$context" = *://* ]] || return 1
+      remainder=${context#*://}
+      authority=${remainder%%/*}
+      authority=${authority##*@}
+      base="${context%%://*}://$authority"
       : >"$temp/urlmatch"
-      git config --file "$temp/urlmatch" "$key" portables-match 2>/dev/null || return 1
+      git config --file "$temp/urlmatch" "credential.$base.helper" portables-match \
+        2>/dev/null || return 1
       matched="$(git config --file "$temp/urlmatch" --get-urlmatch credential.helper \
         "https://$host" 2>/dev/null || true)"
-      [[ "$matched" = portables-match ]]
+      [[ "$matched" = portables-match ]] || return 1
+      case "$remainder" in
+        */?*) printf 'scoped\n' ;;
+        *) printf 'base\n' ;;
+      esac
     }
     custom=0
     custom_helpers=()
@@ -158,6 +170,8 @@ case "$1" in
       fi
       for host in github.com gist.github.com; do
         preserved_helpers=()
+        scoped_keys=()
+        scoped_helpers=()
         migrating=0
         for migrated_host in "${migrate_gh_hosts[@]}"; do
           [[ "$migrated_host" != "$host" ]] || migrating=1
@@ -180,8 +194,29 @@ case "$1" in
               continue
             fi
             [[ "$managed_seen" = 0 ]] || continue
-            host_helper_matches "$key" "$host" || continue
+            relation="$(host_helper_context "$key" "$host" || true)"
+            [[ -n "$relation" ]] || continue
             if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
+              continue
+            fi
+            if [[ "$relation" = scoped ]]; then
+              if [[ -z "$helper" ]]; then
+                for index in "${!scoped_keys[@]}"; do
+                  if [[ "${scoped_keys[index]}" = "$key" ]]; then
+                    unset 'scoped_keys[index]' 'scoped_helpers[index]'
+                  fi
+                done
+                continue
+              fi
+              found=0
+              for index in "${!scoped_keys[@]}"; do
+                if [[ "${scoped_keys[index]}" = "$key" &&
+                  "${scoped_helpers[index]}" = "$helper" ]]; then found=1; fi
+              done
+              if [[ "$found" = 0 ]]; then
+                scoped_keys+=( "$key" )
+                scoped_helpers+=( "$helper" )
+              fi
               continue
             fi
             if [[ -z "$helper" ]]; then
@@ -209,6 +244,13 @@ case "$1" in
           [[ "$found" = 0 ]] || continue
           git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
           emitted_helpers+=( "$helper" )
+        done
+        for index in "${!scoped_keys[@]}"; do
+          helper=${scoped_helpers[index]}
+          found=0
+          for existing in "${emitted_helpers[@]}"; do [[ "$existing" != "$helper" ]] || found=1; done
+          [[ "$found" = 0 ]] || continue
+          git config --file "$temp/config" --add "${scoped_keys[index]}" "$helper"
         done
       done
     fi
