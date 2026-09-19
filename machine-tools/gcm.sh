@@ -89,13 +89,16 @@ case "$1" in
     temp="$(mktemp -d "$config_dir/.portables-credentials.XXXXXX")"
     trap 'rm -rf -- "$temp"' EXIT
     host_helper_context() {
-      local key="$1" host="$2" context remainder authority base matched
+      local key="$1" host="$2" context remainder authority user_scoped=0 base matched
       context=${key#credential.}
       context=${context%.helper}
       [[ "$context" = *://* ]] || return 1
       remainder=${context#*://}
       authority=${remainder%%/*}
-      authority=${authority##*@}
+      if [[ "$authority" = *@* ]]; then
+        user_scoped=1
+        authority=${authority##*@}
+      fi
       base="${context%%://*}://$authority"
       : >"$temp/urlmatch"
       git config --file "$temp/urlmatch" "credential.$base.helper" portables-match \
@@ -103,6 +106,10 @@ case "$1" in
       matched="$(git config --file "$temp/urlmatch" --get-urlmatch credential.helper \
         "https://$host" 2>/dev/null || true)"
       [[ "$matched" = portables-match ]] || return 1
+      if [[ "$user_scoped" = 1 ]]; then
+        printf 'scoped\n'
+        return
+      fi
       case "$remainder" in
         */?*) printf 'scoped\n' ;;
         *) printf 'base\n' ;;
@@ -206,6 +213,8 @@ case "$1" in
                     unset 'scoped_keys[index]' 'scoped_helpers[index]'
                   fi
                 done
+                scoped_keys+=( "$key" )
+                scoped_helpers+=( '' )
                 continue
               fi
               found=0
