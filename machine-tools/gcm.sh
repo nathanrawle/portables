@@ -77,9 +77,20 @@ case "$1" in
       [[ -r "$source" ]] || continue
       rc=0
       git config --file "$source" --includes --show-origin -z \
-        --get-all credential.helper >"$temp/helpers" || rc=$?
+        --get-regexp '^(include\.path|credential\.helper)$' >"$temp/helpers" || rc=$?
       [[ "$rc" -le 1 ]] || exit "$rc"
-      while IFS= read -r -d '' origin && IFS= read -r -d '' helper; do
+      managed_seen=0
+      while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
+        key=${entry%%$'\n'*}
+        helper=${entry#*$'\n'}
+        if [[ "$key" = include.path ]]; then
+          if [[ "$helper" = "$managed" ||
+            ( "$helper" = "${managed##*/}" &&
+              "$(dirname -- "${origin#file:}")" = "$config_dir" ) ]]; then
+            managed_seen=1
+          fi
+          continue
+        fi
         if [[ "$migrate_helpers" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
           continue
         fi
@@ -87,6 +98,7 @@ case "$1" in
           continue
         fi
         custom=1
+        [[ "$managed_seen" = 0 ]] || continue
         if [[ -z "$helper" ]]; then
           custom_helpers=()
           continue

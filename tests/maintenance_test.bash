@@ -386,11 +386,21 @@ EOF
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com.helper custom-shared
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://gist.github.com.helper custom-gist
   bash "$FIXTURE/configure" gcm
-  printf '\n[credential "https://github.com"]\n  helper = after-include\n' >>"$GIT_CONFIG_GLOBAL"
+  cat >>"$GIT_CONFIG_GLOBAL" <<'EOF'
+
+[credential "https://github.com"]
+  helper = after-include
+
+[credential]
+  helper = generic-after-include
+EOF
   bash "$FIXTURE/configure" gcm
   local managed="$HOME/.config/git/portables-credentials.conf"
   printf -v quoted_gh_path '%q' "$gh_path"
   gh_helper="!$quoted_gh_path auth git-credential"
+  assert_eq custom-shared "$(git config --file "$managed" --get-all credential.helper)"
+  assert_eq generic-after-include \
+    "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.helper | tail -n 1)"
   assert_eq $'\n'"$gh_helper"$'\ncustom-shared' \
     "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
   assert_eq $'\n'"$gh_helper"$'\ncustom-gist\ncustom-shared' \
