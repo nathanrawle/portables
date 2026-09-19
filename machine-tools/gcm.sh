@@ -33,6 +33,11 @@ case "$1" in
     migrate_include=0
     migrate_gh_hosts=()
     gh_path="$(command -v gh || true)"
+    gh_helper=
+    if [[ -n "$gh_path" ]]; then
+      printf -v quoted_gh_path '%q' "$gh_path"
+      gh_helper="!$quoted_gh_path auth git-credential"
+    fi
     if [[ -f "$GIT_USER_FILE" ]]; then
       legacy="$(git config --file "$GIT_USER_FILE" --get-all credential.helper || true)"
       if { [[ "$OS" = Darwin ]] && [[ "$legacy" = manager ]]; } ||
@@ -52,7 +57,8 @@ case "$1" in
         for host in github.com gist.github.com; do
           legacy_host="$(git config --file "$GIT_USER_FILE" \
             --get-all "credential.https://$host.helper" || true)"
-          if [[ "$legacy_host" = $'\n'"!$gh_path auth git-credential" ]]; then
+          if [[ "$legacy_host" = $'\n'"!$gh_path auth git-credential" ||
+            "$legacy_host" = $'\n'"$gh_helper" ]]; then
             migrate_gh_hosts+=( "$host" )
           fi
         done
@@ -125,7 +131,8 @@ case "$1" in
             if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
               continue
             fi
-            [[ -n "$helper" && "$helper" != "!$gh_path auth git-credential" ]] || continue
+            [[ -n "$helper" && "$helper" != "!$gh_path auth git-credential" &&
+              "$helper" != "$gh_helper" ]] || continue
             found=0
             for existing in "${preserved_helpers[@]}"; do
               [[ "$existing" != "$helper" ]] || found=1
@@ -134,13 +141,18 @@ case "$1" in
           done <"$temp/host-helpers"
         done
         git config --file "$temp/config" --add "credential.https://$host.helper" ''
-        git config --file "$temp/config" --add "credential.https://$host.helper" \
-          "!$gh_path auth git-credential"
+        git config --file "$temp/config" --add "credential.https://$host.helper" "$gh_helper"
+        emitted_helpers=( "$gh_helper" )
         for helper in "${preserved_helpers[@]}"; do
           git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
+          emitted_helpers+=( "$helper" )
         done
         for helper in "${fallbacks[@]}"; do
+          found=0
+          for existing in "${emitted_helpers[@]}"; do [[ "$existing" != "$helper" ]] || found=1; done
+          [[ "$found" = 0 ]] || continue
           git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
+          emitted_helpers+=( "$helper" )
         done
       done
     fi

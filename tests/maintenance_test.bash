@@ -368,22 +368,37 @@ test_maintenance_git_preserves_custom_github_helpers() {
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
   ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
-  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
-  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh"
-  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
-  git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com.helper custom-github
+  local gh_dir="$HOME/bin with spaces" gh_path quoted_gh_path gh_helper credential
+  mkdir -p "$gh_dir"
+  gh_path="$gh_dir/gh"
+  cat >"$gh_path" <<'EOF'
+#!/bin/sh
+if [ "$1 $2 $3" = 'auth git-credential get' ]; then
+  cat >/dev/null
+  printf 'username=space-user\npassword=space-password\n'
+fi
+EOF
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$gh_path"
+  export PATH="$gh_dir:$TEST_TMPDIR/bin:/usr/bin:/bin"
+  git config --file "$GIT_CONFIG_GLOBAL" credential.helper custom-shared
+  git config --file "$GIT_CONFIG_GLOBAL" credential.https://github.com.helper custom-shared
   git config --file "$GIT_CONFIG_GLOBAL" credential.https://gist.github.com.helper custom-gist
   bash "$FIXTURE/configure" gcm
   bash "$FIXTURE/configure" gcm
   local managed="$HOME/.config/git/portables-credentials.conf"
-  assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential"$'\ncustom-github\nmanager\nosxkeychain' \
+  printf -v quoted_gh_path '%q' "$gh_path"
+  gh_helper="!$quoted_gh_path auth git-credential"
+  assert_eq $'\n'"$gh_helper"$'\ncustom-shared' \
     "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
-  assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential"$'\ncustom-gist\nmanager\nosxkeychain' \
+  assert_eq $'\n'"$gh_helper"$'\ncustom-gist\ncustom-shared' \
     "$(git config --file "$managed" --get-all credential.https://gist.github.com.helper)"
-  assert_eq custom-github \
+  assert_eq custom-shared \
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://github.com.helper)"
   assert_eq custom-gist \
     "$(git config --file "$GIT_CONFIG_GLOBAL" --get-all credential.https://gist.github.com.helper)"
+  credential="$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill)"
+  [[ "$credential" = *$'username=space-user\npassword=space-password'* ]] ||
+    fail 'quoted GitHub CLI helper did not provide credentials'
 }
 
 test_maintenance_wrappers_preserve_failure_and_scope() {
