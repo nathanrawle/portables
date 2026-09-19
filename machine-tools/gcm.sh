@@ -88,6 +88,14 @@ case "$1" in
     fi
     temp="$(mktemp -d "$config_dir/.portables-credentials.XXXXXX")"
     trap 'rm -rf -- "$temp"' EXIT
+    host_helper_matches() {
+      local key="$1" host="$2" matched
+      : >"$temp/urlmatch"
+      git config --file "$temp/urlmatch" "$key" portables-match 2>/dev/null || return 1
+      matched="$(git config --file "$temp/urlmatch" --get-urlmatch credential.helper \
+        "https://$host" 2>/dev/null || true)"
+      [[ "$matched" = portables-match ]]
+    }
     custom=0
     custom_helpers=()
     if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
@@ -172,8 +180,7 @@ case "$1" in
               continue
             fi
             [[ "$managed_seen" = 0 ]] || continue
-            [[ "$key" = "credential.https://$host.helper" ||
-              "$key" = "credential.https://$host/.helper" ]] || continue
+            host_helper_matches "$key" "$host" || continue
             if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
               continue
             fi
