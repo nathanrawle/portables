@@ -184,8 +184,9 @@ while preserving custom destinations and rejecting unrelated broken links.
 - `tests/`: dependency-free shell harness and isolated fixtures.
 
 ```bash
-bash tests/run
-bash tests/run tests/maintenance_test.bash tests/symlinks_test.bash
+bash tests/run --list tests/maintenance_test.bash
+bash tests/run --filter 'Git defaults' tests/maintenance_test.bash
+bash tests/run tests/symlinks_test.bash
 bash -n instantiate configure symlinks lib/*.bash machine-tools/*.sh
 zsh -n home/.zfuns/relink home/.zfuns/retune home/.zfuns/reinstantiate
 ```
@@ -193,7 +194,9 @@ zsh -n home/.zfuns/relink home/.zfuns/retune home/.zfuns/reinstantiate
 Tests use temporary homes, fake installers, and isolated Git configuration. Linux
 dispatch tests simulate the supported distributions; they do not establish that real
 package installation was tested on every OS. Real tmux tests require permission to
-create temporary tmux servers.
+create temporary tmux servers. A bare `bash tests/run` uses the available logical cores
+and is reserved for the pull-request publication gates documented in
+[AGENTS.md](AGENTS.md).
 
 For the worktree functions, see [taw](docs/taw.md) and
 [taw-convert](docs/taw-convert.md). Contributor conventions are in [AGENTS.md](AGENTS.md).

@@ -330,7 +330,7 @@ EOF
   printf '%s\n' "$bin"
 }
 
-make_git_repo() {
+create_git_repo() {
   local repo="$1"
   local primary_branch="${2:-main}"
 
@@ -347,6 +347,26 @@ make_git_repo() {
   git -C "$repo" add develop.txt
   git -C "$repo" commit -qm "develop commit"
   git -C "$repo" checkout -q "$primary_branch"
+}
+
+make_git_repo() {
+  local repo="$1"
+  local primary_branch="${2:-main}"
+  local cache_key= byte i seed
+  local LC_ALL=C
+
+  # Hex bytes keep branch cache keys distinct on case-insensitive filesystems.
+  for ((i = 0; i < ${#primary_branch}; i++)); do
+    printf -v byte '%02x' "'${primary_branch:i:1}"
+    cache_key+="$byte"
+  done
+  seed="$TESTS_TMP_ROOT/fixtures/git/$cache_key"
+
+  if [[ ! -d "$seed/.git" ]]; then
+    create_git_repo "$seed" "$primary_branch"
+  fi
+  mkdir -p "$repo"
+  cp -R "$seed/." "$repo/"
 }
 
 make_bare_wrapper() {
