@@ -462,6 +462,8 @@ test_maintenance_git_preserves_post_managed_overrides() {
     git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" \
       "!$TEST_TMPDIR/bin/gh auth git-credential"
   done
+  git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.gitignore"
+  git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.config/git/ignore"
   git config --file "$HOME/.gitconfig" \
     "includeIf.gitdir:$HOME/work/**.path" "$HOME/work.gitconfig"
   bash "$FIXTURE/configure" gcm
@@ -476,6 +478,8 @@ test_maintenance_git_preserves_post_managed_overrides() {
     assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential" \
       "$(git config --file "$HOME/.gitconfig" --get-all "credential.https://$host.helper")"
   done
+  assert_eq "$HOME/.gitignore"$'\n'"$HOME/.config/git/ignore" \
+    "$(git config --file "$HOME/.gitconfig" --get-all core.excludesFile)"
   assert_eq "$HOME/work.gitconfig" \
     "$(git config --file "$HOME/.gitconfig" \
       --get "includeIf.gitdir:$HOME/work/**.path")"

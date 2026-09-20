@@ -47,7 +47,7 @@ case "$1" in
     }
     user_git_file
     legacy_helpers=0
-    migrate_excludes=0
+    legacy_excludes=0
     migrate_includes=()
     deduplicate_includes=0
     legacy_gh_hosts=()
@@ -66,9 +66,10 @@ case "$1" in
         [[ "$legacy" = $'manager\noauth' ]]; then
         legacy_helpers=1
       fi
-      legacy_excludes="$(git config --file "$GIT_USER_FILE" --get-all core.excludesFile || true)"
-      if [[ "$legacy_excludes" = "$HOME/.gitignore"$'\n'"$config_dir/ignore" ]]; then
-        migrate_excludes=1
+      legacy_excludes_values="$(git config --file "$GIT_USER_FILE" \
+        --get-all core.excludesFile || true)"
+      if [[ "$legacy_excludes_values" = "$HOME/.gitignore"$'\n'"$config_dir/ignore" ]]; then
+        legacy_excludes=1
       fi
       if includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"; then
         managed_include_count=0
@@ -114,7 +115,7 @@ case "$1" in
         [[ -r "$source" ]] || continue
         rc=0
         git -C "$temp" config --file "$source" --includes --show-origin -z \
-          --get-regexp '^(include\.path|credential\.helper|credential\..*\.helper)$' \
+          --get-regexp '^(include\.path|core\.excludesfile|credential\.helper|credential\..*\.helper)$' \
           >"$temp/migration-settings" || rc=$?
         [[ "$rc" -le 1 ]] || return "$rc"
         while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
@@ -133,6 +134,10 @@ case "$1" in
     migrate_helpers=0
     if [[ "$legacy_helpers" = 1 ]] && legacy_key_precedes_boundary credential.helper; then
       migrate_helpers=1
+    fi
+    migrate_excludes=0
+    if [[ "$legacy_excludes" = 1 ]] && legacy_key_precedes_boundary core.excludesfile; then
+      migrate_excludes=1
     fi
     migrate_gh_hosts=()
     for host in "${legacy_gh_hosts[@]}"; do
