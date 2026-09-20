@@ -1002,9 +1002,9 @@ _taw_resolve_explicit_picker() {
       )
       [[ "$_taw_picker_mode" != branch ]] || _taw_fzf_args+=(--ansi)
       if [[ "$_taw_modern_fzf" == true ]]; then
-        _taw_enter_bind='[[ -n {2} && {2} != message ]] && printf "print()+accept"'
-        if [[ "$_taw_picker_mode" == branch ]]; then
-          _taw_enter_bind+=' || [[ "$FZF_MATCH_COUNT" -eq 0 && -n "$FZF_QUERY" ]] && printf "print(create)+accept-or-print-query"'
+        _taw_enter_bind='if [[ -n {2} && {2} != message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 && -n "$FZF_QUERY" ]]; then printf "print(create)+accept-or-print-query"; fi'
+        if [[ "$_taw_picker_mode" != branch ]]; then
+          _taw_enter_bind='[[ -n {2} && {2} != message ]] && printf "print()+accept"'
         fi
         _taw_fzf_args+=(
           '--bind=tab:print(tab)+accept'
@@ -1657,7 +1657,7 @@ _taw_select_branch_target_with_fzf() {
   [[ -n "$_taw_rows" ]] || _taw_rows=$'Picker has no alternate branches\tmessage\t\t\t'
   _taw_fzf_supports_picker_transforms && _taw_modern_fzf=true
   if [[ "$_taw_modern_fzf" == true ]]; then
-    _taw_enter_bind='[[ -n {2} && {2} != message ]] && printf "print()+accept" || [[ "$FZF_MATCH_COUNT" -eq 0 && -n "$FZF_QUERY" ]] && printf "print(create)+accept-or-print-query"'
+    _taw_enter_bind='if [[ -n {2} && {2} != message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 && -n "$FZF_QUERY" ]]; then printf "print(create)+accept-or-print-query"; fi'
     _taw_choice="$(print -r -- "$_taw_rows" | fzf \
       --ansi --delimiter=$'\t' --with-nth=1 --prompt='branch> ' --print-query \
       "--bind=enter:transform:$_taw_enter_bind")" || _taw_status=$?
