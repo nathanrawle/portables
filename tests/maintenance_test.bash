@@ -511,6 +511,24 @@ test_maintenance_git_recognizes_equivalent_managed_includes() {
   done
 }
 
+test_maintenance_git_deduplicates_explicit_managed_includes() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
+  mkdir -p "$HOME/.config/git"
+  local config="$HOME/explicit.gitconfig" managed="$HOME/.config/git/portables-credentials.conf"
+  git config --file "$config" --add include.path '~/.config/git/portables-credentials.conf'
+  git config --file "$config" --add include.path "$managed"
+  GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm
+  assert_eq 1 "$(git config --file "$config" --get-all include.path | wc -l | tr -d ' ')"
+  assert_eq "$managed" "$(git config --file "$config" --get include.path)"
+  assert_eq $'manager\nosxkeychain' \
+    "$(GIT_CONFIG_GLOBAL="$config" git config --global --includes --get-all credential.helper)"
+}
+
 test_maintenance_wrappers_preserve_failure_and_scope() {
   maintenance_fixture
   cat >"$TEST_TMPDIR/bin/bash" <<'EOF'
@@ -562,6 +580,7 @@ test_case 'maintenance: Git manages gh helpers and legacy root settings' test_ma
 test_case 'maintenance: Git preserves custom GitHub helpers' test_maintenance_git_preserves_custom_github_helpers
 test_case 'maintenance: Git does not replay root overlay helpers' test_maintenance_git_does_not_replay_root_overlay_helpers
 test_case 'maintenance: Git recognizes equivalent managed includes' test_maintenance_git_recognizes_equivalent_managed_includes
+test_case 'maintenance: Git deduplicates explicit managed includes' test_maintenance_git_deduplicates_explicit_managed_includes
 test_case 'maintenance: Zsh wrappers preserve failures and caller state' test_maintenance_wrappers_preserve_failure_and_scope
 test_case 'maintenance: wrapper help does not relink or prompt' test_maintenance_wrappers_help_has_no_followup
 

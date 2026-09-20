@@ -63,17 +63,22 @@ case "$1" in
       if [[ "$legacy_excludes" = "$HOME/.gitignore"$'\n'"$config_dir/ignore" ]]; then
         migrate_excludes=1
       fi
-      if [[ -z "${GIT_CONFIG_GLOBAL:-}" ]] &&
-        includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"; then
+      if includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"; then
+        managed_include_count=0
+        managed_include_values=()
         while IFS= read -r included; do
           if is_managed_include "$included" "$GIT_USER_FILE"; then
+            managed_include_count=$((managed_include_count + 1))
             found=0
-            for existing in "${migrate_includes[@]}"; do
+            for existing in "${managed_include_values[@]}"; do
               [[ "$existing" != "$included" ]] || found=1
             done
-            [[ "$found" = 1 ]] || migrate_includes+=( "$included" )
+            [[ "$found" = 1 ]] || managed_include_values+=( "$included" )
           fi
         done <<<"$includes"
+        if [[ -z "${GIT_CONFIG_GLOBAL:-}" || "$managed_include_count" -gt 1 ]]; then
+          migrate_includes=( "${managed_include_values[@]}" )
+        fi
       fi
       if [[ -n "$gh_path" ]]; then
         for host in github.com gist.github.com; do
