@@ -516,17 +516,30 @@ test_maintenance_git_deduplicates_explicit_managed_includes() {
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
   ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
-  chmod +x "$TEST_TMPDIR/bin/git-credential-manager"
+  printf '#!/bin/sh\ncat >/dev/null\n' >"$TEST_TMPDIR/bin/gh"
+  cat >"$TEST_TMPDIR/bin/git-credential-custom-after" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+if [ "$1" = get ]; then
+  printf 'username=after-user\npassword=after-password\n'
+fi
+EOF
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh" \
+    "$TEST_TMPDIR/bin/git-credential-custom-after"
   export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
   mkdir -p "$HOME/.config/git"
-  local config="$HOME/explicit.gitconfig" managed="$HOME/.config/git/portables-credentials.conf"
+  local config="$HOME/explicit.gitconfig" managed="$HOME/.config/git/portables-credentials.conf" \
+    credential
   git config --file "$config" --add include.path '~/.config/git/portables-credentials.conf'
   git config --file "$config" --add include.path "$managed"
+  git config --file "$config" --add credential.helper custom-after
   GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm
   assert_eq 1 "$(git config --file "$config" --get-all include.path | wc -l | tr -d ' ')"
   assert_eq "$managed" "$(git config --file "$config" --get include.path)"
-  assert_eq $'manager\nosxkeychain' \
-    "$(GIT_CONFIG_GLOBAL="$config" git config --global --includes --get-all credential.helper)"
+  credential="$(printf 'protocol=https\nhost=github.com\n\n' | \
+    GIT_CONFIG_GLOBAL="$config" git credential fill)"
+  [[ "$credential" = *$'username=after-user\npassword=after-password'* ]] ||
+    fail 'deduplication moved the managed include after the custom fallback'
 }
 
 test_maintenance_wrappers_preserve_failure_and_scope() {

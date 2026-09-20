@@ -43,6 +43,7 @@ case "$1" in
     migrate_helpers=0
     migrate_excludes=0
     migrate_includes=()
+    deduplicate_includes=0
     migrate_gh_hosts=()
     gh_path="$(type -P gh || true)"
     if [[ -n "$gh_path" && "$gh_path" != /* ]]; then
@@ -76,8 +77,11 @@ case "$1" in
             [[ "$found" = 1 ]] || managed_include_values+=( "$included" )
           fi
         done <<<"$includes"
-        if [[ -z "${GIT_CONFIG_GLOBAL:-}" || "$managed_include_count" -gt 1 ]]; then
+        if [[ -z "${GIT_CONFIG_GLOBAL:-}" ]]; then
           migrate_includes=( "${managed_include_values[@]}" )
+        elif [[ "$managed_include_count" -gt 1 ]]; then
+          migrate_includes=( "${managed_include_values[@]}" )
+          deduplicate_includes=1
         fi
       fi
       if [[ -n "$gh_path" ]]; then
@@ -296,9 +300,18 @@ case "$1" in
     if [[ "$migrate_excludes" = 1 ]]; then
       git config --file "$GIT_USER_FILE" --unset-all core.excludesFile
     fi
-    for included in "${migrate_includes[@]}"; do
-      git config --file "$GIT_USER_FILE" --unset-all --fixed-value include.path "$included"
-    done
+    if [[ "$deduplicate_includes" = 1 ]]; then
+      for included in "${migrate_includes[@]}"; do
+        git config --file "$GIT_USER_FILE" --replace-all --fixed-value \
+          include.path "$managed" "$included"
+      done
+      git config --file "$GIT_USER_FILE" --replace-all --fixed-value \
+        include.path "$managed" "$managed"
+    else
+      for included in "${migrate_includes[@]}"; do
+        git config --file "$GIT_USER_FILE" --unset-all --fixed-value include.path "$included"
+      done
+    fi
     for host in "${migrate_gh_hosts[@]}"; do
       git config --file "$GIT_USER_FILE" --unset-all "credential.https://$host.helper"
     done
