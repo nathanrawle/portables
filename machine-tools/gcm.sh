@@ -46,11 +46,11 @@ case "$1" in
       [[ "$candidate_dir/${candidate##*/}" = "$managed_dir/${managed##*/}" ]]
     }
     user_git_file
-    migrate_helpers=0
+    legacy_helpers=0
     migrate_excludes=0
     migrate_includes=()
     deduplicate_includes=0
-    migrate_gh_hosts=()
+    legacy_gh_hosts=()
     gh_path="$(type -P gh || true)"
     if [[ -n "$gh_path" && "$gh_path" != /* ]]; then
       gh_path="$(cd -- "$(dirname -- "$gh_path")" && pwd -P)/${gh_path##*/}"
@@ -64,7 +64,7 @@ case "$1" in
       legacy="$(git config --file "$GIT_USER_FILE" --get-all credential.helper || true)"
       if { [[ "$OS" = Darwin ]] && [[ "$legacy" = manager ]]; } ||
         [[ "$legacy" = $'manager\noauth' ]]; then
-        migrate_helpers=1
+        legacy_helpers=1
       fi
       legacy_excludes="$(git config --file "$GIT_USER_FILE" --get-all core.excludesFile || true)"
       if [[ "$legacy_excludes" = "$HOME/.gitignore"$'\n'"$config_dir/ignore" ]]; then
@@ -96,7 +96,7 @@ case "$1" in
             --get-all "credential.https://$host.helper" || true)"
           if [[ "$legacy_host" = $'\n'"!$gh_path auth git-credential" ||
             "$legacy_host" = $'\n'"$gh_helper" ]]; then
-            migrate_gh_hosts+=( "$host" )
+            legacy_gh_hosts+=( "$host" )
           fi
         done
       fi
@@ -108,6 +108,38 @@ case "$1" in
     else
       sources=( "$config_dir/config" "$HOME/.gitconfig" )
     fi
+    legacy_key_precedes_boundary() {
+      local target_key="$1" source rc origin entry key value managed_seen=0 before=0 after=0
+      for source in "${sources[@]}"; do
+        [[ -r "$source" ]] || continue
+        rc=0
+        git -C "$temp" config --file "$source" --includes --show-origin -z \
+          --get-regexp '^(include\.path|credential\.helper|credential\..*\.helper)$' \
+          >"$temp/migration-settings" || rc=$?
+        [[ "$rc" -le 1 ]] || return "$rc"
+        while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
+          key=${entry%%$'\n'*}
+          value=${entry#*$'\n'}
+          if [[ "$key" = include.path ]]; then
+            is_managed_include "$value" "${origin#file:}" && managed_seen=1
+            continue
+          fi
+          [[ "$key" = "$target_key" && "${origin#file:}" -ef "$GIT_USER_FILE" ]] || continue
+          if [[ "$managed_seen" = 0 ]]; then before=1; else after=1; fi
+        done <"$temp/migration-settings"
+      done
+      [[ "$before" = 1 && "$after" = 0 ]]
+    }
+    migrate_helpers=0
+    if [[ "$legacy_helpers" = 1 ]] && legacy_key_precedes_boundary credential.helper; then
+      migrate_helpers=1
+    fi
+    migrate_gh_hosts=()
+    for host in "${legacy_gh_hosts[@]}"; do
+      if legacy_key_precedes_boundary "credential.https://$host.helper"; then
+        migrate_gh_hosts+=( "$host" )
+      fi
+    done
     managed_seen=0
     unsupported=()
     for source in "${sources[@]}"; do

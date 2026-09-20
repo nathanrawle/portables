@@ -359,19 +359,18 @@ test_maintenance_git_manages_gh_helpers_and_legacy_root_settings() {
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
   chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh"
   export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
-  unset GIT_CONFIG_GLOBAL
   git config --file "$HOME/.gitconfig" user.email work@example.com
   git config --file "$HOME/.gitconfig" user.signingKey key-id
   git config --file "$HOME/.gitconfig" --add credential.helper manager
   git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.gitignore"
   git config --file "$HOME/.gitconfig" --add core.excludesFile "$HOME/.config/git/ignore"
-  git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
-  git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
   for host in github.com gist.github.com; do
     git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" ''
     git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" \
       "!$TEST_TMPDIR/bin/gh auth git-credential"
   done
+  git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
+  git config --file "$HOME/.gitconfig" --add include.path '~/.config/git/portables-credentials.conf'
   bash "$FIXTURE/configure" gcm
   local managed="$HOME/.config/git/portables-credentials.conf"
   assert_eq $'\nmanager\nosxkeychain' \
@@ -391,9 +390,9 @@ test_maintenance_git_manages_gh_helpers_and_legacy_root_settings() {
   if git config --file "$HOME/.gitconfig" --get-all core.excludesFile >/dev/null; then
     fail 'legacy excludes files remained in machine overlay'
   fi
-  if git config --file "$HOME/.gitconfig" --get-all include.path >/dev/null; then
-    fail 'duplicate managed include remained in machine overlay'
-  fi
+  assert_eq "$managed" "$(git config --file "$HOME/.gitconfig" --get include.path)"
+  assert_eq 1 \
+    "$(git config --file "$HOME/.gitconfig" --get-all include.path | wc -l | tr -d ' ')"
   local backups=( "$HOME"/.gitconfig.bak.* )
   assert_eq 1 "${#backups[@]}"
 }
@@ -456,7 +455,13 @@ test_maintenance_git_preserves_post_managed_overrides() {
   chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh"
   export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
   unset GIT_CONFIG_GLOBAL
-  git config --file "$HOME/.gitconfig" credential.helper root-custom
+  git config --file "$HOME/.gitconfig" --add credential.helper manager
+  git config --file "$HOME/.gitconfig" --add credential.helper oauth
+  for host in github.com gist.github.com; do
+    git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" ''
+    git config --file "$HOME/.gitconfig" --add "credential.https://$host.helper" \
+      "!$TEST_TMPDIR/bin/gh auth git-credential"
+  done
   git config --file "$HOME/.gitconfig" \
     "includeIf.gitdir:$HOME/work/**.path" "$HOME/work.gitconfig"
   bash "$FIXTURE/configure" gcm
@@ -465,7 +470,12 @@ test_maintenance_git_preserves_post_managed_overrides() {
     "$(git config --file "$managed" --get-all credential.helper)"
   assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential"$'\nmanager\nosxkeychain' \
     "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
-  assert_eq root-custom "$(git config --file "$HOME/.gitconfig" --get credential.helper)"
+  assert_eq $'manager\noauth' \
+    "$(git config --file "$HOME/.gitconfig" --get-all credential.helper)"
+  for host in github.com gist.github.com; do
+    assert_eq $'\n'"!$TEST_TMPDIR/bin/gh auth git-credential" \
+      "$(git config --file "$HOME/.gitconfig" --get-all "credential.https://$host.helper")"
+  done
   assert_eq "$HOME/work.gitconfig" \
     "$(git config --file "$HOME/.gitconfig" \
       --get "includeIf.gitdir:$HOME/work/**.path")"
