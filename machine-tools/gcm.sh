@@ -176,9 +176,6 @@ case "$1" in
         Darwin) require_commands git-credential-manager ;;
         Linux) require_commands git-credential-oauth ;;
       esac
-      for helper in "${defaults[@]}"; do
-        git config --file "$temp/config" --add credential.helper "$helper"
-      done
       fallbacks=( "${defaults[@]}" )
     else
       log -i "preserving custom credential helpers"
@@ -271,13 +268,17 @@ case "$1" in
           git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
           emitted_helpers+=( "$helper" )
         done
-        for helper in "${fallbacks[@]}"; do
-          found=0
-          for existing in "${emitted_helpers[@]}"; do [[ "$existing" != "$helper" ]] || found=1; done
-          [[ "$found" = 0 ]] || continue
-          git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
-          emitted_helpers+=( "$helper" )
-        done
+        if [[ "$custom" = 1 ]]; then
+          for helper in "${fallbacks[@]}"; do
+            found=0
+            for existing in "${emitted_helpers[@]}"; do
+              [[ "$existing" != "$helper" ]] || found=1
+            done
+            [[ "$found" = 0 ]] || continue
+            git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
+            emitted_helpers+=( "$helper" )
+          done
+        fi
         reset_scopes=()
         for index in "${!scoped_keys[@]}"; do
           key=${scoped_keys[index]}
@@ -298,6 +299,11 @@ case "$1" in
           [[ "$found" = 0 ]] || continue
           git config --file "$temp/config" --add "$key" "$helper"
         done
+      done
+    fi
+    if [[ "$custom" = 0 ]]; then
+      for helper in "${defaults[@]}"; do
+        git config --file "$temp/config" --add credential.helper "$helper"
       done
     fi
     chmod 600 "$temp/config"

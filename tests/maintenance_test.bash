@@ -380,7 +380,7 @@ test_maintenance_git_manages_gh_helpers_and_legacy_root_settings() {
   local managed="$HOME/.config/git/portables-credentials.conf"
   assert_eq $'manager\nosxkeychain' "$(git config --file "$managed" --get-all credential.helper)"
   for host in github.com gist.github.com; do
-    assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential"$'\nmanager\nosxkeychain' \
+    assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential" \
       "$(git config --file "$managed" --get-all "credential.https://$host.helper")"
     if git config --file "$HOME/.gitconfig" --get-all "credential.https://$host.helper" >/dev/null; then
       fail "legacy $host helper remained in machine overlay"
@@ -546,7 +546,20 @@ test_maintenance_git_preserves_conditional_helpers() {
   maintenance_fixture
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
   ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
-  printf '#!/bin/sh\ncat >/dev/null\n' >"$TEST_TMPDIR/bin/gh"
+  cat >"$TEST_TMPDIR/bin/gh" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+if [ "$1 $2 $3" = 'auth git-credential get' ]; then
+  printf 'username=gh-user\npassword=gh-password\n'
+fi
+EOF
+  cat >"$TEST_TMPDIR/bin/git-credential-manager" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+if [ "$1" = get ]; then
+  printf 'username=manager-user\npassword=manager-password\n'
+fi
+EOF
   cat >"$TEST_TMPDIR/bin/git-credential-conditional" <<'EOF'
 #!/bin/sh
 cat >/dev/null
@@ -554,7 +567,8 @@ if [ "$1" = get ]; then
   printf 'username=conditional-user\npassword=conditional-password\n'
 fi
 EOF
-  chmod +x "$TEST_TMPDIR/bin/gh" "$TEST_TMPDIR/bin/git-credential-conditional"
+  chmod +x "$TEST_TMPDIR/bin/gh" "$TEST_TMPDIR/bin/git-credential-manager" \
+    "$TEST_TMPDIR/bin/git-credential-conditional"
   export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
   mkdir -p "$HOME/.config/git" "$HOME/work/repo"
   local config="$HOME/explicit.gitconfig" conditional="$HOME/work.gitconfig" \
@@ -565,6 +579,10 @@ EOF
   (cd "$HOME" && GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm)
   assert_eq "!'$TEST_TMPDIR/bin/gh' auth git-credential" \
     "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  credential="$(printf 'protocol=https\nhost=github.com\n\n' | \
+    GIT_CONFIG_GLOBAL="$config" git -C "$HOME" credential fill)"
+  [[ "$credential" = *$'username=gh-user\npassword=gh-password'* ]] ||
+    fail 'managed defaults took precedence over the GitHub CLI helper'
   git -C "$HOME/work/repo" init -q
   credential="$(printf 'protocol=https\nhost=github.com\n\n' | \
     GIT_CONFIG_GLOBAL="$config" git -C "$HOME/work/repo" credential fill)"
