@@ -1737,6 +1737,27 @@ test_bare_project_origin_head_only_creates_local_default_worktree() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_bare_picker_preserves_custom_head_default() {
+  local project worktree fake_bin no_fzf_path log default_commit
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  default_commit="$(git --git-dir "$project/.git" rev-parse main)"
+  git --git-dir "$project/.git" update-ref refs/heads/trunk refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/trunk
+  worktree="$project/.worktrees/feature/from-trunk"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/from-trunk \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project" --mode=branch
+
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected a bare custom HEAD to remain the picker default"
+}
+
 test_bare_picker_lists_deduped_branches() {
   local project fake_bin log fzf_log main_count remote_count
 
@@ -5241,6 +5262,8 @@ test_case "taw: bare project without default falls back to master" \
   test_bare_project_without_default_falls_back_to_master
 test_case "taw: bare project with only origin HEAD creates local default worktree" \
   test_bare_project_origin_head_only_creates_local_default_worktree
+test_case "taw: bare picker preserves custom HEAD default" \
+  test_bare_picker_preserves_custom_head_default
 test_case "taw: bare default worktree fails when refs exist but no default resolves" \
   test_bare_zero_worktree_fails_when_refs_exist_but_no_default_resolves
 test_case "taw: bare default worktree fails when only tag ref exists" \
