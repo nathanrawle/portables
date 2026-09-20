@@ -45,6 +45,31 @@ require_commands() {
   return "$missing"
 }
 
+require_git_version() {
+  local required_major="$1" required_minor="$2" output version major minor remainder
+  require_commands git || return 1
+  output="$(git version 2>/dev/null)" || {
+    log -e "unable to determine Git version"
+    return 1
+  }
+  version=${output#git version }
+  version=${version%% *}
+  major=${version%%.*}
+  remainder=${version#*.}
+  minor=${remainder%%.*}
+  [[ "$remainder" != "$version" ]] || {
+    log -e "unrecognized Git version: $output"
+    return 1
+  }
+  case "$major:$minor" in
+    *[!0-9:]*|:*|*:) log -e "unrecognized Git version: $output"; return 1 ;;
+  esac
+  if ((major < required_major || (major == required_major && minor < required_minor))); then
+    log -e "Git $required_major.$required_minor or newer required (found $version)"
+    return 1
+  fi
+}
+
 require_files() {
   local file missing=0
   for file in "$@"; do
@@ -92,21 +117,13 @@ clone_missing() {
 }
 
 user_git_file() {
-  GIT_USER_FILE="${GIT_CONFIG_GLOBAL:-${XDG_CONFIG_HOME:-$HOME/.config}/git/local.conf}"
+  GIT_USER_FILE="${GIT_CONFIG_GLOBAL:-$HOME/.gitconfig}"
   if [[ -L "$GIT_USER_FILE" ]]; then
-    log -e "refusing to write through generated Git config symlink: $GIT_USER_FILE"
+    log -e "refusing to write through Git user config symlink: $GIT_USER_FILE"
     return 1
   fi
   require_external_destination "$GIT_USER_FILE" || return 1
   mkdir -p "$(dirname "$GIT_USER_FILE")"
-}
-
-require_unmasked_xdg_git_config() {
-  [[ -n "${GIT_CONFIG_GLOBAL:-}" ]] && return 0
-  if [[ -e "$HOME/.gitconfig" || -L "$HOME/.gitconfig" ]]; then
-    log -e "$HOME/.gitconfig masks the XDG global config; move or remove it before retrying"
-    return 1
-  fi
 }
 
 require_external_destination() {
