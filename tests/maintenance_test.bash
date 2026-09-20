@@ -537,10 +537,11 @@ EOF
   export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
   mkdir -p "$HOME/.config/git"
   local config="$HOME/explicit.gitconfig" managed="$HOME/.config/git/portables-credentials.conf" \
-    credential
+    credential unsafe="$HOME/unsafe.gitconfig" original output rc=0
   git config --file "$config" --add include.path '~/.config/git/portables-credentials.conf'
   git config --file "$config" --add include.path "$managed"
   git config --file "$config" --add credential.helper custom-after
+  GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm
   GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm
   assert_eq 1 "$(git config --file "$config" --get-all include.path | wc -l | tr -d ' ')"
   assert_eq "$managed" "$(git config --file "$config" --get include.path)"
@@ -548,6 +549,14 @@ EOF
     GIT_CONFIG_GLOBAL="$config" git credential fill)"
   [[ "$credential" = *$'username=after-user\npassword=after-password'* ]] ||
     fail 'deduplication moved the managed include after the custom fallback'
+  printf '[include]\n  path = ~/.config/git/portables-credentials.conf\n[credential]\n  helper = custom-after\n[include]\n  path = %s\n' \
+    "$managed" >"$unsafe"
+  original="$(cat "$unsafe")"
+  output="$(GIT_CONFIG_GLOBAL="$unsafe" bash "$FIXTURE/configure" gcm 2>&1)" || rc=$?
+  assert_eq 1 "$rc"
+  [[ "$output" = *'managed include repeated after a credential override'* ]] ||
+    fail "unsafe duplicate failure was unclear: $output"
+  assert_file_contents "$unsafe" "$original"
 }
 
 test_maintenance_git_resets_system_helpers_and_prefers_gh() {

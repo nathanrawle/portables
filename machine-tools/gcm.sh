@@ -149,6 +149,7 @@ case "$1" in
       fi
     done
     managed_seen=0
+    post_boundary_setting=0
     unsupported=()
     for source in "${sources[@]}"; do
       [[ -r "$source" ]] || continue
@@ -162,11 +163,20 @@ case "$1" in
         value=${entry#*$'\n'}
         if [[ "$key" = include.path ]]; then
           if is_managed_include "$value" "${origin#file:}"; then
+            if [[ "$managed_seen" = 1 && "$post_boundary_setting" = 1 ]]; then
+              unsupported+=( "managed include repeated after a credential override: ${origin#file:}" )
+            fi
             managed_seen=1
           fi
           continue
         fi
-        [[ "$managed_seen" = 0 ]] || continue
+        if [[ "$managed_seen" = 1 ]]; then
+          if [[ "$origin" = "file:$managed" || "${origin#file:}" -ef "$managed" ]]; then
+            continue
+          fi
+          post_boundary_setting=1
+          continue
+        fi
         if [[ "$key" = includeif.*.path ]]; then
           unsupported+=( "conditional include before managed credentials: ${origin#file:}" )
           continue
