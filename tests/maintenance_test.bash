@@ -290,15 +290,26 @@ test_maintenance_git_migrates_only_legacy_pair() {
   cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
   ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
   printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/git-credential-manager"
-  chmod +x "$TEST_TMPDIR/bin/git-credential-manager"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_TMPDIR/bin/gh"
+  chmod +x "$TEST_TMPDIR/bin/git-credential-manager" "$TEST_TMPDIR/bin/gh"
   export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
   export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
   git config --file "$HOME/.gitconfig" --add credential.helper manager
   git config --file "$HOME/.gitconfig" --add credential.helper oauth
   git config --file "$HOME/.gitconfig" credential.https://example.com.helper custom-host
+  git config --file "$HOME/.gitconfig" --add credential.https://github.com.helper ''
+  git config --file "$HOME/.gitconfig" --add credential.https://github.com.helper \
+    "!$TEST_TMPDIR/bin/gh auth git-credential"
+  git config --file "$HOME/.gitconfig" credential.https://github.com/org.helper custom-org
   bash "$FIXTURE/configure" gcm
   assert_eq $'manager\nosxkeychain' "$(git config --global --includes --get-all credential.helper)"
   assert_eq custom-host "$(git config --global --includes --get credential.https://example.com.helper)"
+  assert_eq custom-org \
+    "$(git config --file "$HOME/.config/git/portables-credentials.conf" \
+      --get credential.https://github.com/org.helper)"
+  if git config --file "$HOME/.gitconfig" --get-all credential.https://github.com.helper >/dev/null; then
+    fail 'legacy GitHub helper remained in machine overlay'
+  fi
   local backups=( "$HOME"/.gitconfig.bak.* )
   assert_eq $'manager\noauth' "$(git config --file "${backups[0]}" --get-all credential.helper)"
 }

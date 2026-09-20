@@ -203,7 +203,8 @@ case "$1" in
             [[ "$managed_seen" = 0 ]] || continue
             relation="$(host_helper_context "$key" "$host" || true)"
             [[ -n "$relation" ]] || continue
-            if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
+            if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" &&
+              "$key" = "credential.https://$host.helper" ]]; then
               continue
             fi
             if [[ "$relation" = scoped ]]; then
