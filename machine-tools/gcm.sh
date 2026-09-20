@@ -51,11 +51,6 @@ case "$1" in
       [[ "$candidate_dir/${candidate##*/}" = "$managed_dir/${managed##*/}" ]]
     }
     user_git_file
-    legacy_helpers=0
-    legacy_excludes=0
-    migrate_includes=()
-    deduplicate_includes=0
-    legacy_gh_hosts=()
     gh_path="$(type -P gh || true)"
     if [[ -n "$gh_path" && "$gh_path" != /* ]]; then
       gh_path="$(cd -- "$(dirname -- "$gh_path")" && pwd -P)/${gh_path##*/}"
@@ -65,91 +60,13 @@ case "$1" in
       quoted_gh_path=${gh_path//\'/\'\\\'\'}
       gh_helper="!'$quoted_gh_path' auth git-credential"
     fi
-    if [[ -f "$GIT_USER_FILE" ]]; then
-      legacy="$(git config --file "$GIT_USER_FILE" --get-all credential.helper || true)"
-      if { [[ "$OS" = Darwin ]] && [[ "$legacy" = manager ]]; } ||
-        [[ "$legacy" = $'manager\noauth' ]]; then
-        legacy_helpers=1
-      fi
-      legacy_excludes_values="$(git config --file "$GIT_USER_FILE" \
-        --get-all core.excludesFile || true)"
-      if [[ "$legacy_excludes_values" = "$HOME/.gitignore"$'\n'"$config_dir/ignore" ]]; then
-        legacy_excludes=1
-      fi
-      if includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"; then
-        managed_include_count=0
-        managed_include_values=()
-        while IFS= read -r included; do
-          if is_managed_include "$included" "$GIT_USER_FILE"; then
-            managed_include_count=$((managed_include_count + 1))
-            found=0
-            for existing in "${managed_include_values[@]}"; do
-              [[ "$existing" != "$included" ]] || found=1
-            done
-            [[ "$found" = 1 ]] || managed_include_values+=( "$included" )
-          fi
-        done <<<"$includes"
-        if [[ -z "${GIT_CONFIG_GLOBAL:-}" ]]; then
-          migrate_includes=( "${managed_include_values[@]}" )
-        elif [[ "$managed_include_count" -gt 1 ]]; then
-          migrate_includes=( "${managed_include_values[@]}" )
-          deduplicate_includes=1
-        fi
-      fi
-      if [[ -n "$gh_path" ]]; then
-        for host in github.com gist.github.com; do
-          legacy_host="$(git config --file "$GIT_USER_FILE" \
-            --get-all "credential.https://$host.helper" || true)"
-          if [[ "$legacy_host" = $'\n'"!$gh_path auth git-credential" ||
-            "$legacy_host" = $'\n'"$gh_helper" ]]; then
-            legacy_gh_hosts+=( "$host" )
-          fi
-        done
-      fi
-    fi
     if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
       sources=( "$GIT_USER_FILE" )
     else
       sources=( "$config_dir/config" "$HOME/.gitconfig" )
     fi
-    legacy_key_precedes_boundary() {
-      local target_key="$1" source rc origin entry key value managed_seen=0 before=0 after=0
-      for source in "${sources[@]}"; do
-        [[ -r "$source" ]] || continue
-        rc=0
-        git -C "$temp" config --file "$source" --includes --show-origin -z \
-          --get-regexp '^(include\.path|core\.excludesfile|credential\.helper|credential\..*\.helper)$' \
-          >"$temp/migration-settings" || rc=$?
-        [[ "$rc" -le 1 ]] || return "$rc"
-        while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
-          key=${entry%%$'\n'*}
-          value=${entry#*$'\n'}
-          if [[ "$key" = include.path ]]; then
-            is_managed_include "$value" "${origin#file:}" && managed_seen=1
-            continue
-          fi
-          [[ "$key" = "$target_key" && "${origin#file:}" -ef "$GIT_USER_FILE" ]] || continue
-          if [[ "$managed_seen" = 0 ]]; then before=1; else after=1; fi
-        done <"$temp/migration-settings"
-      done
-      [[ "$before" = 1 && "$after" = 0 ]]
-    }
-    migrate_helpers=0
-    if [[ "$legacy_helpers" = 1 ]] && legacy_key_precedes_boundary credential.helper; then
-      migrate_helpers=1
-    fi
-    migrate_excludes=0
-    if [[ "$legacy_excludes" = 1 ]] && legacy_key_precedes_boundary core.excludesfile; then
-      migrate_excludes=1
-    fi
-    migrate_gh_hosts=()
-    for host in "${legacy_gh_hosts[@]}"; do
-      if legacy_key_precedes_boundary "credential.https://$host.helper"; then
-        migrate_gh_hosts+=( "$host" )
-      fi
-    done
     managed_seen=0
-    post_boundary_setting=0
+    managed_include_count=0
     unsupported=()
     for source in "${sources[@]}"; do
       [[ -r "$source" ]] || continue
@@ -163,45 +80,28 @@ case "$1" in
         value=${entry#*$'\n'}
         if [[ "$key" = include.path ]]; then
           if is_managed_include "$value" "${origin#file:}"; then
-            if [[ "$managed_seen" = 1 && "$post_boundary_setting" = 1 ]]; then
-              unsupported+=( "managed include repeated after a credential override: ${origin#file:}" )
-            fi
             managed_seen=1
+            managed_include_count=$((managed_include_count + 1))
           fi
           continue
         fi
-        if [[ "$managed_seen" = 1 ]]; then
-          if [[ "$origin" = "file:$managed" || "${origin#file:}" -ef "$managed" ]]; then
-            continue
-          fi
-          post_boundary_setting=1
-          continue
-        fi
+        [[ "$managed_seen" = 0 ]] || continue
         if [[ "$key" = includeif.*.path ]]; then
           unsupported+=( "conditional include before managed credentials: ${origin#file:}" )
-          continue
+        else
+          unsupported+=( "credential helper before managed credentials: $key (${origin#file:})" )
         fi
-        if [[ "$origin" = "file:$managed" || "${origin#file:}" -ef "$managed" ]]; then
-          continue
-        fi
-        if [[ "$migrate_helpers" = 1 && "$key" = credential.helper &&
-          "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
-          continue
-        fi
-        allowed=0
-        for host in "${migrate_gh_hosts[@]}"; do
-          if [[ "$key" = "credential.https://$host.helper" &&
-            "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
-            allowed=1
-          fi
-        done
-        [[ "$allowed" = 0 ]] || continue
-        unsupported+=( "credential helper before managed credentials: $key (${origin#file:})" )
       done <"$temp/settings"
     done
+    if [[ "$managed_include_count" -gt 1 ]]; then
+      unsupported+=( "managed credentials included $managed_include_count times" )
+    fi
+    if [[ -z "${GIT_CONFIG_GLOBAL:-}" && "$managed_include_count" = 0 ]]; then
+      unsupported+=( "tracked Git config does not include $managed" )
+    fi
     if [[ ${#unsupported[@]} -gt 0 ]]; then
       for item in "${unsupported[@]}"; do log -e "$item"; done
-      log -e 'move custom credential settings after the managed include'
+      log -e 'place one managed include before custom credential settings'
       exit 1
     fi
     printf '%s\n' "$marker" >"$temp/config"
@@ -220,35 +120,7 @@ case "$1" in
     fi
     chmod 600 "$temp/config"
     mv "$temp/config" "$managed"
-    backup=
-    if [[ "$migrate_helpers" = 1 || "$migrate_excludes" = 1 || ${#migrate_includes[@]} -gt 0 ||
-      ${#migrate_gh_hosts[@]} -gt 0 ]]; then
-      backup="$(mktemp "$GIT_USER_FILE.bak.XXXXXX")"
-      cp -p "$GIT_USER_FILE" "$backup"
-    fi
-    if [[ "$migrate_helpers" = 1 ]]; then
-      git config --file "$GIT_USER_FILE" --unset-all credential.helper
-    fi
-    if [[ "$migrate_excludes" = 1 ]]; then
-      git config --file "$GIT_USER_FILE" --unset-all core.excludesFile
-    fi
-    if [[ "$deduplicate_includes" = 1 ]]; then
-      for included in "${migrate_includes[@]}"; do
-        git config --file "$GIT_USER_FILE" --replace-all --fixed-value \
-          include.path "$managed" "$included"
-      done
-      git config --file "$GIT_USER_FILE" --replace-all --fixed-value \
-        include.path "$managed" "$managed"
-    else
-      for included in "${migrate_includes[@]}"; do
-        git config --file "$GIT_USER_FILE" --unset-all --fixed-value include.path "$included"
-      done
-    fi
-    for host in "${migrate_gh_hosts[@]}"; do
-      git config --file "$GIT_USER_FILE" --unset-all "credential.https://$host.helper"
-    done
-    [[ -z "$backup" ]] || log -i "legacy Git settings backed up to $backup"
-    if [[ -n "${GIT_CONFIG_GLOBAL:-}" && "$managed_seen" = 0 ]]; then
+    if [[ -n "${GIT_CONFIG_GLOBAL:-}" && "$managed_include_count" = 0 ]]; then
       git config --file "$GIT_USER_FILE" --add include.path "$managed"
     fi
     ;;
