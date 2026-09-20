@@ -4102,6 +4102,48 @@ test_branch_picker_creates_new_normal_worktree_from_default_branch() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_branch_picker_creates_from_main_when_primary_is_on_feature() {
+  local repo worktree worktree_real fake_bin no_fzf_path log default_commit
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  default_commit="$(git -C "$repo" rev-parse main)"
+  git -C "$repo" checkout -qb feature/current
+  worktree="$repo/.worktrees/feature/from-main"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/from-main \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected an unmatched query to use main instead of the current branch"
+}
+
+test_branch_picker_creates_with_no_alternate_rows() {
+  local repo worktree worktree_real fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  worktree="$repo/.worktrees/feature/first-picker-branch"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/first-picker-branch \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq feature/first-picker-branch "$(git -C "$worktree" branch --show-current)" \
+    "expected an unmatched query to work with no alternate branch rows"
+}
+
 test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch() {
   local project worktree worktree_real fake_bin no_fzf_path log default_commit
 
@@ -5377,6 +5419,10 @@ test_case "taw: branch mode creates unassigned normal worktree" \
   test_branch_mode_creates_unassigned_normal_worktree
 test_case "taw: branch picker creates new normal worktree from default branch" \
   test_branch_picker_creates_new_normal_worktree_from_default_branch
+test_case "taw: branch picker creates from main when primary is on feature" \
+  test_branch_picker_creates_from_main_when_primary_is_on_feature
+test_case "taw: branch picker creates with no alternate rows" \
+  test_branch_picker_creates_with_no_alternate_rows
 test_case "taw: explicit branch picker creates new bare worktree from default branch" \
   test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch
 test_case "taw: branch picker rejects invalid new branch before mutation" \
