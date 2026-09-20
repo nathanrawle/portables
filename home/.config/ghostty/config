@@ -1,3 +1,7 @@
+background-opacity = 0.8
+background-blur = macos-glass-clear
+background-opacity-cells = true
+
 font-family = "Maple Mono"
 font-size = 14
 
