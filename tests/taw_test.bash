@@ -4165,6 +4165,48 @@ test_branch_picker_creates_with_no_alternate_rows() {
     "expected an unmatched query to work with no alternate branch rows"
 }
 
+test_explicit_branch_picker_rechecks_query_against_remote_refs() {
+  local repo worktree fake_bin no_fzf_path log upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/delayed refs/heads/develop
+  worktree="$repo/.worktrees/feature/delayed"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/delayed \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+
+  upstream_ref="$(git -C "$worktree" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq origin/feature/delayed "$upstream_ref" \
+    "expected a delayed remote row to remain a tracking worktree"
+}
+
+test_legacy_empty_branch_picker_falls_back_to_primary_worktree() {
+  local repo repo_real fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" branch -D develop >/dev/null
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_NO_MATCH_QUERY=feature/legacy \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  assert_file_contains "$log" $'-c\t'"$repo_real"$'\tvim'
+  assert_not_exists "$repo/.worktrees/feature/legacy"
+}
+
 test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch() {
   local project worktree worktree_real fake_bin no_fzf_path log default_commit
 
@@ -5446,6 +5488,10 @@ test_case "taw: branch picker creates from main when primary is on feature" \
   test_branch_picker_creates_from_main_when_primary_is_on_feature
 test_case "taw: branch picker creates with no alternate rows" \
   test_branch_picker_creates_with_no_alternate_rows
+test_case "taw: explicit branch picker rechecks query against remote refs" \
+  test_explicit_branch_picker_rechecks_query_against_remote_refs
+test_case "taw: legacy empty branch picker falls back to primary worktree" \
+  test_legacy_empty_branch_picker_falls_back_to_primary_worktree
 test_case "taw: explicit branch picker creates new bare worktree from default branch" \
   test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch
 test_case "taw: branch picker rejects invalid new branch before mutation" \
