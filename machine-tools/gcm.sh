@@ -126,6 +126,7 @@ case "$1" in
     }
     custom=0
     custom_helpers=()
+    conditional_before_managed=0
     if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
       sources=( "$GIT_USER_FILE" )
     else
@@ -135,8 +136,9 @@ case "$1" in
     for source in "${sources[@]}"; do
       [[ -r "$source" ]] || continue
       rc=0
-      git config --file "$source" --includes --show-origin -z \
-        --get-regexp '^(include\.path|credential\.helper)$' >"$temp/helpers" || rc=$?
+      git -C "$temp" config --file "$source" --includes --show-origin -z \
+        --get-regexp '^(include\.path|include[Ii]f\..*\.path|credential\.helper)$' \
+        >"$temp/helpers" || rc=$?
       [[ "$rc" -le 1 ]] || exit "$rc"
       while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
         key=${entry%%$'\n'*}
@@ -145,6 +147,10 @@ case "$1" in
           if is_managed_include "$helper" "${origin#file:}"; then
             managed_seen=1
           fi
+          continue
+        fi
+        if [[ "$key" = includeif.*.path ]]; then
+          [[ "$managed_seen" = 1 ]] || conditional_before_managed=1
           continue
         fi
         if [[ "$migrate_helpers" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
@@ -195,8 +201,8 @@ case "$1" in
         for source in "${host_sources[@]}"; do
           [[ -r "$source" ]] || continue
           rc=0
-          git config --file "$source" --includes --show-origin -z \
-            --get-regexp '^(include\.path|credential\..*\.helper)$' \
+          git -C "$temp" config --file "$source" --includes --show-origin -z \
+            --get-regexp '^(include\.path|include[Ii]f\..*\.path|credential\..*\.helper)$' \
             >"$temp/host-helpers" || rc=$?
           [[ "$rc" -le 1 ]] || exit "$rc"
           managed_seen=0
@@ -207,6 +213,10 @@ case "$1" in
               if is_managed_include "$helper" "${origin#file:}"; then
                 managed_seen=1
               fi
+              continue
+            fi
+            if [[ "$key" = includeif.*.path ]]; then
+              [[ "$managed_seen" = 1 ]] || conditional_before_managed=1
               continue
             fi
             [[ "$managed_seen" = 0 ]] || continue
@@ -250,6 +260,10 @@ case "$1" in
             [[ "$found" = 1 ]] || preserved_helpers+=( "$helper" )
           done <"$temp/host-helpers"
         done
+        if [[ "$conditional_before_managed" = 1 ]]; then
+          git config --file "$temp/config" --add "credential.https://$host.helper" "$gh_helper"
+          continue
+        fi
         git config --file "$temp/config" --add "credential.https://$host.helper" ''
         git config --file "$temp/config" --add "credential.https://$host.helper" "$gh_helper"
         emitted_helpers=( "$gh_helper" )

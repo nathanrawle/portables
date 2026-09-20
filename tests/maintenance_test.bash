@@ -542,6 +542,36 @@ EOF
     fail 'deduplication moved the managed include after the custom fallback'
 }
 
+test_maintenance_git_preserves_conditional_helpers() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/gcm.sh" "$FIXTURE/machine-tools/"
+  ln -sf "$(command -v git)" "$TEST_TMPDIR/bin/git"
+  printf '#!/bin/sh\ncat >/dev/null\n' >"$TEST_TMPDIR/bin/gh"
+  cat >"$TEST_TMPDIR/bin/git-credential-conditional" <<'EOF'
+#!/bin/sh
+cat >/dev/null
+if [ "$1" = get ]; then
+  printf 'username=conditional-user\npassword=conditional-password\n'
+fi
+EOF
+  chmod +x "$TEST_TMPDIR/bin/gh" "$TEST_TMPDIR/bin/git-credential-conditional"
+  export PATH="$TEST_TMPDIR/bin:/usr/bin:/bin"
+  mkdir -p "$HOME/.config/git" "$HOME/work/repo"
+  local config="$HOME/explicit.gitconfig" conditional="$HOME/work.gitconfig" \
+    managed="$HOME/.config/git/portables-credentials.conf" credential work
+  work="$(cd "$HOME/work" && pwd -P)"
+  git config --file "$conditional" credential.https://github.com.helper conditional
+  git config --file "$config" "includeIf.gitdir:$work/**.path" "$conditional"
+  (cd "$HOME" && GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm)
+  assert_eq "!'$TEST_TMPDIR/bin/gh' auth git-credential" \
+    "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
+  git -C "$HOME/work/repo" init -q
+  credential="$(printf 'protocol=https\nhost=github.com\n\n' | \
+    GIT_CONFIG_GLOBAL="$config" git -C "$HOME/work/repo" credential fill)"
+  [[ "$credential" = *$'username=conditional-user\npassword=conditional-password'* ]] ||
+    fail 'managed GitHub helpers masked the conditional helper'
+}
+
 test_maintenance_wrappers_preserve_failure_and_scope() {
   maintenance_fixture
   cat >"$TEST_TMPDIR/bin/bash" <<'EOF'
@@ -594,6 +624,7 @@ test_case 'maintenance: Git preserves custom GitHub helpers' test_maintenance_gi
 test_case 'maintenance: Git does not replay root overlay helpers' test_maintenance_git_does_not_replay_root_overlay_helpers
 test_case 'maintenance: Git recognizes equivalent managed includes' test_maintenance_git_recognizes_equivalent_managed_includes
 test_case 'maintenance: Git deduplicates explicit managed includes' test_maintenance_git_deduplicates_explicit_managed_includes
+test_case 'maintenance: Git preserves conditional helpers' test_maintenance_git_preserves_conditional_helpers
 test_case 'maintenance: Zsh wrappers preserve failures and caller state' test_maintenance_wrappers_preserve_failure_and_scope
 test_case 'maintenance: wrapper help does not relink or prompt' test_maintenance_wrappers_help_has_no_followup
 
