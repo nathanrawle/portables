@@ -33,10 +33,15 @@ case "$1" in
     fi
     require_external_destination "$managed"
     mkdir -p "$config_dir"
+    temp="$(mktemp -d "$config_dir/.portables-credentials.XXXXXX")"
+    trap 'rm -rf -- "$temp"' EXIT
     is_managed_include() {
       local included="$1" including_file="$2" candidate candidate_dir managed_dir
       case "$included" in
-        "~/"*) candidate="$HOME/${included#\~/}" ;;
+        "~"*/*)
+          git config --file "$temp/include-path" include.path "$included" || return 1
+          candidate="$(git config --file "$temp/include-path" --path --get include.path)" || return 1
+          ;;
         /*) candidate="$included" ;;
         *) candidate="$(dirname -- "$including_file")/$included" ;;
       esac
@@ -102,8 +107,6 @@ case "$1" in
         done
       fi
     fi
-    temp="$(mktemp -d "$config_dir/.portables-credentials.XXXXXX")"
-    trap 'rm -rf -- "$temp"' EXIT
     if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
       sources=( "$GIT_USER_FILE" )
     else
