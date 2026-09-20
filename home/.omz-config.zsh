@@ -2,6 +2,11 @@
 
 export ZSH="$HOME/.oh-my-zsh"
 
+# Keep completion state with other generated Zsh cache files.
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+mkdir -p "$XDG_CACHE_HOME/zsh"
+ZSH_COMPDUMP="$XDG_CACHE_HOME/zsh/compdump-${HOST%%.*}-${ZSH_VERSION}"
+
 # Oh My Zsh auto-update
 zstyle ':omz:update' mode auto
 
