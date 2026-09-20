@@ -502,6 +502,17 @@ test_maintenance_git_recognizes_equivalent_managed_includes() {
     assert_eq $'\n'"!'$TEST_TMPDIR/bin/gh' auth git-credential"$'\nmanager\nosxkeychain' \
       "$(git config --file "$managed" --get-all credential.https://github.com.helper)"
   done
+  local nested="$HOME/nested.gitconfig" unrelated="$HOME/unrelated.gitconfig"
+  printf '[include]\n  path = %s\n' "$managed" >"$nested"
+  : >"$unrelated"
+  config="$HOME/transitive.gitconfig"
+  printf '[include]\n  path = %s\n[credential]\n  helper = after-include\n[include]\n  path = %s\n' \
+    "$nested" "$unrelated" >"$config"
+  GIT_CONFIG_GLOBAL="$config" bash "$FIXTURE/configure" gcm
+  assert_eq "$nested"$'\n'"$unrelated" \
+    "$(git config --file "$config" --get-all include.path)"
+  assert_eq $'\nmanager\nosxkeychain\nafter-include' \
+    "$(git config --file "$config" --includes --get-all credential.helper)"
 }
 
 test_maintenance_git_deduplicates_explicit_managed_includes() {

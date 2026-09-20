@@ -230,13 +230,8 @@ case "$1" in
       git config --file "$GIT_USER_FILE" --unset-all "credential.https://$host.helper"
     done
     [[ -z "$backup" ]] || log -i "legacy Git settings backed up to $backup"
-    if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
-      includes="$(git config --file "$GIT_USER_FILE" --get-all include.path 2>/dev/null || true)"
-      found=0
-      while IFS= read -r included; do
-        is_managed_include "$included" "$GIT_USER_FILE" && found=1
-      done <<<"$includes"
-      [[ "$found" = 1 ]] || git config --file "$GIT_USER_FILE" --add include.path "$managed"
+    if [[ -n "${GIT_CONFIG_GLOBAL:-}" && "$managed_seen" = 0 ]]; then
+      git config --file "$GIT_USER_FILE" --add include.path "$managed"
     fi
     ;;
 esac
