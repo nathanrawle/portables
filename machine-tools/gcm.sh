@@ -14,8 +14,14 @@ case "$1" in
   config)
     require_git_version 2 30
     case "$OS" in
-      Darwin) defaults=( manager osxkeychain ) ;;
-      Linux) defaults=( 'cache --timeout 21600' oauth ) ;;
+      Darwin)
+        defaults=( manager osxkeychain )
+        require_commands git-credential-manager
+        ;;
+      Linux)
+        defaults=( 'cache --timeout 21600' oauth )
+        require_commands git-credential-oauth
+        ;;
       *) log -e "unsupported credential platform: $OS"; exit 1 ;;
     esac
     config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/git"
@@ -97,213 +103,69 @@ case "$1" in
     fi
     temp="$(mktemp -d "$config_dir/.portables-credentials.XXXXXX")"
     trap 'rm -rf -- "$temp"' EXIT
-    host_helper_context() {
-      local key="$1" host="$2" context remainder authority user_scoped=0 base matched
-      context=${key#credential.}
-      context=${context%.helper}
-      [[ "$context" = *://* ]] || return 1
-      remainder=${context#*://}
-      authority=${remainder%%/*}
-      if [[ "$authority" = *@* ]]; then
-        user_scoped=1
-        authority=${authority##*@}
-      fi
-      base="${context%%://*}://$authority"
-      : >"$temp/urlmatch"
-      git config --file "$temp/urlmatch" "credential.$base.helper" portables-match \
-        2>/dev/null || return 1
-      matched="$(git config --file "$temp/urlmatch" --get-urlmatch credential.helper \
-        "https://$host" 2>/dev/null || true)"
-      [[ "$matched" = portables-match ]] || return 1
-      if [[ "$user_scoped" = 1 ]]; then
-        printf 'scoped\n'
-        return
-      fi
-      case "$remainder" in
-        */?*) printf 'scoped\n' ;;
-        *) printf 'base\n' ;;
-      esac
-    }
-    custom=0
-    custom_helpers=()
-    conditional_before_managed=0
     if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
       sources=( "$GIT_USER_FILE" )
     else
       sources=( "$config_dir/config" "$HOME/.gitconfig" )
     fi
     managed_seen=0
+    unsupported=()
     for source in "${sources[@]}"; do
       [[ -r "$source" ]] || continue
       rc=0
       git -C "$temp" config --file "$source" --includes --show-origin -z \
-        --get-regexp '^(include\.path|include[Ii]f\..*\.path|credential\.helper)$' \
-        >"$temp/helpers" || rc=$?
+        --get-regexp '^(include\.path|include[Ii]f\..*\.path|credential\.helper|credential\..*\.helper)$' \
+        >"$temp/settings" || rc=$?
       [[ "$rc" -le 1 ]] || exit "$rc"
       while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
         key=${entry%%$'\n'*}
-        helper=${entry#*$'\n'}
+        value=${entry#*$'\n'}
         if [[ "$key" = include.path ]]; then
-          if is_managed_include "$helper" "${origin#file:}"; then
+          if is_managed_include "$value" "${origin#file:}"; then
             managed_seen=1
           fi
           continue
         fi
+        [[ "$managed_seen" = 0 ]] || continue
         if [[ "$key" = includeif.*.path ]]; then
-          [[ "$managed_seen" = 1 ]] || conditional_before_managed=1
-          continue
-        fi
-        if [[ "$migrate_helpers" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
+          unsupported+=( "conditional include before managed credentials: ${origin#file:}" )
           continue
         fi
         if [[ "$origin" = "file:$managed" || "${origin#file:}" -ef "$managed" ]]; then
           continue
         fi
-        custom=1
-        [[ "$managed_seen" = 0 ]] || continue
-        if [[ -z "$helper" ]]; then
-          custom_helpers=()
+        if [[ "$migrate_helpers" = 1 && "$key" = credential.helper &&
+          "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
           continue
         fi
-        found=0
-        for existing in "${custom_helpers[@]}"; do [[ "$existing" != "$helper" ]] || found=1; done
-        [[ "$found" = 1 ]] || custom_helpers+=( "$helper" )
-      done <"$temp/helpers"
+        allowed=0
+        for host in "${migrate_gh_hosts[@]}"; do
+          if [[ "$key" = "credential.https://$host.helper" &&
+            "${origin#file:}" -ef "$GIT_USER_FILE" ]]; then
+            allowed=1
+          fi
+        done
+        [[ "$allowed" = 0 ]] || continue
+        unsupported+=( "credential helper before managed credentials: $key (${origin#file:})" )
+      done <"$temp/settings"
     done
-    printf '%s\n' "$marker" >"$temp/config"
-    if [[ "$custom" = 0 ]]; then
-      case "$OS" in
-        Darwin) require_commands git-credential-manager ;;
-        Linux) require_commands git-credential-oauth ;;
-      esac
-      fallbacks=( "${defaults[@]}" )
-    else
-      log -i "preserving custom credential helpers"
-      fallbacks=( "${custom_helpers[@]}" )
+    if [[ ${#unsupported[@]} -gt 0 ]]; then
+      for item in "${unsupported[@]}"; do log -e "$item"; done
+      log -e 'move custom credential settings after the managed include'
+      exit 1
     fi
+    printf '%s\n' "$marker" >"$temp/config"
+    git config --file "$temp/config" --add credential.helper ''
+    for helper in "${defaults[@]}"; do
+      git config --file "$temp/config" --add credential.helper "$helper"
+    done
     if [[ -n "$gh_path" ]]; then
-      if [[ -n "${GIT_CONFIG_GLOBAL:-}" ]]; then
-        host_sources=( "$GIT_USER_FILE" )
-      else
-        host_sources=( "$config_dir/config" )
-      fi
       for host in github.com gist.github.com; do
-        preserved_helpers=()
-        scoped_keys=()
-        scoped_helpers=()
-        migrating=0
-        for migrated_host in "${migrate_gh_hosts[@]}"; do
-          [[ "$migrated_host" != "$host" ]] || migrating=1
-        done
-        for source in "${host_sources[@]}"; do
-          [[ -r "$source" ]] || continue
-          rc=0
-          git -C "$temp" config --file "$source" --includes --show-origin -z \
-            --get-regexp '^(include\.path|include[Ii]f\..*\.path|credential\..*\.helper)$' \
-            >"$temp/host-helpers" || rc=$?
-          [[ "$rc" -le 1 ]] || exit "$rc"
-          managed_seen=0
-          while IFS= read -r -d '' origin && IFS= read -r -d '' entry; do
-            key=${entry%%$'\n'*}
-            helper=${entry#*$'\n'}
-            if [[ "$key" = include.path ]]; then
-              if is_managed_include "$helper" "${origin#file:}"; then
-                managed_seen=1
-              fi
-              continue
-            fi
-            if [[ "$key" = includeif.*.path ]]; then
-              [[ "$managed_seen" = 1 ]] || conditional_before_managed=1
-              continue
-            fi
-            [[ "$managed_seen" = 0 ]] || continue
-            relation="$(host_helper_context "$key" "$host" || true)"
-            [[ -n "$relation" ]] || continue
-            if [[ "$migrating" = 1 && "${origin#file:}" -ef "$GIT_USER_FILE" &&
-              "$key" = "credential.https://$host.helper" ]]; then
-              continue
-            fi
-            if [[ "$relation" = scoped ]]; then
-              if [[ -z "$helper" ]]; then
-                for index in "${!scoped_keys[@]}"; do
-                  if [[ "${scoped_keys[index]}" = "$key" ]]; then
-                    unset 'scoped_keys[index]' 'scoped_helpers[index]'
-                  fi
-                done
-                scoped_keys+=( "$key" )
-                scoped_helpers+=( '' )
-                continue
-              fi
-              found=0
-              for index in "${!scoped_keys[@]}"; do
-                if [[ "${scoped_keys[index]}" = "$key" &&
-                  "${scoped_helpers[index]}" = "$helper" ]]; then found=1; fi
-              done
-              if [[ "$found" = 0 ]]; then
-                scoped_keys+=( "$key" )
-                scoped_helpers+=( "$helper" )
-              fi
-              continue
-            fi
-            if [[ -z "$helper" ]]; then
-              preserved_helpers=()
-              continue
-            fi
-            [[ "$helper" != "!$gh_path auth git-credential" && "$helper" != "$gh_helper" ]] || continue
-            found=0
-            for existing in "${preserved_helpers[@]}"; do
-              [[ "$existing" != "$helper" ]] || found=1
-            done
-            [[ "$found" = 1 ]] || preserved_helpers+=( "$helper" )
-          done <"$temp/host-helpers"
-        done
-        if [[ "$conditional_before_managed" = 1 ]]; then
-          git config --file "$temp/config" --add "credential.https://$host.helper" "$gh_helper"
-          continue
-        fi
         git config --file "$temp/config" --add "credential.https://$host.helper" ''
         git config --file "$temp/config" --add "credential.https://$host.helper" "$gh_helper"
-        emitted_helpers=( "$gh_helper" )
-        for helper in "${preserved_helpers[@]}"; do
+        for helper in "${defaults[@]}"; do
           git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
-          emitted_helpers+=( "$helper" )
         done
-        if [[ "$custom" = 1 ]]; then
-          for helper in "${fallbacks[@]}"; do
-            found=0
-            for existing in "${emitted_helpers[@]}"; do
-              [[ "$existing" != "$helper" ]] || found=1
-            done
-            [[ "$found" = 0 ]] || continue
-            git config --file "$temp/config" --add "credential.https://$host.helper" "$helper"
-            emitted_helpers+=( "$helper" )
-          done
-        fi
-        reset_scopes=()
-        for index in "${!scoped_keys[@]}"; do
-          key=${scoped_keys[index]}
-          helper=${scoped_helpers[index]}
-          if [[ -z "$helper" ]]; then
-            git config --file "$temp/config" --add "$key" ''
-            reset_scopes+=( "$key" )
-            continue
-          fi
-          reset_seen=0
-          for existing in "${reset_scopes[@]}"; do [[ "$existing" != "$key" ]] || reset_seen=1; done
-          if [[ "$reset_seen" = 1 ]]; then
-            git config --file "$temp/config" --add "$key" "$helper"
-            continue
-          fi
-          found=0
-          for existing in "${emitted_helpers[@]}"; do [[ "$existing" != "$helper" ]] || found=1; done
-          [[ "$found" = 0 ]] || continue
-          git config --file "$temp/config" --add "$key" "$helper"
-        done
-      done
-    fi
-    if [[ "$custom" = 0 ]]; then
-      for helper in "${defaults[@]}"; do
-        git config --file "$temp/config" --add credential.helper "$helper"
       done
     fi
     chmod 600 "$temp/config"
