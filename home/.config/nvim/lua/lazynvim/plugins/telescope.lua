@@ -15,6 +15,24 @@ return {
     },
   },
   config = function()
+    local actions = require("telescope.actions")
+    local action_state = require("telescope.actions.state")
+
+    local function with_visible_preview(preview_action, fallback_action)
+      return function(prompt_bufnr)
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        local has_preview = picker
+          and picker.previewer
+          and picker.preview_win
+          and vim.api.nvim_win_is_valid(picker.preview_win)
+        if has_preview then
+          preview_action(prompt_bufnr)
+        elseif fallback_action then
+          fallback_action(prompt_bufnr)
+        end
+      end
+    end
+
     require("telescope").setup({
       defaults = {
         preview = {
@@ -22,8 +40,29 @@ return {
             disable = { "zsh" },
           },
         },
+        mappings = {
+          n = {
+            ["<S-h>"] = with_visible_preview(actions.preview_scrolling_left, actions.move_to_top),
+            ["<S-l>"] = with_visible_preview(actions.preview_scrolling_right, actions.move_to_bottom),
+            ["<S-j>"] = with_visible_preview(actions.preview_scrolling_down, actions.move_selection_next),
+            ["<S-k>"] = with_visible_preview(actions.preview_scrolling_up, actions.move_selection_previous),
+          },
+          i = {
+            ["<M-h>"] = with_visible_preview(actions.preview_scrolling_left, actions.nop),
+            ["<M-l>"] = with_visible_preview(actions.preview_scrolling_right, actions.nop),
+            ["<M-j>"] = with_visible_preview(actions.preview_scrolling_down, actions.nop),
+            ["<M-k>"] = with_visible_preview(actions.preview_scrolling_up, actions.results_scrolling_right),
+          },
+        },
       },
       pickers = {
+        buffers = {
+          attach_mappings = function(prompt_bufnr, map)
+            vim.keymap.del({ "i", "n" }, "<M-d>", { buffer = prompt_bufnr })
+            map({ "i", "n" }, "<C-b>", actions.delete_buffer)
+            return true
+          end,
+        },
         find_files = {
           find_command = function(_)
             local cmd_list = { "fd", "--type", "f", "--color", "never" }
@@ -48,8 +87,6 @@ return {
         },
         help_tags = {
           attach_mappings = function(prompt_bufnr, _)
-            local actions = require("telescope.actions")
-            local action_state = require("telescope.actions.state")
             local fh = require("floating-help")
             actions.select_default:replace(function()
               actions.close(prompt_bufnr)
