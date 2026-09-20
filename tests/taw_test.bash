@@ -78,6 +78,7 @@ fi
 print_query=0
 expects_key=0
 prints_key=0
+supports_create=0
 uses_ansi=0
 initial_query=""
 args=( "$@" )
@@ -95,6 +96,9 @@ for ((i = 0; i < ${#args[@]}; i++)); do
     --bind=*)
       if [[ "${args[$i]}" == *"print("*"+accept"* ]]; then
         prints_key=1
+      fi
+      if [[ "${args[$i]}" == *"accept-or-print-query"* ]]; then
+        supports_create=1
       fi
       ;;
     --query=*)
@@ -209,6 +213,18 @@ if [[ "$key" = cancel ]]; then
 fi
 
 if [[ ${#lines[@]} -eq 0 ]]; then
+  exit 1
+fi
+
+if [[ -n "${TAW_FAKE_FZF_NO_MATCH_QUERY:-}" ]]; then
+  output_query="${TAW_FAKE_FZF_NO_MATCH_QUERY}"
+  if (( supports_create )); then
+    if (( print_query )); then
+      printf '%s\n' "$output_query"
+    fi
+    printf 'create\n%s\n' "$output_query"
+    exit 0
+  fi
   exit 1
 fi
 
@@ -4060,6 +4076,76 @@ test_branch_mode_creates_unassigned_normal_worktree() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_branch_picker_creates_new_normal_worktree_from_default_branch() {
+  local repo worktree worktree_real fake_bin no_fzf_path log default_commit
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  default_commit="$(git -C "$repo" rev-parse main)"
+  worktree="$repo/.worktrees/feature/new-picker-branch"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/new-picker-branch \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq feature/new-picker-branch "$(git -C "$worktree" branch --show-current)" \
+    "expected unmatched picker query to create a branch"
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected new branch to start from the default branch"
+  assert_eq main "$(git -C "$repo" branch --show-current)" \
+    "expected the primary worktree to remain unchanged"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch() {
+  local project worktree worktree_real fake_bin no_fzf_path log default_commit
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR/bare")"
+  default_commit="$(git --git-dir "$project/.git" rev-parse main)"
+  worktree="$project/.worktrees/feature/new-picker-branch"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/new-picker-branch \
+    TAW_FAKE_TMUX_SESSIONS= TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project" --mode=branch
+
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq feature/new-picker-branch "$(git -C "$worktree" branch --show-current)" \
+    "expected explicit branch mode to create a branch from the query"
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected bare picker branch to start from the default branch"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_branch_picker_rejects_invalid_new_branch_before_mutation() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY='bad..branch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"; then
+    fail "expected an invalid unmatched branch query to fail"
+  fi
+
+  assert_not_exists "$repo/.worktrees/bad..branch"
+  assert_no_tmux_work_window "$log"
+}
+
 test_branch_mode_creates_worktree_with_dirty_primary_checkout() {
   local repo worktree fake_bin no_fzf_path log
 
@@ -5289,6 +5375,12 @@ test_case "taw: branch mode reuses window for assigned worktree" \
   test_branch_mode_reuses_window_for_assigned_worktree
 test_case "taw: branch mode creates unassigned normal worktree" \
   test_branch_mode_creates_unassigned_normal_worktree
+test_case "taw: branch picker creates new normal worktree from default branch" \
+  test_branch_picker_creates_new_normal_worktree_from_default_branch
+test_case "taw: explicit branch picker creates new bare worktree from default branch" \
+  test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch
+test_case "taw: branch picker rejects invalid new branch before mutation" \
+  test_branch_picker_rejects_invalid_new_branch_before_mutation
 test_case "taw: branch mode tolerates dirty primary checkout" \
   test_branch_mode_creates_worktree_with_dirty_primary_checkout
 test_case "taw: branch mode creates tracking remote worktree" \
