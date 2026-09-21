@@ -97,7 +97,7 @@ for ((i = 0; i < ${#args[@]}; i++)); do
       if [[ "${args[$i]}" == *"print("*"+accept"* ]]; then
         prints_key=1
       fi
-      if [[ "${args[$i]}" == *"accept-or-print-query"* ]]; then
+      if [[ "${args[$i]}" == *"print(create)+accept"* ]]; then
         supports_create=1
       fi
       ;;
