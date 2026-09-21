@@ -983,6 +983,7 @@ _taw_resolve_explicit_picker() {
     return 1
   }
 
+  _taw_detect_current_project >/dev/null 2>&1 || true
   _taw_init_picker_cache || {
     _taw_cleanup_picker_cache
     _taw_die "could not initialize picker cache"
@@ -1673,7 +1674,7 @@ _taw_prepare_picker_created_branch() {
   fi
 
   _taw_refs="$(_taw_git for-each-ref --count=1 --format='%(refname)' 2>/dev/null)" || return 1
-  if [[ -z "$_taw_refs" ]] && _taw_default_bare_target; then
+  if [[ -z "$_taw_refs" ]]; then
     _taw_branch_ref=
     return 0
   fi

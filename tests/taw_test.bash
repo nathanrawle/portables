@@ -4165,6 +4165,27 @@ test_branch_picker_creates_with_no_alternate_rows() {
     "expected an unmatched query to work with no alternate branch rows"
 }
 
+test_branch_picker_creates_first_branch_in_unborn_repo() {
+  local repo worktree fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/unborn"
+  worktree="$repo/.worktrees/feature/first-branch"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/first-branch \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  assert_eq feature/first-branch "$(git -C "$worktree" branch --show-current)" \
+    "expected an unmatched query to create the first branch in an unborn repo"
+  assert_file_contains "$log" $'-c\t'"$(cd "$worktree" && pwd -P)"$'\tvim'
+}
+
 test_explicit_branch_picker_rechecks_query_against_remote_refs() {
   local repo worktree fake_bin no_fzf_path log upstream_ref
 
@@ -5663,6 +5684,8 @@ test_case "taw: branch picker creates from main when primary is on feature" \
   test_branch_picker_creates_from_main_when_primary_is_on_feature
 test_case "taw: branch picker creates with no alternate rows" \
   test_branch_picker_creates_with_no_alternate_rows
+test_case "taw: branch picker creates first branch in unborn repo" \
+  test_branch_picker_creates_first_branch_in_unborn_repo
 test_case "taw: explicit branch picker rechecks query against remote refs" \
   test_explicit_branch_picker_rechecks_query_against_remote_refs
 test_case "taw: automatic branch picker rechecks qualified remote queries" \
