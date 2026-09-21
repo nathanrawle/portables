@@ -18,7 +18,7 @@ alias follow='f'
 alias hist=history
 alias rnsort='sort -rn'
 
-alias reshell='exec $0'
+alias reshell='exec $SHELL'
 alias :q=exit
 
 # utilities: python
