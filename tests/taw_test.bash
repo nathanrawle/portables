@@ -4518,7 +4518,7 @@ test_picker_enter_transform_parses_empty_fzf_placeholder() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" --mode=branch
 
-  bind="$(tr '\t' '\n' <"$args_log" | rg '^--bind=enter:transform:' | head -n 1)"
+  bind="$(tr '\t' '\n' <"$args_log" | grep '^--bind=enter:transform:' | head -n 1)"
   transform="${bind#--bind=enter:transform:}"
   empty_placeholder="''"
   expanded="${transform//\{2\}/$empty_placeholder}"
@@ -4859,6 +4859,30 @@ test_project_scoped_modes_remain_cycleable_outside_git() {
   assert_file_contains "$log" $'-s\ttarget\t-n\tmain 🌲\t-c\t'"$target_real"$'\tvim'
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_not_contains "$log" 'ignored'
+}
+
+test_explicit_branch_picker_keeps_non_project_message_inert() {
+  local elsewhere fake_bin no_fzf_path log args_log fzf_log
+
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+
+  EDITOR=vim TAW_FAKE_FZF_KEYS=$'\ncancel' \
+    TAW_FAKE_FZF_MATCH='Not in a Git project' TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --mode=branch
+
+  assert_file_contains "$fzf_log" $'Not in a Git project\tmessage\t\t\t'
+  assert_file_contains "$args_log" 'enter:transform:'
+  assert_file_not_contains "$args_log" 'print(create)+accept'
+  assert_no_tmux_work_window "$log"
 }
 
 test_explicit_picker_keeps_empty_modes_cycleable() {
@@ -5685,6 +5709,8 @@ test_case "taw: session selection after project mode replaces context" \
   test_session_selection_after_project_mode_replaces_context
 test_case "taw: project-scoped modes remain cycleable outside git" \
   test_project_scoped_modes_remain_cycleable_outside_git
+test_case "taw: explicit branch picker keeps non-project message inert" \
+  test_explicit_branch_picker_keeps_non_project_message_inert
 test_case "taw: explicit picker keeps empty modes cycleable" \
   test_explicit_picker_keeps_empty_modes_cycleable
 test_case "taw: invalid picker modes and combinations are rejected" \

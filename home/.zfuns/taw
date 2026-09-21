@@ -1010,6 +1010,8 @@ _taw_resolve_explicit_picker() {
         _taw_enter_bind='if [[ -n {2} && {2} != message && {2} != branch-message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 || {2} == branch-message ]] && [[ -n "$FZF_QUERY" ]]; then printf "print(create)+accept"; fi'
         if [[ "$_taw_picker_mode" != branch ]]; then
           _taw_enter_bind='[[ -n {2} && {2} != message ]] && printf "print()+accept"'
+        elif [[ "$_taw_project_kind" != normal && "$_taw_is_bare" != true ]]; then
+          _taw_enter_bind='[[ -n {2} && {2} != message && {2} != branch-message ]] && printf "print()+accept"'
         fi
         _taw_fzf_args+=(
           '--bind=tab:print(tab)+accept'
