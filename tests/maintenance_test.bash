@@ -1051,6 +1051,13 @@ EOF
 test_maintenance_zsh_autocomplete_loads_xdg_source() {
   maintenance_fixture
   export XDG_DATA_HOME="$HOME/.local/share"
+  printf '# local zshrc\n' >"$HOME/.zshrc"
+  assert_eq unset "$(HOME="$HOME" zsh -dfc '
+    source "$1"
+    print -r -- "${skip_global_compinit:-unset}"
+  ' _ "$REPO_ROOT/home/.zshenv")"
+  rm "$HOME/.zshrc"
+  ln -s "$REPO_ROOT/home/.zshrc" "$HOME/.zshrc"
   mkdir -p "$XDG_DATA_HOME/zsh-autocomplete"
   cat >"$XDG_DATA_HOME/zsh-autocomplete/zsh-autocomplete.plugin.zsh" <<'EOF'
 typeset -gi PORTABLES_AUTOCOMPLETE_LOADS=$(( ${PORTABLES_AUTOCOMPLETE_LOADS:-0} + 1 ))
