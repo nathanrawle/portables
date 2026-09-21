@@ -4229,7 +4229,7 @@ test_explicit_branch_picker_rejects_missing_configured_remote_query() {
   if git -C "$repo" show-ref --verify --quiet refs/heads/origin/missing; then
     fail "expected explicit picker not to create a local branch shadowing a remote"
   fi
-  [[ ! -f "$log" ]] || fail "expected tmux not to run after missing configured remote ref"
+  assert_no_tmux_work_window "$log"
 }
 
 test_automatic_branch_picker_rejects_missing_configured_remote_query() {
@@ -4252,7 +4252,7 @@ test_automatic_branch_picker_rejects_missing_configured_remote_query() {
   if git -C "$repo" show-ref --verify --quiet refs/heads/origin/missing; then
     fail "expected automatic picker not to create a local branch shadowing a remote"
   fi
-  [[ ! -f "$log" ]] || fail "expected tmux not to run after missing configured remote ref"
+  assert_no_tmux_work_window "$log"
 }
 
 test_legacy_empty_branch_picker_falls_back_to_primary_worktree() {
