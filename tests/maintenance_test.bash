@@ -971,7 +971,6 @@ EOF
   mkdir -p "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" \
     "$HOME/.oh-my-zsh/custom/plugins/zsh-completions" \
     "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" \
-    "$HOME/.oh-my-zsh/custom/plugins/zsh-autocomplete" \
     "$HOME/.oh-my-zsh/custom/themes/powerlevel10k"
   printf '# framework\n' >"$HOME/.oh-my-zsh/oh-my-zsh.sh"
 }
@@ -1001,6 +1000,80 @@ test_maintenance_zsh_preserves_unmanaged_function_links() {
   assert_symlink_to "$HOME/.zfuns/zln" "$TEST_TMPDIR/custom-zmv"
 }
 
+test_maintenance_zsh_autocomplete_install_matrix() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/zsh-autocomplete.sh" "$FIXTURE/machine-tools/"
+  local tool="$FIXTURE/machine-tools/zsh-autocomplete.sh" distro
+  assert_eq syspkgmgr:zsh-autocomplete "$(OS=Darwin ID= bash "$tool" install)"
+  assert_eq syspkgmgr:zsh-autocomplete "$(OS=Linux ID=arch bash "$tool" install)"
+  for distro in ubuntu debian pop fedora; do
+    assert_eq self-install "$(OS=Linux ID="$distro" bash "$tool" install)"
+  done
+
+  export XDG_DATA_HOME="$HOME/.local/share"
+  mkdir -p "$XDG_DATA_HOME/zsh-autocomplete/z-async"
+  printf '# plugin\n' >"$XDG_DATA_HOME/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+  printf '# z-async\n' >"$XDG_DATA_HOME/zsh-autocomplete/z-async/z-async"
+  assert_eq '' "$(OS=Linux ID=ubuntu bash "$tool" install)"
+}
+
+test_maintenance_zsh_autocomplete_pins_linux_clone() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/zsh-autocomplete.sh" "$FIXTURE/machine-tools/"
+  export OS=Linux ID=ubuntu XDG_DATA_HOME="$HOME/.local/share"
+  cat >"$TEST_TMPDIR/bin/git" <<'EOF'
+#!/usr/bin/env bash
+printf 'git %s\n' "$*" >>"$TRACE"
+destination=${!#}
+mkdir -p "$destination/z-async"
+printf '# plugin\n' >"$destination/zsh-autocomplete.plugin.zsh"
+printf '# z-async\n' >"$destination/z-async/z-async"
+EOF
+  chmod +x "$TEST_TMPDIR/bin/git"
+  bash "$FIXTURE/machine-tools/zsh-autocomplete.sh" self-install
+  assert_exists "$XDG_DATA_HOME/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+  assert_exists "$XDG_DATA_HOME/zsh-autocomplete/z-async/z-async"
+  grep -Eq '^git clone --depth 1 --branch 26\.08\.04 -- https://github\.com/marlonrichert/zsh-autocomplete\.git .*/\.zsh-autocomplete\.[^/]+/source$' "$TRACE" ||
+    fail 'zsh-autocomplete clone was not pinned to the stable release'
+  bash "$FIXTURE/machine-tools/zsh-autocomplete.sh" self-install
+  assert_eq 1 "$(grep -c '^git clone ' "$TRACE")"
+
+  mv "$XDG_DATA_HOME/zsh-autocomplete" "$XDG_DATA_HOME/installed"
+  mkdir -p "$XDG_DATA_HOME/zsh-autocomplete"
+  printf 'preserve\n' >"$XDG_DATA_HOME/zsh-autocomplete/local-file"
+  if bash "$FIXTURE/machine-tools/zsh-autocomplete.sh" self-install; then
+    fail 'conflicting zsh-autocomplete path was replaced'
+  fi
+  assert_file_contents "$XDG_DATA_HOME/zsh-autocomplete/local-file" preserve
+  assert_eq 1 "$(grep -c '^git clone ' "$TRACE")"
+}
+
+test_maintenance_zsh_autocomplete_loads_xdg_source() {
+  maintenance_fixture
+  export XDG_DATA_HOME="$HOME/.local/share"
+  printf '# local zshrc\n' >"$HOME/.zshrc"
+  assert_eq unset "$(HOME="$HOME" zsh -dfc '
+    source "$1"
+    print -r -- "${skip_global_compinit:-unset}"
+  ' _ "$REPO_ROOT/home/.zshenv")"
+  rm "$HOME/.zshrc"
+  ln -s "$REPO_ROOT/home/.zshrc" "$HOME/.zshrc"
+  mkdir -p "$XDG_DATA_HOME/zsh-autocomplete"
+  cat >"$XDG_DATA_HOME/zsh-autocomplete/zsh-autocomplete.plugin.zsh" <<'EOF'
+typeset -gi PORTABLES_AUTOCOMPLETE_LOADS=$(( ${PORTABLES_AUTOCOMPLETE_LOADS:-0} + 1 ))
+EOF
+  : >"$HOME/.opencode-completions.zsh"
+  local init="$TEST_TMPDIR/toolshinits.zsh" output
+  awk '!/^[[:space:]]+\/(opt\/homebrew|usr\/local|usr\/share\/zsh\/plugins)\/.*zsh-autocomplete/' \
+    "$REPO_ROOT/home/.toolshinits.zsh" >"$init"
+  output="$(HOME="$HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH=/usr/bin:/bin zsh -dfc '
+    source "$1"
+    source "$2"
+    print -r -- "$PORTABLES_AUTOCOMPLETE_LOADS:$skip_global_compinit"
+  ' _ "$REPO_ROOT/home/.zshenv" "$init")"
+  assert_eq '1:1' "$output"
+}
+
 test_case 'maintenance: unattempted requirements do not poison independent owners' test_maintenance_skipped_requirement_does_not_block_independent_owner
 test_case 'maintenance: machine environment preserves settings and permissions' test_maintenance_machine_env_preserves_settings_and_mode
 test_case 'maintenance: machine environment preserves conflicting home files' test_maintenance_machine_env_preserves_home_conflict
@@ -1011,6 +1084,9 @@ test_case 'maintenance: interactive restart accepts y/Y and declines Enter/n/N' 
 test_case 'maintenance: relink help after options skips restart' test_maintenance_relink_help_skips_restart
 test_case 'maintenance: Zsh migrates only recognized function links' test_maintenance_zsh_migrates_managed_function_links
 test_case 'maintenance: Zsh preserves unmanaged function links' test_maintenance_zsh_preserves_unmanaged_function_links
+test_case 'maintenance: zsh-autocomplete selects supported installers' test_maintenance_zsh_autocomplete_install_matrix
+test_case 'maintenance: zsh-autocomplete pins Linux self-install' test_maintenance_zsh_autocomplete_pins_linux_clone
+test_case 'maintenance: zsh-autocomplete loads XDG source before compinit' test_maintenance_zsh_autocomplete_loads_xdg_source
 
 test_maintenance_default_python_reuses_installed_version() {
   maintenance_fixture
