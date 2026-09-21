@@ -4231,6 +4231,31 @@ test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_picker_creation_from_remote_default_does_not_track_default() {
+  local project worktree default_commit fake_bin no_fzf_path log upstream
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  default_commit="$(git --git-dir "$project/.git" rev-parse main)"
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/main refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  worktree="$project/.worktrees/feature/from-remote-default"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/from-remote-default \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project" --mode=branch
+
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected picker creation to use the remote default commit"
+  upstream="$(git -C "$worktree" config --get branch.feature/from-remote-default.remote || true)"
+  assert_eq "" "$upstream" "expected picker creation not to track the default remote"
+}
+
 test_branch_picker_rejects_invalid_new_branch_before_mutation() {
   local repo fake_bin no_fzf_path log
 
@@ -5494,6 +5519,8 @@ test_case "taw: legacy empty branch picker falls back to primary worktree" \
   test_legacy_empty_branch_picker_falls_back_to_primary_worktree
 test_case "taw: explicit branch picker creates new bare worktree from default branch" \
   test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch
+test_case "taw: picker creation from remote default does not track default" \
+  test_picker_creation_from_remote_default_does_not_track_default
 test_case "taw: branch picker rejects invalid new branch before mutation" \
   test_branch_picker_rejects_invalid_new_branch_before_mutation
 test_case "taw: branch mode tolerates dirty primary checkout" \
