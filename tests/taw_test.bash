@@ -4276,6 +4276,76 @@ test_automatic_branch_picker_rejects_missing_configured_remote_query() {
   assert_no_tmux_work_window "$log"
 }
 
+test_branch_picker_rejects_checkout_shorthand_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" checkout -q --detach
+  git -C "$repo" checkout -q main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY='@{-1}' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"; then
+    fail "expected checkout shorthand to be rejected as a picker branch"
+  fi
+
+  assert_not_exists "$repo/.worktrees/@{-1}"
+  assert_no_tmux_work_window "$log"
+}
+
+test_explicit_branch_picker_rejects_fully_qualified_remote_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=refs/remotes/origin/topic \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch; then
+    fail "expected a fully qualified remote query to fail"
+  fi
+
+  assert_not_exists "$repo/.worktrees/refs/remotes/origin/topic"
+  if git -C "$repo" show-ref --verify --quiet refs/heads/refs/remotes/origin/topic; then
+    fail "expected no local branch for a fully qualified remote query"
+  fi
+  assert_no_tmux_work_window "$log"
+}
+
+test_automatic_branch_picker_rejects_fully_qualified_remote_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=refs/remotes/origin/topic \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"; then
+    fail "expected a fully qualified remote query to fail"
+  fi
+
+  assert_not_exists "$repo/.worktrees/refs/remotes/origin/topic"
+  if git -C "$repo" show-ref --verify --quiet refs/heads/refs/remotes/origin/topic; then
+    fail "expected no local branch for a fully qualified remote query"
+  fi
+  assert_no_tmux_work_window "$log"
+}
+
 test_legacy_empty_branch_picker_falls_back_to_primary_worktree() {
   local repo repo_real fake_bin no_fzf_path log
 
@@ -5694,6 +5764,12 @@ test_case "taw: explicit branch picker rejects missing configured remote query" 
   test_explicit_branch_picker_rejects_missing_configured_remote_query
 test_case "taw: automatic branch picker rejects missing configured remote query" \
   test_automatic_branch_picker_rejects_missing_configured_remote_query
+test_case "taw: branch picker rejects checkout shorthand query" \
+  test_branch_picker_rejects_checkout_shorthand_query
+test_case "taw: explicit branch picker rejects fully qualified remote query" \
+  test_explicit_branch_picker_rejects_fully_qualified_remote_query
+test_case "taw: automatic branch picker rejects fully qualified remote query" \
+  test_automatic_branch_picker_rejects_fully_qualified_remote_query
 test_case "taw: legacy empty branch picker falls back to primary worktree" \
   test_legacy_empty_branch_picker_falls_back_to_primary_worktree
 test_case "taw: explicit branch picker creates new bare worktree from default branch" \

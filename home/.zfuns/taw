@@ -1089,6 +1089,10 @@ _taw_resolve_explicit_picker() {
         [[ "$_taw_picker_mode" == branch && -n "$_taw_query" ]] || return 1
         _taw_ensure_picker_project_context || return 1
         _taw_require_picker_safe "picker query" "$_taw_query" || return 1
+        [[ "$_taw_query" != refs/remotes/* ]] || {
+          _taw_die "remote ref syntax is not a branch query: $_taw_query"
+          return 1
+        }
         if _taw_resolve_branch_target "$_taw_query"; then
           _taw_picker_kind=branch
           _taw_picker_branch="$_taw_branch_target_name"
@@ -1353,6 +1357,11 @@ _taw_ensure_remote_fetch_refspec() {
 
 _taw_branch_exists() {
   _taw_git show-ref --verify --quiet "refs/heads/$1"
+}
+
+_taw_valid_branch_name() {
+  git check-ref-format "refs/heads/$1" >/dev/null 2>&1 \
+    && git check-ref-format --branch "$1" >/dev/null 2>&1
 }
 
 _taw_remote_names_sorted() {
@@ -1659,7 +1668,7 @@ _taw_prepare_picker_created_branch() {
   local _taw_branch="$1" _taw_refs
 
   _taw_require_picker_safe "picker query" "$_taw_branch" || return 1
-  git check-ref-format --branch "$_taw_branch" >/dev/null 2>&1 || {
+  _taw_valid_branch_name "$_taw_branch" || {
     _taw_die "invalid worktree branch: $_taw_branch"
     return 1
   }
@@ -1724,6 +1733,10 @@ _taw_select_branch_target_with_fzf() {
     if [[ "${_taw_output_lines[2]}" == create ]]; then
       [[ -n "$_taw_query" ]] || return 1
       _taw_require_picker_safe "picker query" "$_taw_query" || return 1
+      if [[ "$_taw_query" == refs/remotes/* ]]; then
+        _taw_die "remote ref syntax is not a branch query: $_taw_query"
+        return 1
+      fi
       if _taw_resolve_branch_target "$_taw_query"; then
         _taw_picker_kind=branch
         _taw_picker_branch="$_taw_branch_target_name"
@@ -1840,7 +1853,7 @@ _taw_prepare_worktree() {
   local _taw_remote_target _taw_remote_name _taw_remote_branch _taw_start_point _taw_is_remote_ref=false
 
   [[ "$_taw_project_kind" == normal || "$_taw_is_bare" == true ]] || return 1
-  git check-ref-format --branch "$_taw_branch" >/dev/null 2>&1 || {
+  _taw_valid_branch_name "$_taw_branch" || {
     _taw_die "invalid worktree branch: $_taw_branch"
     return 1
   }
@@ -1929,7 +1942,7 @@ _taw_prepare_orphan_worktree() {
   local _taw_path="$1" _taw_branch="$2" _taw_existing_common
 
   [[ "$_taw_project_kind" == normal || "$_taw_is_bare" == true ]] || return 1
-  git check-ref-format --branch "$_taw_branch" >/dev/null 2>&1 || {
+  _taw_valid_branch_name "$_taw_branch" || {
     _taw_die "invalid worktree branch: $_taw_branch"
     return 1
   }
