@@ -4209,6 +4209,52 @@ test_automatic_branch_picker_rechecks_qualified_remote_queries() {
     "expected a qualified remote query to select the tracking worktree"
 }
 
+test_explicit_branch_picker_rejects_missing_configured_remote_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=origin/missing \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch; then
+    fail "expected an explicit picker query with a missing remote ref to fail"
+  fi
+
+  if git -C "$repo" show-ref --verify --quiet refs/heads/origin/missing; then
+    fail "expected explicit picker not to create a local branch shadowing a remote"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after missing configured remote ref"
+}
+
+test_automatic_branch_picker_rejects_missing_configured_remote_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=origin/missing \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"; then
+    fail "expected an automatic picker query with a missing remote ref to fail"
+  fi
+
+  if git -C "$repo" show-ref --verify --quiet refs/heads/origin/missing; then
+    fail "expected automatic picker not to create a local branch shadowing a remote"
+  fi
+  [[ ! -f "$log" ]] || fail "expected tmux not to run after missing configured remote ref"
+}
+
 test_legacy_empty_branch_picker_falls_back_to_primary_worktree() {
   local repo repo_real fake_bin no_fzf_path log
 
@@ -4427,6 +4473,8 @@ test_picker_selects_fzf_bindings_by_version() {
   assert_file_contains "$args_log" 'tab:print(tab)+accept'
   assert_file_contains "$args_log" 'enter:transform:'
   assert_file_contains "$args_log" 'print()+accept'
+  assert_file_contains "$args_log" 'if [[ -n {2} && {2} != message && {2} != branch-message ]]'
+  assert_file_not_contains "$args_log" 'if [[ -n "{2}"'
   assert_file_not_contains "$args_log" '--expect='
 
   for version in 0.52.1 unknown; do
@@ -4453,6 +4501,30 @@ test_picker_selects_fzf_bindings_by_version() {
   assert_file_contains "$args_log" \
     '--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter'
   assert_file_not_contains "$args_log" ':transform:'
+}
+
+test_picker_enter_transform_parses_empty_fzf_placeholder() {
+  local repo fake_bin no_fzf_path log args_log bind transform empty_placeholder expanded output
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=develop TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+
+  bind="$(tr '\t' '\n' <"$args_log" | rg '^--bind=enter:transform:' | head -n 1)"
+  transform="${bind#--bind=enter:transform:}"
+  empty_placeholder="''"
+  expanded="${transform//\{2\}/$empty_placeholder}"
+  output="$(FZF_MATCH_COUNT=0 FZF_QUERY=feature/new zsh -f -c "$expanded")"
+  assert_eq 'print(create)+accept' "$output" \
+    "expected an empty fzf placeholder to reach the create action"
 }
 
 test_legacy_picker_reports_producer_failure_before_fzf() {
@@ -5571,6 +5643,10 @@ test_case "taw: explicit branch picker rechecks query against remote refs" \
   test_explicit_branch_picker_rechecks_query_against_remote_refs
 test_case "taw: automatic branch picker rechecks qualified remote queries" \
   test_automatic_branch_picker_rechecks_qualified_remote_queries
+test_case "taw: explicit branch picker rejects missing configured remote query" \
+  test_explicit_branch_picker_rejects_missing_configured_remote_query
+test_case "taw: automatic branch picker rejects missing configured remote query" \
+  test_automatic_branch_picker_rejects_missing_configured_remote_query
 test_case "taw: legacy empty branch picker falls back to primary worktree" \
   test_legacy_empty_branch_picker_falls_back_to_primary_worktree
 test_case "taw: explicit branch picker creates new bare worktree from default branch" \
@@ -5589,6 +5665,8 @@ test_case "taw: branch mode creates unassigned bare worktree" \
   test_branch_mode_creates_unassigned_bare_worktree
 test_case "taw: picker selects fzf bindings by version" \
   test_picker_selects_fzf_bindings_by_version
+test_case "taw: picker enter transform parses empty fzf placeholder" \
+  test_picker_enter_transform_parses_empty_fzf_placeholder
 test_case "taw: legacy picker reports producer failure before fzf" \
   test_legacy_picker_reports_producer_failure_before_fzf
 test_case "taw: picker acceptance keys select layouts" \
