@@ -1,4 +1,16 @@
-source /opt/homebrew/share/zsh-autocomplete/zsh-autocomplete.plugin.zsh || true
+# Load this before Oh My Zsh so its completion functions exist when compinit runs.
+for zsh_autocomplete in \
+  /opt/homebrew/share/zsh-autocomplete/zsh-autocomplete.plugin.zsh \
+  /usr/local/share/zsh-autocomplete/zsh-autocomplete.plugin.zsh \
+  /usr/share/zsh/plugins/zsh-autocomplete/zsh-autocomplete.plugin.zsh \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
+do
+  if [[ -r "$zsh_autocomplete" ]]; then
+    source "$zsh_autocomplete"
+    break
+  fi
+done
+unset zsh_autocomplete
 
 export HOMEBREW_NO_ENV_HINTS=1
 [[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -66,4 +78,3 @@ autoload -Uz zmv zcp zln
 LESS='-iRFXMx4W'
 
 export NVM_DIR PATH path fpath LESS
-
