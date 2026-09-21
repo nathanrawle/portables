@@ -14,8 +14,6 @@ case "$1" in
       clone_missing "https://github.com/zsh-users/$plugin.git" "$custom/plugins/$plugin" ||
         failure "plugin $plugin"
     done
-    clone_missing https://github.com/marlonrichert/zsh-autocomplete.git "$custom/plugins/zsh-autocomplete" ||
-      failure "plugin zsh-autocomplete"
     clone_missing https://github.com/romkatv/powerlevel10k.git "$custom/themes/powerlevel10k" ||
       failure "theme powerlevel10k"
     zmv="$(zsh -fc 'for dir in $fpath; do if [[ -r "$dir/zmv" ]]; then print -r -- "$dir/zmv"; break; fi; done')"
