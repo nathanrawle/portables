@@ -4187,6 +4187,28 @@ test_explicit_branch_picker_rechecks_query_against_remote_refs() {
     "expected a delayed remote row to remain a tracking worktree"
 }
 
+test_automatic_branch_picker_rechecks_qualified_remote_queries() {
+  local repo worktree fake_bin no_fzf_path log upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/qualified refs/heads/develop
+  worktree="$repo/.worktrees/feature/qualified"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=origin/feature/qualified \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  upstream_ref="$(git -C "$worktree" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq origin/feature/qualified "$upstream_ref" \
+    "expected a qualified remote query to select the tracking worktree"
+}
+
 test_legacy_empty_branch_picker_falls_back_to_primary_worktree() {
   local repo repo_real fake_bin no_fzf_path log
 
@@ -5547,6 +5569,8 @@ test_case "taw: branch picker creates with no alternate rows" \
   test_branch_picker_creates_with_no_alternate_rows
 test_case "taw: explicit branch picker rechecks query against remote refs" \
   test_explicit_branch_picker_rechecks_query_against_remote_refs
+test_case "taw: automatic branch picker rechecks qualified remote queries" \
+  test_automatic_branch_picker_rechecks_qualified_remote_queries
 test_case "taw: legacy empty branch picker falls back to primary worktree" \
   test_legacy_empty_branch_picker_falls_back_to_primary_worktree
 test_case "taw: explicit branch picker creates new bare worktree from default branch" \

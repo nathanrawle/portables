@@ -1711,6 +1711,13 @@ _taw_select_branch_target_with_fzf() {
     if [[ "${_taw_output_lines[2]}" == create ]]; then
       [[ -n "$_taw_query" ]] || return 1
       _taw_require_picker_safe "picker query" "$_taw_query" || return 1
+      if _taw_resolve_branch_target "$_taw_query"; then
+        _taw_picker_kind=branch
+        _taw_picker_branch="$_taw_branch_target_name"
+        _taw_picker_ref="$_taw_branch_target_ref"
+        _taw_picker_path=
+        return 0
+      fi
       _taw_picker_kind=create
       _taw_picker_branch="$_taw_query"
       _taw_picker_ref=
