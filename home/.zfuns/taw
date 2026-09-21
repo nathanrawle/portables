@@ -835,8 +835,13 @@ _taw_explicit_picker_rows() {
   esac
   _taw_status=$?
   (( _taw_status == 0 )) || return "$_taw_status"
-  (( _taw_picker_row_count > 0 )) \
-    || _taw_emit_picker_row $'Picker has no targets\tmessage\t\t\t'
+  if (( _taw_picker_row_count == 0 )); then
+    if [[ "$_taw_mode" == branch ]]; then
+      _taw_emit_picker_row $'Picker has no targets\tbranch-message\t\t\t'
+    else
+      _taw_emit_picker_row $'Picker has no targets\tmessage\t\t\t'
+    fi
+  fi
 }
 
 _taw_start_picker_producer() {
@@ -1002,7 +1007,7 @@ _taw_resolve_explicit_picker() {
       )
       [[ "$_taw_picker_mode" != branch ]] || _taw_fzf_args+=(--ansi)
       if [[ "$_taw_modern_fzf" == true ]]; then
-        _taw_enter_bind='if [[ -n {2} && {2} != message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 || {2} == message ]] && [[ -n "$FZF_QUERY" ]]; then printf "print(create)+accept-or-print-query"; fi'
+        _taw_enter_bind='if [[ -n {2} && {2} != message && {2} != branch-message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 || {2} == branch-message ]] && [[ -n "$FZF_QUERY" ]]; then printf "print(create)+accept-or-print-query"; fi'
         if [[ "$_taw_picker_mode" != branch ]]; then
           _taw_enter_bind='[[ -n {2} && {2} != message ]] && printf "print()+accept"'
         fi
@@ -1096,7 +1101,8 @@ _taw_resolve_explicit_picker() {
       _taw_choice="${_taw_output_lines[3]}"
       [[ -n "$_taw_choice" ]] || return 1
       _taw_fields=( "${(@ps:\t:)_taw_choice}" )
-      if (( ${#_taw_fields[@]} == 5 )) && [[ "${_taw_fields[2]}" == message ]]; then
+      if (( ${#_taw_fields[@]} == 5 )) \
+        && [[ "${_taw_fields[2]}" == message || "${_taw_fields[2]}" == branch-message ]]; then
         _taw_picker_layout=
         continue
       fi
@@ -1592,6 +1598,14 @@ _taw_default_branch() {
     fi
   fi
 
+  if [[ "$_taw_is_bare" == true ]] \
+    && _taw_head_commit="$(_taw_git rev-parse --verify --quiet HEAD^{commit} 2>/dev/null)" \
+    && _taw_branch="$(_taw_local_branch_for_commit "$_taw_head_commit")"; then
+    _taw_default_branch_result="$_taw_branch"
+    _taw_default_base_ref="$_taw_branch"
+    return 0
+  fi
+
   if _taw_remote_head="$(_taw_git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"; then
     _taw_branch="${_taw_remote_head#origin/}"
     if _taw_branch_exists "$_taw_branch"; then
@@ -1669,9 +1683,9 @@ _taw_select_branch_target_with_fzf() {
   if [[ -z "$_taw_rows" && "$_taw_modern_fzf" != true ]]; then
     return 2
   fi
-  [[ -n "$_taw_rows" ]] || _taw_rows=$'Picker has no alternate branches\tmessage\t\t\t'
+  [[ -n "$_taw_rows" ]] || _taw_rows=$'Picker has no alternate branches\tbranch-message\t\t\t'
   if [[ "$_taw_modern_fzf" == true ]]; then
-    _taw_enter_bind='if [[ -n {2} && {2} != message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 || {2} == message ]] && [[ -n "$FZF_QUERY" ]]; then printf "print(create)+accept-or-print-query"; fi'
+    _taw_enter_bind='if [[ -n {2} && {2} != message && {2} != branch-message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 || {2} == branch-message ]] && [[ -n "$FZF_QUERY" ]]; then printf "print(create)+accept-or-print-query"; fi'
     _taw_choice="$(print -r -- "$_taw_rows" | fzf \
       --ansi --delimiter=$'\t' --with-nth=1 --prompt='branch> ' --print-query \
       "--bind=enter:transform:$_taw_enter_bind")" || _taw_status=$?

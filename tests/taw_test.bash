@@ -4256,6 +4256,38 @@ test_picker_creation_from_remote_default_does_not_track_default() {
   assert_eq "" "$upstream" "expected picker creation not to track the default remote"
 }
 
+test_bare_picker_preserves_detached_head_branch_default() {
+  local project temp_worktree trunk_commit worktree default_commit fake_bin no_fzf_path log
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  default_commit="$(git --git-dir "$project/.git" rev-parse main)"
+  temp_worktree="$TEST_TMPDIR/trunk-source"
+  git --git-dir "$project/.git" worktree add -q "$temp_worktree" main
+  git -C "$temp_worktree" config user.name Test
+  git -C "$temp_worktree" config user.email test@example.com
+  printf 'trunk\n' >"$temp_worktree/TRUNK"
+  git -C "$temp_worktree" add TRUNK
+  git -C "$temp_worktree" commit -qm 'trunk commit'
+  trunk_commit="$(git -C "$temp_worktree" rev-parse HEAD)"
+  git --git-dir "$project/.git" branch trunk "$trunk_commit"
+  git --git-dir "$project/.git" worktree remove -f "$temp_worktree"
+  git --git-dir "$project/.git" update-ref --no-deref HEAD "$trunk_commit"
+  worktree="$project/.worktrees/feature/from-detached-head"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/from-detached-head \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project" --mode=branch
+
+  assert_eq "$trunk_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected picker creation to use the detached HEAD branch history"
+  [[ "$default_commit" != "$(git -C "$worktree" rev-parse HEAD)" ]] \
+    || fail "expected detached HEAD history to differ from main"
+}
+
 test_branch_picker_rejects_invalid_new_branch_before_mutation() {
   local repo fake_bin no_fzf_path log
 
@@ -5521,6 +5553,8 @@ test_case "taw: explicit branch picker creates new bare worktree from default br
   test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch
 test_case "taw: picker creation from remote default does not track default" \
   test_picker_creation_from_remote_default_does_not_track_default
+test_case "taw: bare picker preserves detached HEAD branch default" \
+  test_bare_picker_preserves_detached_head_branch_default
 test_case "taw: branch picker rejects invalid new branch before mutation" \
   test_branch_picker_rejects_invalid_new_branch_before_mutation
 test_case "taw: branch mode tolerates dirty primary checkout" \

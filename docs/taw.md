@@ -88,13 +88,13 @@ the agent's state:
 
 For sessions containing multiple agents, the displayed priority is waiting,
 acknowledged, thinking, then idle. The marker is part of the session snapshot;
+reopen the picker to refresh it.
 
 In branch mode, pressing Enter with a non-empty query that has no matching row
 creates a new local branch and managed worktree named from that query. The
 branch starts from taw's detected default branch, and the primary worktree is
 left unchanged. This works in both the automatic branch picker and explicit
 `--mode=branch`, and requires the modern fzf picker path.
-reopen the picker to refresh it.
 
 `TAW_ICONS` controls the icon set. Its values are `auto`, `nerd`, and `unicode`.
 The default, `auto`, uses Nerd Font icons when `fc-list` finds installed font
