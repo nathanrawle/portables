@@ -78,6 +78,7 @@ fi
 print_query=0
 expects_key=0
 prints_key=0
+supports_create=0
 uses_ansi=0
 initial_query=""
 args=( "$@" )
@@ -95,6 +96,9 @@ for ((i = 0; i < ${#args[@]}; i++)); do
     --bind=*)
       if [[ "${args[$i]}" == *"print("*"+accept"* ]]; then
         prints_key=1
+      fi
+      if [[ "${args[$i]}" == *"print(create)+accept"* ]]; then
+        supports_create=1
       fi
       ;;
     --query=*)
@@ -209,6 +213,18 @@ if [[ "$key" = cancel ]]; then
 fi
 
 if [[ ${#lines[@]} -eq 0 ]]; then
+  exit 1
+fi
+
+if [[ -n "${TAW_FAKE_FZF_NO_MATCH_QUERY:-}" ]]; then
+  output_query="${TAW_FAKE_FZF_NO_MATCH_QUERY}"
+  if (( supports_create )); then
+    if (( print_query )); then
+      printf '%s\n' "$output_query"
+    fi
+    printf 'create\n%s\n' "$output_query"
+    exit 0
+  fi
   exit 1
 fi
 
@@ -1719,6 +1735,27 @@ test_bare_project_origin_head_only_creates_local_default_worktree() {
   assert_eq "main" "$branch" "expected origin/HEAD-only repo to create local main worktree"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\tmain 🌲'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_bare_picker_preserves_custom_head_default() {
+  local project worktree fake_bin no_fzf_path log default_commit
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  default_commit="$(git --git-dir "$project/.git" rev-parse main)"
+  git --git-dir "$project/.git" update-ref refs/heads/trunk refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/trunk
+  worktree="$project/.worktrees/feature/from-trunk"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/from-trunk \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project" --mode=branch
+
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected a bare custom HEAD to remain the picker default"
 }
 
 test_bare_picker_lists_deduped_branches() {
@@ -4060,6 +4097,376 @@ test_branch_mode_creates_unassigned_normal_worktree() {
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
+test_branch_picker_creates_new_normal_worktree_from_default_branch() {
+  local repo worktree worktree_real fake_bin no_fzf_path log default_commit
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  default_commit="$(git -C "$repo" rev-parse main)"
+  worktree="$repo/.worktrees/feature/new-picker-branch"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/new-picker-branch \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq feature/new-picker-branch "$(git -C "$worktree" branch --show-current)" \
+    "expected unmatched picker query to create a branch"
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected new branch to start from the default branch"
+  assert_eq main "$(git -C "$repo" branch --show-current)" \
+    "expected the primary worktree to remain unchanged"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_branch_picker_creates_from_main_when_primary_is_on_feature() {
+  local repo worktree worktree_real fake_bin no_fzf_path log default_commit
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  default_commit="$(git -C "$repo" rev-parse main)"
+  git -C "$repo" checkout -qb feature/current
+  worktree="$repo/.worktrees/feature/from-main"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/from-main \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected an unmatched query to use main instead of the current branch"
+}
+
+test_branch_picker_creates_with_no_alternate_rows() {
+  local repo worktree worktree_real fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  worktree="$repo/.worktrees/feature/first-picker-branch"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/first-picker-branch \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq feature/first-picker-branch "$(git -C "$worktree" branch --show-current)" \
+    "expected an unmatched query to work with no alternate branch rows"
+}
+
+test_branch_picker_creates_first_branch_in_unborn_repo() {
+  local repo worktree fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/unborn"
+  worktree="$repo/.worktrees/feature/first-branch"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/first-branch \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  assert_eq feature/first-branch "$(git -C "$worktree" branch --show-current)" \
+    "expected an unmatched query to create the first branch in an unborn repo"
+  assert_file_contains "$log" $'-c\t'"$(cd "$worktree" && pwd -P)"$'\tvim'
+}
+
+test_explicit_branch_picker_rechecks_query_against_remote_refs() {
+  local repo worktree fake_bin no_fzf_path log upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/delayed refs/heads/develop
+  worktree="$repo/.worktrees/feature/delayed"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/delayed \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+
+  upstream_ref="$(git -C "$worktree" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq origin/feature/delayed "$upstream_ref" \
+    "expected a delayed remote row to remain a tracking worktree"
+}
+
+test_automatic_branch_picker_rechecks_qualified_remote_queries() {
+  local repo worktree fake_bin no_fzf_path log upstream_ref
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  git -C "$repo" update-ref refs/remotes/origin/feature/qualified refs/heads/develop
+  worktree="$repo/.worktrees/feature/qualified"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=origin/feature/qualified \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  upstream_ref="$(git -C "$worktree" rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  assert_eq origin/feature/qualified "$upstream_ref" \
+    "expected a qualified remote query to select the tracking worktree"
+}
+
+test_explicit_branch_picker_rejects_missing_configured_remote_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=origin/missing \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch; then
+    fail "expected an explicit picker query with a missing remote ref to fail"
+  fi
+
+  if git -C "$repo" show-ref --verify --quiet refs/heads/origin/missing; then
+    fail "expected explicit picker not to create a local branch shadowing a remote"
+  fi
+  assert_no_tmux_work_window "$log"
+}
+
+test_automatic_branch_picker_rejects_missing_configured_remote_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=origin/missing \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"; then
+    fail "expected an automatic picker query with a missing remote ref to fail"
+  fi
+
+  if git -C "$repo" show-ref --verify --quiet refs/heads/origin/missing; then
+    fail "expected automatic picker not to create a local branch shadowing a remote"
+  fi
+  assert_no_tmux_work_window "$log"
+}
+
+test_branch_picker_rejects_checkout_shorthand_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" checkout -q --detach
+  git -C "$repo" checkout -q main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY='@{-1}' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"; then
+    fail "expected checkout shorthand to be rejected as a picker branch"
+  fi
+
+  assert_not_exists "$repo/.worktrees/@{-1}"
+  assert_no_tmux_work_window "$log"
+}
+
+test_explicit_branch_picker_rejects_fully_qualified_remote_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=refs/remotes/origin/topic \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch; then
+    fail "expected a fully qualified remote query to fail"
+  fi
+
+  assert_not_exists "$repo/.worktrees/refs/remotes/origin/topic"
+  if git -C "$repo" show-ref --verify --quiet refs/heads/refs/remotes/origin/topic; then
+    fail "expected no local branch for a fully qualified remote query"
+  fi
+  assert_no_tmux_work_window "$log"
+}
+
+test_automatic_branch_picker_rejects_fully_qualified_remote_query() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/origin.git"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=refs/remotes/origin/topic \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"; then
+    fail "expected a fully qualified remote query to fail"
+  fi
+
+  assert_not_exists "$repo/.worktrees/refs/remotes/origin/topic"
+  if git -C "$repo" show-ref --verify --quiet refs/heads/refs/remotes/origin/topic; then
+    fail "expected no local branch for a fully qualified remote query"
+  fi
+  assert_no_tmux_work_window "$log"
+}
+
+test_legacy_empty_branch_picker_falls_back_to_primary_worktree() {
+  local repo repo_real fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" branch -D develop >/dev/null
+  repo_real="$(cd "$repo" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_NO_MATCH_QUERY=feature/legacy \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"
+
+  assert_file_contains "$log" $'-c\t'"$repo_real"$'\tvim'
+  assert_not_exists "$repo/.worktrees/feature/legacy"
+}
+
+test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch() {
+  local project worktree worktree_real fake_bin no_fzf_path log default_commit
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR/bare")"
+  default_commit="$(git --git-dir "$project/.git" rev-parse main)"
+  worktree="$project/.worktrees/feature/new-picker-branch"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/new-picker-branch \
+    TAW_FAKE_TMUX_SESSIONS= TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project" --mode=branch
+
+  worktree_real="$(cd "$worktree" && pwd -P)"
+  assert_eq feature/new-picker-branch "$(git -C "$worktree" branch --show-current)" \
+    "expected explicit branch mode to create a branch from the query"
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected bare picker branch to start from the default branch"
+  assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
+}
+
+test_picker_creation_from_remote_default_does_not_track_default() {
+  local project worktree default_commit fake_bin no_fzf_path log upstream
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  default_commit="$(git --git-dir "$project/.git" rev-parse main)"
+  git --git-dir "$project/.git" update-ref refs/remotes/origin/main refs/heads/main
+  git --git-dir "$project/.git" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  git --git-dir "$project/.git" symbolic-ref HEAD refs/heads/missing
+  git --git-dir "$project/.git" update-ref -d refs/heads/main
+  worktree="$project/.worktrees/feature/from-remote-default"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/from-remote-default \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project" --mode=branch
+
+  assert_eq "$default_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected picker creation to use the remote default commit"
+  upstream="$(git -C "$worktree" config --get branch.feature/from-remote-default.remote || true)"
+  assert_eq "" "$upstream" "expected picker creation not to track the default remote"
+}
+
+test_bare_picker_preserves_detached_head_branch_default() {
+  local project temp_worktree trunk_commit worktree default_commit fake_bin no_fzf_path log
+
+  project="$(make_bare_wrapper "$TEST_TMPDIR")"
+  default_commit="$(git --git-dir "$project/.git" rev-parse main)"
+  temp_worktree="$TEST_TMPDIR/trunk-source"
+  git --git-dir "$project/.git" worktree add -q "$temp_worktree" main
+  git -C "$temp_worktree" config user.name Test
+  git -C "$temp_worktree" config user.email test@example.com
+  printf 'trunk\n' >"$temp_worktree/TRUNK"
+  git -C "$temp_worktree" add TRUNK
+  git -C "$temp_worktree" commit -qm 'trunk commit'
+  trunk_commit="$(git -C "$temp_worktree" rev-parse HEAD)"
+  git --git-dir "$project/.git" branch trunk "$trunk_commit"
+  git --git-dir "$project/.git" worktree remove -f "$temp_worktree"
+  git --git-dir "$project/.git" update-ref --no-deref HEAD "$trunk_commit"
+  worktree="$project/.worktrees/feature/from-detached-head"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY=feature/from-detached-head \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$project" --mode=branch
+
+  assert_eq "$trunk_commit" "$(git -C "$worktree" rev-parse HEAD)" \
+    "expected picker creation to use the detached HEAD branch history"
+  [[ "$default_commit" != "$(git -C "$worktree" rev-parse HEAD)" ]] \
+    || fail "expected detached HEAD history to differ from main"
+}
+
+test_branch_picker_rejects_invalid_new_branch_before_mutation() {
+  local repo fake_bin no_fzf_path log
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if EDITOR=vim TAW_FAKE_FZF_NO_MATCH_QUERY='bad..branch' \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo"; then
+    fail "expected an invalid unmatched branch query to fail"
+  fi
+
+  assert_not_exists "$repo/.worktrees/bad..branch"
+  assert_no_tmux_work_window "$log"
+}
+
 test_branch_mode_creates_worktree_with_dirty_primary_checkout() {
   local repo worktree fake_bin no_fzf_path log
 
@@ -4157,6 +4564,8 @@ test_picker_selects_fzf_bindings_by_version() {
   assert_file_contains "$args_log" 'tab:print(tab)+accept'
   assert_file_contains "$args_log" 'enter:transform:'
   assert_file_contains "$args_log" 'print()+accept'
+  assert_file_contains "$args_log" 'if [[ -n {2} && {2} != message && {2} != branch-message ]]'
+  assert_file_not_contains "$args_log" 'if [[ -n "{2}"'
   assert_file_not_contains "$args_log" '--expect='
 
   for version in 0.52.1 unknown; do
@@ -4183,6 +4592,30 @@ test_picker_selects_fzf_bindings_by_version() {
   assert_file_contains "$args_log" \
     '--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter'
   assert_file_not_contains "$args_log" ':transform:'
+}
+
+test_picker_enter_transform_parses_empty_fzf_placeholder() {
+  local repo fake_bin no_fzf_path log args_log bind transform empty_placeholder expanded output
+
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+
+  EDITOR=vim TAW_FAKE_FZF_MATCH=develop TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+
+  bind="$(tr '\t' '\n' <"$args_log" | grep '^--bind=enter:transform:' | head -n 1)"
+  transform="${bind#--bind=enter:transform:}"
+  empty_placeholder="''"
+  expanded="${transform//\{2\}/$empty_placeholder}"
+  output="$(FZF_MATCH_COUNT=0 FZF_QUERY=feature/new zsh -f -c "$expanded")"
+  assert_eq 'print(create)+accept' "$output" \
+    "expected an empty fzf placeholder to reach the create action"
 }
 
 test_legacy_picker_reports_producer_failure_before_fzf() {
@@ -4517,6 +4950,30 @@ test_project_scoped_modes_remain_cycleable_outside_git() {
   assert_file_contains "$log" $'-s\ttarget\t-n\tmain 🌲\t-c\t'"$target_real"$'\tvim'
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_not_contains "$log" 'ignored'
+}
+
+test_explicit_branch_picker_keeps_non_project_message_inert() {
+  local elsewhere fake_bin no_fzf_path log args_log fzf_log
+
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$elsewhere"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+
+  EDITOR=vim TAW_FAKE_FZF_KEYS=$'\ncancel' \
+    TAW_FAKE_FZF_MATCH='Not in a Git project' TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FZF_INPUT_LOG="$fzf_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$elsewhere" --mode=branch
+
+  assert_file_contains "$fzf_log" $'Not in a Git project\tmessage\t\t\t'
+  assert_file_contains "$args_log" 'enter:transform:'
+  assert_file_not_contains "$args_log" 'print(create)+accept'
+  assert_no_tmux_work_window "$log"
 }
 
 test_explicit_picker_keeps_empty_modes_cycleable() {
@@ -5113,6 +5570,8 @@ test_case "taw: bare project without default falls back to master" \
   test_bare_project_without_default_falls_back_to_master
 test_case "taw: bare project with only origin HEAD creates local default worktree" \
   test_bare_project_origin_head_only_creates_local_default_worktree
+test_case "taw: bare picker preserves custom HEAD default" \
+  test_bare_picker_preserves_custom_head_default
 test_case "taw: bare default worktree fails when refs exist but no default resolves" \
   test_bare_zero_worktree_fails_when_refs_exist_but_no_default_resolves
 test_case "taw: bare default worktree fails when only tag ref exists" \
@@ -5289,6 +5748,38 @@ test_case "taw: branch mode reuses window for assigned worktree" \
   test_branch_mode_reuses_window_for_assigned_worktree
 test_case "taw: branch mode creates unassigned normal worktree" \
   test_branch_mode_creates_unassigned_normal_worktree
+test_case "taw: branch picker creates new normal worktree from default branch" \
+  test_branch_picker_creates_new_normal_worktree_from_default_branch
+test_case "taw: branch picker creates from main when primary is on feature" \
+  test_branch_picker_creates_from_main_when_primary_is_on_feature
+test_case "taw: branch picker creates with no alternate rows" \
+  test_branch_picker_creates_with_no_alternate_rows
+test_case "taw: branch picker creates first branch in unborn repo" \
+  test_branch_picker_creates_first_branch_in_unborn_repo
+test_case "taw: explicit branch picker rechecks query against remote refs" \
+  test_explicit_branch_picker_rechecks_query_against_remote_refs
+test_case "taw: automatic branch picker rechecks qualified remote queries" \
+  test_automatic_branch_picker_rechecks_qualified_remote_queries
+test_case "taw: explicit branch picker rejects missing configured remote query" \
+  test_explicit_branch_picker_rejects_missing_configured_remote_query
+test_case "taw: automatic branch picker rejects missing configured remote query" \
+  test_automatic_branch_picker_rejects_missing_configured_remote_query
+test_case "taw: branch picker rejects checkout shorthand query" \
+  test_branch_picker_rejects_checkout_shorthand_query
+test_case "taw: explicit branch picker rejects fully qualified remote query" \
+  test_explicit_branch_picker_rejects_fully_qualified_remote_query
+test_case "taw: automatic branch picker rejects fully qualified remote query" \
+  test_automatic_branch_picker_rejects_fully_qualified_remote_query
+test_case "taw: legacy empty branch picker falls back to primary worktree" \
+  test_legacy_empty_branch_picker_falls_back_to_primary_worktree
+test_case "taw: explicit branch picker creates new bare worktree from default branch" \
+  test_explicit_branch_picker_creates_new_bare_worktree_from_default_branch
+test_case "taw: picker creation from remote default does not track default" \
+  test_picker_creation_from_remote_default_does_not_track_default
+test_case "taw: bare picker preserves detached HEAD branch default" \
+  test_bare_picker_preserves_detached_head_branch_default
+test_case "taw: branch picker rejects invalid new branch before mutation" \
+  test_branch_picker_rejects_invalid_new_branch_before_mutation
 test_case "taw: branch mode tolerates dirty primary checkout" \
   test_branch_mode_creates_worktree_with_dirty_primary_checkout
 test_case "taw: branch mode creates tracking remote worktree" \
@@ -5297,6 +5788,8 @@ test_case "taw: branch mode creates unassigned bare worktree" \
   test_branch_mode_creates_unassigned_bare_worktree
 test_case "taw: picker selects fzf bindings by version" \
   test_picker_selects_fzf_bindings_by_version
+test_case "taw: picker enter transform parses empty fzf placeholder" \
+  test_picker_enter_transform_parses_empty_fzf_placeholder
 test_case "taw: legacy picker reports producer failure before fzf" \
   test_legacy_picker_reports_producer_failure_before_fzf
 test_case "taw: picker acceptance keys select layouts" \
@@ -5315,6 +5808,8 @@ test_case "taw: session selection after project mode replaces context" \
   test_session_selection_after_project_mode_replaces_context
 test_case "taw: project-scoped modes remain cycleable outside git" \
   test_project_scoped_modes_remain_cycleable_outside_git
+test_case "taw: explicit branch picker keeps non-project message inert" \
+  test_explicit_branch_picker_keeps_non_project_message_inert
 test_case "taw: explicit picker keeps empty modes cycleable" \
   test_explicit_picker_keeps_empty_modes_cycleable
 test_case "taw: invalid picker modes and combinations are rejected" \
