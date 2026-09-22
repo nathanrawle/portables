@@ -209,7 +209,8 @@ on run argv
             set rowAnchors to {firstTerminal}
 
             repeat with column from 2 to columnCount
-                set newTerminal to split (item (column - 1) of rowAnchors) direction right with configuration cfg
+                set anchorTerminal to item (column - 1) of rowAnchors
+                set newTerminal to split anchorTerminal direction right with configuration cfg
                 set end of rowAnchors to newTerminal
                 set end of allTerms to newTerminal
             end repeat
@@ -218,7 +219,8 @@ on run argv
             repeat with row from 2 to rowCount
                 repeat with column from 1 to columnCount
                     if nextSurface is less than or equal to surfaceCount then
-                        set newTerminal to split (item column of rowAnchors) direction down with configuration cfg
+                        set anchorTerminal to item column of rowAnchors
+                        set newTerminal to split anchorTerminal direction down with configuration cfg
                         set item column of rowAnchors to newTerminal
                         set end of allTerms to newTerminal
                         set nextSurface to nextSurface + 1
