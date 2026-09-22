@@ -354,6 +354,7 @@ unlink_agent_window() (
       >/dev/null 2>&1 || true
     return 1
   fi
+  sync_dashboard
 )
 
 set_status() {

@@ -43,6 +43,7 @@ script="$(cat)"
 mode="${2:-}"
 {
   printf 'mode=%s\n' "$mode"
+  [[ "$mode" = close-terminal ]] && printf 'target=%s\n' "${3:-}"
   printf '%s\n' "$script"
 } >>"$TAW_DASHBOARD_OSASCRIPT_LOG"
 
@@ -53,7 +54,10 @@ case "$mode" in
   build)
     printf '%s' "${TAW_FAKE_GHOSTTY_BUILD:?}"
     ;;
-  close|close-terminal|focus)
+  close-terminal)
+    printf '1\n'
+    ;;
+  close|focus)
     printf '1\n'
     ;;
   *)
@@ -100,6 +104,21 @@ run_dashboard_status() {
     TAW_AGENT_LINK_REAL_TMUX="$DASHBOARD_REAL_TMUX" \
     TAW_AGENT_LINK_SOCKET="$DASHBOARD_SOCKET" \
     "$DASHBOARD_STATUS" start "$agent" "$pane"
+}
+
+run_dashboard_status_unlink() {
+  local bin="$1" home="$2" window="$3"
+
+  TMUX=/tmp HOME="$home" PATH="$bin:$PATH" \
+    TAW_DASHBOARD_REAL_TMUX="$DASHBOARD_REAL_TMUX" \
+    TAW_DASHBOARD_SOCKET="$DASHBOARD_SOCKET" \
+    TAW_DASHBOARD_TMUX_LOG="$TEST_TMPDIR/tmux.log" \
+    TAW_DASHBOARD_OSASCRIPT_LOG="$TEST_TMPDIR/osascript.log" \
+    TAW_AGENT_DASHBOARD_STATE_FILE="$TEST_TMPDIR/dashboard.state" \
+    TAW_AGENT_DASHBOARD_OSASCRIPT="$bin/osascript" \
+    TAW_AGENT_LINK_REAL_TMUX="$DASHBOARD_REAL_TMUX" \
+    TAW_AGENT_LINK_SOCKET="$DASHBOARD_SOCKET" \
+    "$DASHBOARD_STATUS" unlink "$window"
 }
 
 assert_dashboard_file_contains() {
@@ -228,7 +247,100 @@ test_dashboard_closes_private_views_but_keeps_source_alive() {
     "expected close to preserve the managed source link"
 }
 
+test_dashboard_unlink_resolves_session_id() {
+  local project home wrapper source_window pane session session_id terminal
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-unlink-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+  source_window="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-windows \
+    -t agents -F '#{window_id}')"
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-3\nterminal-5' \
+    run_dashboard "$wrapper" open
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  terminal="$(awk -F '\t' '$1 == "terminal" { print $2 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  session_id="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-sessions \
+    -F $'#{session_id}\t#{session_name}' \
+    | awk -F '\t' -v name="$session" '$2 == name { print $1 }')"
+  [[ -n "$session_id" ]] || fail "expected a tmux session ID for $session"
+
+  run_dashboard "$wrapper" unlink "$session_id" "$source_window"
+
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$session" 2>/dev/null; then
+    fail "expected unlink to remove the private view session"
+  fi
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+  assert_dashboard_file_contains "$TEST_TMPDIR/osascript.log" \
+    "mode=close-terminal"
+  assert_dashboard_file_contains "$TEST_TMPDIR/osascript.log" "target=$terminal"
+}
+
+test_agent_unlink_syncs_dashboard() {
+  local project home wrapper source_window pane session
+  local attempt
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-agent-unlink-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" claude
+  source_window="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-windows \
+    -t agents -F '#{window_id}')"
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-4\nterminal-6' \
+    run_dashboard "$wrapper" open
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+
+  run_dashboard_status_unlink "$wrapper" "$home" "$source_window"
+
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    [[ ! -e "$TEST_TMPDIR/dashboard.state" ]] && break
+    sleep 0.05
+  done
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"; then
+    fail "expected agent unlink to remove the private view session"
+  fi
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
 test_case "agent dashboard: private views and no reopen" \
   test_dashboard_uses_private_views_and_does_not_reopen
 test_case "agent dashboard: close preserves source" \
   test_dashboard_closes_private_views_but_keeps_source_alive
+test_case "agent dashboard: unlink resolves session IDs" \
+  test_dashboard_unlink_resolves_session_id
+test_case "agent dashboard: agent unlink syncs dashboard" \
+  test_agent_unlink_syncs_dashboard

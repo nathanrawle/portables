@@ -460,13 +460,16 @@ close_dashboard() {
 }
 
 unlink_dashboard_window() {
-  local session_name="$1" source_window marker source terminal i
+  local session_target="$1" source_window marker source terminal i session_name
   local -a remaining_terminals remaining_sessions remaining_sources
 
-  marker="$(tmux show-option -qv -t "$session_name" \
+  session_name="$(tmux display-message -p -t "$session_target" '#{session_name}' \
+    2>/dev/null)" || return 0
+  [[ -n "$session_name" ]] || return 0
+  marker="$(tmux show-option -qv -t "$session_target" \
     "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" || marker=
   [[ "$marker" = 1 ]] || return 0
-  source="$(tmux show-option -qv -t "$session_name" \
+  source="$(tmux show-option -qv -t "$session_target" \
     "$DASHBOARD_SOURCE_WINDOW_OPTION" 2>/dev/null)" || source=
   [[ "$source" = "$2" ]] || return 0
 
