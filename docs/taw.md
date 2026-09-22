@@ -366,6 +366,26 @@ The protection is implemented by those key bindings. Running the literal tmux
 `kill-window` command still destroys a linked window in every session because
 tmux represents linked windows as one shared object.
 
+## Ghostty Agent Dashboard
+
+On macOS, `taw-agents` toggles a Ghostty window containing one adaptive split
+per supported agent window. The same controller is available as:
+
+```bash
+taw-agents                         # toggle
+taw-agent-dashboard open|focus|sync|close
+```
+
+The dashboard is built from the managed `agents` session. Each split attaches
+to a private, marked tmux view session that links one `agents` window, so
+closing the dashboard or a view never kills the source agent window. Agent
+membership changes reconcile the dashboard while it is open; closing the
+Ghostty window clears its state and later tmux hooks do not reopen it.
+
+The first use may ask macOS to allow the shell to automate Ghostty. Ghostty
+1.3 or newer is required, and the dashboard's view sessions are hidden from
+the `taw` project picker.
+
 ## Codex Neovim Bridge
 
 Codex can discover and query a live Neovim without MCP when both processes are
