@@ -19,6 +19,7 @@ STATE_WINDOW_ID=
 STATE_TERMINALS=()
 STATE_SESSIONS=()
 STATE_SOURCE_WINDOWS=()
+STATE_EXCLUDED_SOURCE_WINDOWS=()
 DESIRED_WINDOWS=()
 
 tmux_available() {
@@ -74,6 +75,7 @@ load_state() {
   STATE_TERMINALS=()
   STATE_SESSIONS=()
   STATE_SOURCE_WINDOWS=()
+  STATE_EXCLUDED_SOURCE_WINDOWS=()
   [[ -s "$DASHBOARD_STATE_FILE" ]] || return 1
 
   while IFS= read -r line; do
@@ -94,6 +96,10 @@ load_state() {
         STATE_SESSIONS+=( "$session" )
         STATE_SOURCE_WINDOWS+=( "$source" )
         ;;
+      exclude)
+        [[ -n "$value" ]] || return 1
+        STATE_EXCLUDED_SOURCE_WINDOWS+=( "$value" )
+        ;;
       *)
         return 1
         ;;
@@ -108,7 +114,7 @@ load_state() {
 write_state() {
   local window_id="$1"
   shift
-  local parent temp i
+  local parent temp i source
 
   parent="${DASHBOARD_STATE_FILE%/*}"
   [[ "$parent" != "$DASHBOARD_STATE_FILE" ]] || parent=.
@@ -121,6 +127,9 @@ write_state() {
         "${STATE_TERMINALS[$i]}" "${STATE_SESSIONS[$i]}" \
         "${STATE_SOURCE_WINDOWS[$i]}"
     done
+    for source in "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}"; do
+      printf 'exclude\t%s\n' "$source"
+    done
   } >"$temp" || {
     rm -f "$temp"
     return 1
@@ -130,6 +139,39 @@ write_state() {
 
 clear_state() {
   rm -f "$DASHBOARD_STATE_FILE"
+}
+
+array_contains() {
+  local expected="$1"
+  shift
+  local actual
+
+  for actual in "$@"; do
+    [[ "$actual" = "$expected" ]] && return 0
+  done
+  return 1
+}
+
+apply_state_exclusions() {
+  local source window
+  local -a active_exclusions filtered_windows
+
+  active_exclusions=()
+  for source in "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}"; do
+    array_contains "$source" "${DESIRED_WINDOWS[@]+${DESIRED_WINDOWS[@]}}" \
+      || continue
+    active_exclusions+=( "$source" )
+  done
+  STATE_EXCLUDED_SOURCE_WINDOWS=( "${active_exclusions[@]}" )
+
+  filtered_windows=()
+  for window in "${DESIRED_WINDOWS[@]}"; do
+    array_contains "$window" \
+      "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}" \
+      && continue
+    filtered_windows+=( "$window" )
+  done
+  DESIRED_WINDOWS=( "${filtered_windows[@]}" )
 }
 
 state_matches_desired() {
@@ -420,6 +462,11 @@ open_dashboard() {
 
   if load_state; then
     if dashboard_is_live; then
+      if ((${#STATE_EXCLUDED_SOURCE_WINDOWS[@]} > 0)); then
+        STATE_EXCLUDED_SOURCE_WINDOWS=()
+        rebuild_dashboard
+        return
+      fi
       if state_matches_desired; then
         focus_dashboard
         return
@@ -443,6 +490,13 @@ sync_dashboard() {
     return 0
   fi
   if ! collect_desired_windows; then
+    close_dashboard_window
+    cleanup_state_view_sessions
+    clear_state
+    return 0
+  fi
+  apply_state_exclusions
+  if ((${#DESIRED_WINDOWS[@]} == 0)); then
     close_dashboard_window
     cleanup_state_view_sessions
     clear_state
@@ -490,6 +544,9 @@ unlink_dashboard_window() {
       remaining_sessions+=( "${STATE_SESSIONS[$i]}" )
       remaining_sources+=( "${STATE_SOURCE_WINDOWS[$i]}" )
     done
+    array_contains "$source" \
+      "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}" \
+      || STATE_EXCLUDED_SOURCE_WINDOWS+=( "$source" )
     destroy_view_session "$session_name" || true
     if ((${#remaining_sessions[@]} == 0)); then
       clear_state

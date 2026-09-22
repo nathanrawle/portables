@@ -2876,8 +2876,7 @@ test_project_picker_rejects_control_characters_in_tmux_sessions() {
     fail "expected project picker to reject a tab in a tmux session name"
   fi
 
-  assert_string_contains "$output" \
-    "tmux session contains control characters and cannot be used by the picker"
+  assert_string_contains "$output" "tmux returned invalid session metadata"
   assert_no_tmux_work_window "$log"
 }
 
@@ -2906,10 +2905,35 @@ test_project_picker_batches_tmux_session_metadata() {
 
   assert_file_contains "$fzf_log" '* first'
   assert_file_contains "$fzf_log" '* second'
-  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__'
+  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{@taw_agent_dashboard_session}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__'
   metadata_call_count="$(grep -Fxc -- "$metadata_call" "$log" || true)"
   assert_eq "1" "$metadata_call_count" "expected one batched tmux metadata query"
   assert_file_not_contains "$log" $'display-message\t-p\t-t\t'
+}
+
+test_project_picker_hides_owned_dashboard_sessions_only() {
+  local xdg empty_search elsewhere fake_bin log fzf_log sessions
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" \
+    >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$7\ttaw-agent-view-ordinary\t/tmp/ordinary\n'
+  sessions+=$'$8\ttaw-agent-view-owned\t/tmp/owned\t1'
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+  fzf_log="$TEST_TMPDIR/fzf.log"
+
+  XDG_CONFIG_HOME="$xdg" TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_FZF_CANCEL=1 TAW_FZF_INPUT_LOG="$fzf_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere" --pick-project
+
+  assert_file_contains "$fzf_log" '* taw-agent-view-ordinary'
+  assert_file_not_contains "$fzf_log" '* taw-agent-view-owned'
 }
 
 test_project_picker_shows_unicode_agent_states_and_priority() {
@@ -3061,7 +3085,7 @@ test_explicit_picker_prefetches_mode_snapshots() {
   assert_eq "1" "$(grep -Fxc -- "$branch_call" "$git_log")" \
     "expected one branch snapshot"
   assert_file_not_contains "$git_log" $'worktree\tlist\t--porcelain\t-z'
-  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__'
+  metadata_call=$'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{@taw_agent_dashboard_session}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__'
   assert_eq "1" "$(grep -Fxc -- "$metadata_call" "$log")" \
     "expected one session snapshot"
   assert_eq "1" "$(wc -l <"$version_log" | tr -d ' ')" \
@@ -3231,7 +3255,7 @@ test_project_picker_skips_unsafe_current_tmux_session() {
   assert_file_contains "$fzf_log" "$repo"
   assert_file_not_contains "$fzf_log" '* current'
   assert_file_contains "$log" \
-    $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__\t-f\t#{!=:#{session_id},$1}'
+    $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}\t#{@taw_agent_dashboard_session}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__\t-f\t#{!=:#{session_id},$1}'
   assert_file_not_contains "$log" $'display-message\t-p\t-t\t$1\t#{session_path}'
 }
 
@@ -4645,8 +4669,7 @@ test_legacy_picker_reports_producer_failure_before_fzf() {
     fail "expected a legacy picker producer failure to fail"
   fi
 
-  assert_string_contains "$output" \
-    "tmux session contains control characters and cannot be used by the picker"
+  assert_string_contains "$output" "tmux returned invalid session metadata"
   assert_not_exists "$args_log"
   assert_no_tmux_work_window "$log"
   if compgen -G "$picker_tmp/taw-picker.*" >/dev/null; then
@@ -5676,6 +5699,8 @@ test_case "taw: project picker rejects control characters in tmux sessions" \
   test_project_picker_rejects_control_characters_in_tmux_sessions
 test_case "taw: project picker batches tmux session metadata" \
   test_project_picker_batches_tmux_session_metadata
+test_case "taw: project picker hides owned dashboard sessions only" \
+  test_project_picker_hides_owned_dashboard_sessions_only
 test_case "taw: project picker shows Unicode agent states and priority" \
   test_project_picker_shows_unicode_agent_states_and_priority
 test_case "taw: project picker shows Nerd Font agent states" \

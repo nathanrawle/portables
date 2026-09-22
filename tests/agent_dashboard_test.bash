@@ -294,6 +294,58 @@ test_dashboard_unlink_resolves_session_id() {
   assert_dashboard_file_contains "$TEST_TMPDIR/osascript.log" "target=$terminal"
 }
 
+test_dashboard_preserves_explicitly_closed_views() {
+  local project home wrapper pane session session_id source_window build_count
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-closed-view-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n first -c "$project" 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-window -d -t source: -n second -c "$project" 'sleep 300'
+  while IFS= read -r pane; do
+    run_dashboard_status "$wrapper" "$home" "$pane" codex
+  done < <("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-panes -a \
+    -t source -F '#{pane_id}')
+
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-5\nterminal-7\nterminal-8' \
+    run_dashboard "$wrapper" open
+  session="$(awk -F '\t' '$1 == "terminal" { print $3; exit }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  source_window="$(awk -F '\t' '$1 == "terminal" { print $4; exit }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  session_id="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-sessions \
+    -F $'#{session_id}\t#{session_name}' \
+    | awk -F '\t' -v name="$session" '$2 == name { print $1 }')"
+  [[ -n "$session_id" ]] || fail "expected a tmux session ID for $session"
+
+  run_dashboard "$wrapper" unlink "$session_id" "$source_window"
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" \
+    $'exclude\t'"$source_window"
+  build_count="$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")"
+  run_dashboard "$wrapper" sync
+  assert_eq "$build_count" "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
+    "expected sync not to reopen an explicitly closed view"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$session" 2>/dev/null; then
+    fail "expected the explicitly closed view session to stay closed"
+  fi
+  assert_eq 2 "$($DASHBOARD_REAL_TMUX -L "$DASHBOARD_SOCKET" \
+    list-windows -t agents -F '#{window_id}' | wc -l | tr -d ' ')" \
+    "expected source windows to remain managed"
+}
+
 test_agent_unlink_syncs_dashboard() {
   local project home wrapper source_window pane session
   local attempt
@@ -342,5 +394,7 @@ test_case "agent dashboard: close preserves source" \
   test_dashboard_closes_private_views_but_keeps_source_alive
 test_case "agent dashboard: unlink resolves session IDs" \
   test_dashboard_unlink_resolves_session_id
+test_case "agent dashboard: preserves explicitly closed views" \
+  test_dashboard_preserves_explicitly_closed_views
 test_case "agent dashboard: agent unlink syncs dashboard" \
   test_agent_unlink_syncs_dashboard
