@@ -1,0 +1,548 @@
+#!/usr/bin/env bash
+
+set -u
+
+usage() {
+  printf 'usage: taw-agent-dashboard [open|focus|sync|toggle|close|unlink]\n' >&2
+}
+
+AGENT_SESSION_NAME=agents
+AGENT_SESSION_MARKER=@taw_agent_link_session
+DASHBOARD_SESSION_MARKER=@taw_agent_dashboard_session
+DASHBOARD_SOURCE_WINDOW_OPTION=@taw_agent_dashboard_window_id
+DASHBOARD_LOCK=taw-agent-dashboard
+DASHBOARD_STATE_FILE="${TAW_AGENT_DASHBOARD_STATE_FILE:-${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/taw-agent-dashboard.state}"
+DASHBOARD_OSASCRIPT="${TAW_AGENT_DASHBOARD_OSASCRIPT:-osascript}"
+
+MANAGED_SESSION_ID=
+STATE_WINDOW_ID=
+STATE_TERMINALS=()
+STATE_SESSIONS=()
+STATE_SOURCE_WINDOWS=()
+DESIRED_WINDOWS=()
+
+tmux_available() {
+  command -v tmux >/dev/null 2>&1
+}
+
+osascript_available() {
+  [[ -n "${TAW_AGENT_DASHBOARD_OSASCRIPT:-}" ]] \
+    || command -v osascript >/dev/null 2>&1
+}
+
+locate_managed_session() {
+  local sessions line session_id session_name marker rest tab=$'\t'
+  local managed_id= named_id=
+
+  MANAGED_SESSION_ID=
+  sessions="$(tmux list-sessions \
+    -F $'#{session_id}\t#{session_name}\t#{@taw_agent_link_session}' 2>/dev/null)" \
+    || return 1
+
+  while IFS= read -r line; do
+    [[ -n "$line" && "$line" = *"$tab"* ]] || continue
+    session_id="${line%%"$tab"*}"
+    rest="${line#*"$tab"}"
+    session_name="${rest%%"$tab"*}"
+    marker="${rest#*"$tab"}"
+    [[ "$marker" = 1 ]] && managed_id="$session_id"
+    [[ "$session_name" = "$AGENT_SESSION_NAME" ]] && named_id="$session_id"
+  done <<<"$sessions"
+
+  [[ -n "$managed_id" && ( -z "$named_id" || "$named_id" = "$managed_id" ) ]] \
+    || return 1
+  MANAGED_SESSION_ID="$managed_id"
+}
+
+collect_desired_windows() {
+  local windows window
+
+  DESIRED_WINDOWS=()
+  locate_managed_session || return 1
+  windows="$(tmux list-windows -t "$MANAGED_SESSION_ID" -F '#{window_id}' 2>/dev/null)" \
+    || return 1
+  while IFS= read -r window; do
+    [[ -n "$window" ]] && DESIRED_WINDOWS+=( "$window" )
+  done <<<"$windows"
+  ((${#DESIRED_WINDOWS[@]} > 0))
+}
+
+load_state() {
+  local line kind value session source tab=$'\t'
+
+  STATE_WINDOW_ID=
+  STATE_TERMINALS=()
+  STATE_SESSIONS=()
+  STATE_SOURCE_WINDOWS=()
+  [[ -s "$DASHBOARD_STATE_FILE" ]] || return 1
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    kind="${line%%"$tab"*}"
+    value="${line#*"$tab"}"
+    case "$kind" in
+      window)
+        STATE_WINDOW_ID="$value"
+        ;;
+      terminal)
+        STATE_TERMINALS+=( "${value%%"$tab"*}" )
+        value="${value#*"$tab"}"
+        session="${value%%"$tab"*}"
+        source="${value#*"$tab"}"
+        [[ "$value" != "$source" && -n "$session" && -n "$source" ]] \
+          || return 1
+        STATE_SESSIONS+=( "$session" )
+        STATE_SOURCE_WINDOWS+=( "$source" )
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done <"$DASHBOARD_STATE_FILE"
+
+  [[ -n "$STATE_WINDOW_ID" && ${#STATE_TERMINALS[@]} -gt 0 \
+    && ${#STATE_TERMINALS[@]} -eq ${#STATE_SESSIONS[@]} \
+    && ${#STATE_TERMINALS[@]} -eq ${#STATE_SOURCE_WINDOWS[@]} ]]
+}
+
+write_state() {
+  local window_id="$1"
+  shift
+  local parent temp i
+
+  parent="${DASHBOARD_STATE_FILE%/*}"
+  [[ "$parent" != "$DASHBOARD_STATE_FILE" ]] || parent=.
+  mkdir -p "$parent" || return 1
+  temp="$DASHBOARD_STATE_FILE.$$"
+  {
+    printf 'window\t%s\n' "$window_id"
+    for ((i = 0; i < ${#STATE_SESSIONS[@]}; i++)); do
+      printf 'terminal\t%s\t%s\t%s\n' \
+        "${STATE_TERMINALS[$i]}" "${STATE_SESSIONS[$i]}" \
+        "${STATE_SOURCE_WINDOWS[$i]}"
+    done
+  } >"$temp" || {
+    rm -f "$temp"
+    return 1
+  }
+  mv -f "$temp" "$DASHBOARD_STATE_FILE"
+}
+
+clear_state() {
+  rm -f "$DASHBOARD_STATE_FILE"
+}
+
+state_matches_desired() {
+  local i
+
+  ((${#STATE_SOURCE_WINDOWS[@]} == ${#DESIRED_WINDOWS[@]})) || return 1
+  for ((i = 0; i < ${#DESIRED_WINDOWS[@]}; i++)); do
+    [[ "${STATE_SOURCE_WINDOWS[$i]}" = "${DESIRED_WINDOWS[$i]}" ]] || return 1
+  done
+}
+
+dashboard_script() {
+  local mode="$1"
+  shift
+
+  "$DASHBOARD_OSASCRIPT" - "$mode" "$@" <<'APPLESCRIPT'
+on run argv
+    set mode to item 1 of argv
+
+    tell application "Ghostty"
+        if mode is "health" then
+            set targetWindowID to item 2 of argv
+            repeat with candidateWindow in windows
+                if (id of candidateWindow as text) is targetWindowID then return "1"
+            end repeat
+            return "0"
+        end if
+
+        if mode is "focus" then
+            set targetWindowID to item 2 of argv
+            repeat with candidateWindow in windows
+                if (id of candidateWindow as text) is targetWindowID then
+                    activate window candidateWindow
+                    return "1"
+                end if
+            end repeat
+            return "0"
+        end if
+
+        if mode is "close" then
+            set targetWindowID to item 2 of argv
+            repeat with candidateWindow in windows
+                if (id of candidateWindow as text) is targetWindowID then
+                    close window candidateWindow
+                    return "1"
+                end if
+            end repeat
+            return "0"
+        end if
+
+        if mode is "close-terminal" then
+            set targetTerminalID to item 2 of argv
+            repeat with candidateTerminal in terminals
+                if (id of candidateTerminal as text) is targetTerminalID then
+                    close candidateTerminal
+                    return "1"
+                end if
+            end repeat
+            return "0"
+        end if
+
+        if mode is "build" then
+            set sessionNames to items 2 thru (count of argv) of argv
+            set surfaceCount to count of sessionNames
+            if surfaceCount is less than 1 then error "dashboard requires a session"
+
+            set columnCount to 1
+            repeat while (columnCount * columnCount) is less than surfaceCount
+                set columnCount to columnCount + 1
+            end repeat
+            set rowCount to (surfaceCount + columnCount - 1) div columnCount
+
+            set cfg to new surface configuration
+            set win to new window with configuration cfg
+            set firstTerminal to terminal 1 of selected tab of win
+            set allTerms to {firstTerminal}
+            set rowAnchors to {firstTerminal}
+
+            repeat with column from 2 to columnCount
+                set newTerminal to split (item (column - 1) of rowAnchors) direction right with configuration cfg
+                set end of rowAnchors to newTerminal
+                set end of allTerms to newTerminal
+            end repeat
+
+            set nextSurface to columnCount + 1
+            repeat with row from 2 to rowCount
+                repeat with column from 1 to columnCount
+                    if nextSurface is less than or equal to surfaceCount then
+                        set newTerminal to split (item column of rowAnchors) direction down with configuration cfg
+                        set item column of rowAnchors to newTerminal
+                        set end of allTerms to newTerminal
+                        set nextSurface to nextSurface + 1
+                    end if
+                end repeat
+            end repeat
+
+            repeat with surfaceIndex from 1 to surfaceCount
+                set sessionName to item surfaceIndex of sessionNames
+                set currentTerminal to item surfaceIndex of allTerms
+                input text ("env -u TMUX tmux attach-session -t " & sessionName) to currentTerminal
+                send key "enter" to currentTerminal
+            end repeat
+
+            try
+                perform action "equalize_splits" on firstTerminal
+            end try
+            focus firstTerminal
+
+            set outputLines to {(id of win as text)}
+            repeat with currentTerminal in allTerms
+                set end of outputLines to (id of currentTerminal as text)
+            end repeat
+            set AppleScript's text item delimiters to linefeed
+            return outputLines as text
+        end if
+    end tell
+
+    error "unknown dashboard operation"
+end run
+APPLESCRIPT
+}
+
+view_session_name() {
+  local source_window="$1" base candidate suffix marker source
+
+  base="taw-agent-view-${source_window#@}"
+  candidate="$base"
+  suffix=1
+  while tmux has-session -t "=$candidate" >/dev/null 2>&1; do
+    marker="$(tmux show-option -qv -t "$candidate" "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" \
+      || marker=
+    source="$(tmux show-option -qv -t "$candidate" \
+      "$DASHBOARD_SOURCE_WINDOW_OPTION" 2>/dev/null)" || source=
+    if [[ "$marker" = 1 && "$source" = "$source_window" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    candidate="$base-$suffix"
+    suffix=$((suffix + 1))
+  done
+  printf '%s\n' "$candidate"
+}
+
+ensure_view_session() {
+  local source_window="$1" source_path="$2" session_name created session_id window_index
+  local tab=$'\t'
+
+  session_name="$(view_session_name "$source_window")" || return 1
+  if tmux has-session -t "=$session_name" >/dev/null 2>&1; then
+    tmux link-window -d -k -s "$MANAGED_SESSION_ID:$source_window" \
+      -t "=$session_name:{end}" >/dev/null 2>&1 || return 1
+    printf '%s\n' "$session_name"
+    return 0
+  fi
+
+  created="$(tmux new-session -d -P -F $'#{session_id}\t#{window_index}' \
+    -s "$session_name" -c "$source_path" 2>/dev/null)" || return 1
+  session_id="${created%%"$tab"*}"
+  window_index="${created#*"$tab"}"
+  [[ -n "$session_id" && "$session_id" != "$created" && -n "$window_index" ]] \
+    || return 1
+  tmux set-option -t "$session_id" "$DASHBOARD_SESSION_MARKER" 1 >/dev/null \
+    || return 1
+  tmux set-option -t "$session_id" "$DASHBOARD_SOURCE_WINDOW_OPTION" \
+    "$source_window" >/dev/null || return 1
+  tmux link-window -d -k -s "$MANAGED_SESSION_ID:$source_window" \
+    -t "$session_id:$window_index" >/dev/null || return 1
+  printf '%s\n' "$session_name"
+}
+
+destroy_view_session() {
+  local session_name="$1" marker
+
+  tmux has-session -t "=$session_name" >/dev/null 2>&1 || return 0
+  marker="$(tmux show-option -qv -t "$session_name" "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" \
+    || marker=
+  [[ "$marker" = 1 ]] || return 1
+  tmux kill-session -t "=$session_name" >/dev/null 2>&1
+}
+
+cleanup_state_view_sessions() {
+  local session
+  for session in "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}"; do
+    [[ -n "$session" ]] || continue
+    destroy_view_session "$session" || true
+  done
+}
+
+dashboard_is_live() {
+  local health
+
+  osascript_available || return 1
+  health="$(dashboard_script health "$STATE_WINDOW_ID" 2>/dev/null)" || return 1
+  [[ "$health" = 1 ]]
+}
+
+focus_dashboard() {
+  dashboard_script focus "$STATE_WINDOW_ID" >/dev/null
+}
+
+focus_existing_dashboard() {
+  load_state || return 0
+  dashboard_is_live || return 0
+  focus_dashboard
+}
+
+close_dashboard_window() {
+  dashboard_is_live || return 0
+  dashboard_script close "$STATE_WINDOW_ID" >/dev/null
+}
+
+parse_build_result() {
+  local result="$1" line
+  local -a result_lines
+
+  result_lines=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && result_lines+=( "$line" )
+  done <<<"$result"
+  (( ${#result_lines[@]} == ${#DESIRED_WINDOWS[@]} + 1 )) || return 1
+  STATE_WINDOW_ID="${result_lines[0]}"
+  STATE_TERMINALS=()
+  STATE_SESSIONS=()
+  STATE_SOURCE_WINDOWS=()
+  local i
+  for ((i = 0; i < ${#DESIRED_WINDOWS[@]}; i++)); do
+    STATE_TERMINALS+=( "${result_lines[$((i + 1))]}" )
+    STATE_SESSIONS+=( "${VIEW_SESSIONS[$i]}" )
+    STATE_SOURCE_WINDOWS+=( "${DESIRED_WINDOWS[$i]}" )
+  done
+}
+
+VIEW_SESSIONS=()
+
+create_dashboard() {
+  local window source_path view_session result
+
+  VIEW_SESSIONS=()
+  for window in "${DESIRED_WINDOWS[@]}"; do
+    source_path="$(tmux display-message -p -t "$MANAGED_SESSION_ID:$window" \
+      '#{pane_current_path}' 2>/dev/null)" || return 1
+    view_session="$(ensure_view_session "$window" "$source_path")" || {
+      local session
+      for session in "${VIEW_SESSIONS[@]}"; do
+        destroy_view_session "$session" || true
+      done
+      return 1
+    }
+    VIEW_SESSIONS+=( "$view_session" )
+  done
+
+  result="$(dashboard_script build "${VIEW_SESSIONS[@]}" 2>/dev/null)" || {
+    local session
+    for session in "${VIEW_SESSIONS[@]}"; do
+      destroy_view_session "$session" || true
+    done
+    return 1
+  }
+  parse_build_result "$result" || {
+    dashboard_script close "$STATE_WINDOW_ID" >/dev/null 2>&1 || true
+    local session
+    for session in "${VIEW_SESSIONS[@]}"; do
+      destroy_view_session "$session" || true
+    done
+    return 1
+  }
+  write_state "$STATE_WINDOW_ID" || return 1
+}
+
+rebuild_dashboard() {
+  close_dashboard_window || return 1
+  cleanup_state_view_sessions
+  clear_state
+  create_dashboard
+}
+
+open_dashboard() {
+  collect_desired_windows || {
+    printf 'taw-agent-dashboard: no managed Codex or Claude windows found\n' >&2
+    return 1
+  }
+  osascript_available || {
+    printf 'taw-agent-dashboard: Ghostty AppleScript requires macOS and osascript\n' >&2
+    return 1
+  }
+
+  if load_state; then
+    if dashboard_is_live; then
+      if state_matches_desired; then
+        focus_dashboard
+        return
+      fi
+      rebuild_dashboard
+      return
+    fi
+    cleanup_state_view_sessions
+    clear_state
+  else
+    clear_state
+  fi
+  create_dashboard
+}
+
+sync_dashboard() {
+  load_state || return 0
+  if ! dashboard_is_live; then
+    cleanup_state_view_sessions
+    clear_state
+    return 0
+  fi
+  if ! collect_desired_windows; then
+    close_dashboard_window
+    cleanup_state_view_sessions
+    clear_state
+    return 0
+  fi
+  state_matches_desired && return 0
+  rebuild_dashboard
+}
+
+close_dashboard() {
+  load_state || return 0
+  close_dashboard_window || true
+  cleanup_state_view_sessions
+  clear_state
+}
+
+unlink_dashboard_window() {
+  local session_name="$1" source_window marker source terminal i
+  local -a remaining_terminals remaining_sessions remaining_sources
+
+  marker="$(tmux show-option -qv -t "$session_name" \
+    "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" || marker=
+  [[ "$marker" = 1 ]] || return 0
+  source="$(tmux show-option -qv -t "$session_name" \
+    "$DASHBOARD_SOURCE_WINDOW_OPTION" 2>/dev/null)" || source=
+  [[ "$source" = "$2" ]] || return 0
+
+  if load_state; then
+    for ((i = 0; i < ${#STATE_SESSIONS[@]}; i++)); do
+      if [[ "${STATE_SESSIONS[$i]}" = "$session_name" ]]; then
+        terminal="${STATE_TERMINALS[$i]}"
+        dashboard_script close-terminal "$terminal" >/dev/null 2>&1 || true
+        break
+      fi
+    done
+    remaining_terminals=()
+    remaining_sessions=()
+    remaining_sources=()
+    for ((i = 0; i < ${#STATE_SESSIONS[@]}; i++)); do
+      [[ "${STATE_SESSIONS[$i]}" = "$session_name" ]] && continue
+      remaining_terminals+=( "${STATE_TERMINALS[$i]}" )
+      remaining_sessions+=( "${STATE_SESSIONS[$i]}" )
+      remaining_sources+=( "${STATE_SOURCE_WINDOWS[$i]}" )
+    done
+    destroy_view_session "$session_name" || true
+    if ((${#remaining_sessions[@]} == 0)); then
+      clear_state
+    else
+      STATE_TERMINALS=( "${remaining_terminals[@]}" )
+      STATE_SESSIONS=( "${remaining_sessions[@]}" )
+      STATE_SOURCE_WINDOWS=( "${remaining_sources[@]}" )
+      write_state "$STATE_WINDOW_ID"
+    fi
+  else
+    destroy_view_session "$session_name" || true
+  fi
+}
+
+with_lock() {
+  local command="$1"
+  shift
+
+  tmux wait-for -L "$DASHBOARD_LOCK" >/dev/null 2>&1 || return 1
+  trap 'tmux wait-for -U "$DASHBOARD_LOCK" >/dev/null 2>&1 || true' EXIT
+  "$command" "$@"
+}
+
+case "${1:-toggle}" in
+  open)
+    tmux_available || exit 0
+    with_lock open_dashboard
+    ;;
+  sync)
+    tmux_available || exit 0
+    with_lock sync_dashboard
+    ;;
+  focus)
+    tmux_available || exit 0
+    with_lock focus_existing_dashboard
+    ;;
+  toggle)
+    tmux_available || exit 0
+    if load_state && dashboard_is_live; then
+      with_lock close_dashboard
+    else
+      with_lock open_dashboard
+    fi
+    ;;
+  close)
+    tmux_available || exit 0
+    with_lock close_dashboard
+    ;;
+  unlink)
+    [[ $# -eq 3 ]] || { usage; exit 2; }
+    tmux_available || exit 0
+    with_lock unlink_dashboard_window "$2" "$3"
+    ;;
+  -h|--help)
+    usage
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
