@@ -258,6 +258,12 @@ dashboard_script() {
 on run argv
     set mode to item 1 of argv
 
+    if mode is "health" or mode is "terminals-health" then
+        if not (application "Ghostty" is running) then
+            return "0"
+        end if
+    end if
+
     tell application "Ghostty"
         if mode is "health" then
             set targetWindowID to item 2 of argv

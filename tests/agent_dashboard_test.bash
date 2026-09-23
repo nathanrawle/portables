@@ -89,6 +89,10 @@ mode="${2:-}"
 
 case "$mode" in
   health)
+    if [[ "${TAW_FAKE_GHOSTTY_RUNNING:-1}" = 0 \
+      && "$script" != *'application "Ghostty" is running'* ]]; then
+      printf 'launched=1\n' >>"$TAW_DASHBOARD_OSASCRIPT_LOG"
+    fi
     [[ "${TAW_FAKE_GHOSTTY_HEALTH_ERROR:-0}" = 1 ]] && exit 1
     printf '%s\n' "${TAW_FAKE_GHOSTTY_HEALTH:-1}"
     ;;
@@ -169,6 +173,7 @@ run_dashboard() {
     TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE="${TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE:-0}" \
     TAW_DASHBOARD_STATE_WRITE_FAILURE_MARKER="$TEST_TMPDIR/state-write-failure" \
     TAW_DASHBOARD_REAL_MV="$real_mv" \
+    TAW_FAKE_GHOSTTY_RUNNING="${TAW_FAKE_GHOSTTY_RUNNING:-1}" \
     TAW_FAKE_GHOSTTY_BUILD_ERROR="${TAW_FAKE_GHOSTTY_BUILD_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_BUILD="${TAW_FAKE_GHOSTTY_BUILD:-}" \
     TAW_FAKE_GHOSTTY_HEALTH="${TAW_FAKE_GHOSTTY_HEALTH:-1}" \
@@ -891,6 +896,44 @@ test_dashboard_preserves_state_on_health_query_failure() {
   if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
     -t "=$session" 2>/dev/null; then
     fail "expected an explicitly missing dashboard to clean its view session"
+  fi
+}
+
+test_dashboard_health_sync_does_not_launch_stopped_ghostty() {
+  local project home wrapper pane session
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-stopped-ghostty-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-13\nterminal-16' \
+    run_dashboard "$wrapper" open
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+
+  TAW_FAKE_GHOSTTY_RUNNING=0 TAW_FAKE_GHOSTTY_HEALTH=0 \
+    run_dashboard "$wrapper" sync
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  if grep -Fq 'launched=1' "$TEST_TMPDIR/osascript.log"; then
+    fail "expected health-only sync not to launch Ghostty"
+  fi
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$session" 2>/dev/null; then
+    fail "expected a stopped dashboard to clean its view session"
   fi
 }
 
@@ -1651,6 +1694,8 @@ test_case "agent dashboard: cleans source lookup failures" \
   test_dashboard_cleans_source_lookup_failure
 test_case "agent dashboard: preserves state on health query failure" \
   test_dashboard_preserves_state_on_health_query_failure
+test_case "agent dashboard: health sync does not launch stopped Ghostty" \
+  test_dashboard_health_sync_does_not_launch_stopped_ghostty
 test_case "agent dashboard: preserves state on close health query failure" \
   test_dashboard_preserves_state_on_close_health_query_failure
 test_case "agent dashboard: preserves state on tmux query failure" \
