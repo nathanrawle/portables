@@ -26,6 +26,9 @@ alias -g XDN='&>/dev/null'
 # zsh-autocomplete
 alias hisb="zstyle -t ':autocomplete:*' default-context '' && zstyle ':autocomplete:*' default-context history-incremental-search-backward || zstyle ':autocomplete:*' default-context ''"
 
+# Toggle the Ghostty dashboard for all managed Codex and Claude windows.
+alias taw-agents='"$HOME/.zfuns/taw-agent-dashboard" toggle'
+
 # gcloud config
 alias gconf='() {
   if [[ -z $1 ]]; then
@@ -37,4 +40,3 @@ alias gconf='() {
     esac
   fi
 }'
-

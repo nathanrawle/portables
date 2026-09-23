@@ -639,7 +639,8 @@ _taw_tmux_sessionizer_picker_rows() {
   local -a _taw_tmux_rows
   local _taw_picker_current_session_id _taw_sessions _taw_session_line
   local _taw_session_id _taw_session_name _taw_session_path _taw_session_rest
-  local _taw_session_path_and_metadata _taw_session_metadata _taw_agent_state _taw_icon
+  local _taw_session_metadata _taw_dashboard_session _taw_agent_state _taw_icon
+  local _taw_session_tabs
   local _taw_entry _taw_path _taw_depth
   local _taw_marker=__taw_picker_end__ _taw_session_format
   local _taw_tab=$'\t'
@@ -668,7 +669,7 @@ _taw_tmux_sessionizer_picker_rows() {
       || _taw_picker_current_session_id=
   fi
 
-  _taw_session_format=$'#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}'"$_taw_marker"
+  _taw_session_format=$'#{session_id}\t#{session_name}\t#{session_path}\t#{@taw_agent_dashboard_session}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}'"$_taw_marker"
   _taw_tmux_list_args=(list-sessions -F "$_taw_session_format")
   if [[ -n "$_taw_picker_current_session_id" ]]; then
     _taw_tmux_list_args+=(
@@ -683,17 +684,28 @@ _taw_tmux_sessionizer_picker_rows() {
       && "$_taw_session_id" == "$_taw_picker_current_session_id" ]] && continue
     _taw_session_rest="${_taw_session_line#*${_taw_tab}}"
     _taw_session_name="${_taw_session_rest%%${_taw_tab}*}"
-    _taw_session_path_and_metadata="${_taw_session_rest#*${_taw_tab}}"
-    _taw_session_metadata="${_taw_session_path_and_metadata##*${_taw_tab}}"
-    _taw_session_path="${_taw_session_path_and_metadata%${_taw_tab}*}"
+    _taw_session_rest="${_taw_session_rest#*${_taw_tab}}"
+    _taw_session_path="${_taw_session_rest%%${_taw_tab}*}"
+    _taw_session_rest="${_taw_session_rest#*${_taw_tab}}"
+    _taw_dashboard_session="${_taw_session_rest%%${_taw_tab}*}"
+    _taw_session_metadata="${_taw_session_rest#*${_taw_tab}}"
     [[ "$_taw_session_rest" != "$_taw_session_line" \
-      && "$_taw_session_path_and_metadata" != "$_taw_session_rest" \
-      && "$_taw_session_path" != "$_taw_session_path_and_metadata" \
+      && "$_taw_session_rest" == *"$_taw_tab"* \
       && "$_taw_session_metadata" == *"$_taw_marker" ]] || {
       _taw_die "tmux returned invalid session metadata"
       return 1
     }
+    _taw_session_tabs="${_taw_session_line//[^$'\t']/}"
+    [[ ${#_taw_session_tabs} -eq 4 ]] || {
+      _taw_die "tmux returned invalid session metadata"
+      return 1
+    }
     _taw_session_metadata="${_taw_session_metadata%$_taw_marker}"
+    [[ -z "$_taw_dashboard_session" || "$_taw_dashboard_session" = 1 ]] || {
+      _taw_die "tmux returned invalid session metadata"
+      return 1
+    }
+    [[ "$_taw_dashboard_session" = 1 ]] && continue
     [[ -n "$_taw_session_id" && -n "$_taw_session_name" \
       && -n "$_taw_session_path" ]] || {
       _taw_die "tmux returned invalid session metadata"

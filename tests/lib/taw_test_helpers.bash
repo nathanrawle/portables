@@ -161,11 +161,16 @@ case "${1:-}" in
       esac
     done
     if [[ -n "$format" ]]; then
+      if [[ "${TAW_FAKE_TMUX_RAW_SESSIONS:-0}" = 1 ]]; then
+        printf '%b' "$sessions"
+        [[ "$sessions" = *$'\n' ]] || printf '\n'
+        exit 0
+      fi
       line_number=0
       while IFS= read -r line || [[ -n "$line" ]]; do
         line_number=$((line_number + 1))
         [[ -n "$line" ]] || continue
-        IFS=$'\t' read -r first second third fourth _ <<<"$line"
+        IFS=$'\t' read -r first second third fourth fifth _ <<<"$line"
         if [[ ( "$first" = @* || "$first" = \$* ) && -n "$third" ]]; then
           session_id="$first"
           session="$second"
@@ -194,6 +199,23 @@ case "${1:-}" in
               printf '%s__taw_picker_end__\n' "$line"
             else
               printf '%s\t%s__taw_picker_end__\n' "$session_id" "$line"
+            fi
+            ;;
+          $'#{session_id}\t#{session_name}\t#{session_path}\t#{@taw_agent_dashboard_session}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__')
+            if [[ ( "$first" = @* || "$first" = \$* ) && -n "$third" ]]; then
+              if [[ "$fourth" = 1 && -z "${fifth:-}" ]]; then
+                printf '%s\t%s\t%s\t%s\t__taw_picker_end__\n' \
+                  "$first" "$second" "$third" "$fourth"
+              elif [[ -n "${fifth:-}" || -z "${fourth:-}" \
+                || "$fourth" = *codex=* || "$fourth" = *claude=* ]]; then
+                printf '%s\t%s\t%s\t%s\t%s__taw_picker_end__\n' \
+                  "$first" "$second" "$third" "${fifth:-}" "${fourth:-}"
+              else
+                printf '%s\t__taw_picker_end__\n' "$line"
+              fi
+            else
+              printf '%s\t%s\t%s\t\t__taw_picker_end__\n' \
+                "$session_id" "$first" "$second"
             fi
             ;;
           $'#{session_id}\t#{session_name}\t#{session_path}\t#{W:#{P:#{@taw_agent}=#{@taw_agent_state};}}__taw_picker_end__')

@@ -13,6 +13,7 @@ usage() {
 
 AGENT_SESSION_NAME=agents
 AGENT_SESSION_MARKER=@taw_agent_link_session
+AGENT_DASHBOARD_SESSION_MARKER=@taw_agent_dashboard_session
 AGENT_SUPPRESSION_OPTION=@taw_agent_link_suppressed
 AGENT_PANE_PID_OPTION=@taw_agent_pane_pid
 AGENT_LINK_LOCK=taw-agent-link-session
@@ -23,6 +24,32 @@ SOURCE_WINDOW_MEMBERS=()
 SOURCE_WINDOW_SUPPRESSIONS=()
 DESIRED_WINDOW_IDS=()
 SOURCE_WINDOW_INDEX=-1
+
+dashboard_state_file() {
+  local runtime_dir server_key
+
+  runtime_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+  server_key="${TMUX:-}"
+  server_key="${server_key%%,*}"
+  if [[ -z "$server_key" ]] && command -v tmux >/dev/null 2>&1; then
+    server_key="$(tmux display-message -p '#{socket_path}' 2>/dev/null || true)"
+  fi
+  server_key="${server_key//\//_}"
+  server_key="${server_key//:/_}"
+  server_key="${server_key//[^[:alnum:]_.-]/_}"
+  if [[ -n "$server_key" ]]; then
+    printf '%s\n' "${TAW_AGENT_DASHBOARD_STATE_FILE:-$runtime_dir/taw-agent-dashboard.$server_key.state}"
+  else
+    printf '%s\n' "${TAW_AGENT_DASHBOARD_STATE_FILE:-$runtime_dir/taw-agent-dashboard.state}"
+  fi
+}
+
+sync_dashboard() {
+  local dashboard="$HOME/.zfuns/taw-agent-dashboard"
+
+  [[ -x "$dashboard" && -f "$(dashboard_state_file)" ]] || return 0
+  "$dashboard" sync >/dev/null 2>&1 &
+}
 
 pane_target() {
   local explicit_pane="${1:-}"
@@ -117,7 +144,7 @@ locate_agent_session() {
 
 collect_source_windows() {
   local panes line session_id window_id pane_id agent agent_pane_pid pane_pid
-  local suppression rest tab=$'\t'
+  local suppression dashboard_session_marker rest tab=$'\t'
   local member i fingerprint
 
   SOURCE_WINDOW_IDS=()
@@ -125,7 +152,7 @@ collect_source_windows() {
   SOURCE_WINDOW_SUPPRESSIONS=()
   DESIRED_WINDOW_IDS=()
   panes="$(tmux list-panes -a \
-    -F $'#{session_id}\t#{window_id}\t#{pane_id}\t#{@taw_agent}\t#{@taw_agent_pane_pid}\t#{pane_pid}\t#{@taw_agent_link_suppressed}' \
+    -F $'#{session_id}\t#{window_id}\t#{pane_id}\t#{@taw_agent}\t#{@taw_agent_pane_pid}\t#{pane_pid}\t#{@taw_agent_link_suppressed}\t#{@taw_agent_dashboard_session}' \
     2>/dev/null)" || return 1
 
   while IFS= read -r line; do
@@ -142,8 +169,15 @@ collect_source_windows() {
     rest="${rest#*"$tab"}"
     pane_pid="${rest%%"$tab"*}"
     suppression="${rest#*"$tab"}"
+    if [[ "$suppression" = *"$tab"* ]]; then
+      dashboard_session_marker="${suppression#*"$tab"}"
+      suppression="${suppression%%"$tab"*}"
+    else
+      dashboard_session_marker=
+    fi
     [[ -n "$session_id" && -n "$window_id" && -n "$pane_id" ]] || continue
     [[ -z "$AGENT_SESSION_ID" || "$session_id" != "$AGENT_SESSION_ID" ]] || continue
+    [[ "$dashboard_session_marker" = 1 ]] && continue
 
     if ! source_window_index "$window_id"; then
       SOURCE_WINDOW_IDS+=( "$window_id" )
@@ -298,9 +332,14 @@ reconcile_agent_session() {
 }
 
 sync_agent_session() (
+  local status
+
   tmux wait-for -L "$AGENT_LINK_LOCK" >/dev/null 2>&1 || return 1
   trap 'tmux wait-for -U "$AGENT_LINK_LOCK" >/dev/null 2>&1 || true' EXIT
   reconcile_agent_session
+  status=$?
+  (( status == 0 )) || return "$status"
+  sync_dashboard
 )
 
 unlink_agent_window() (
@@ -330,6 +369,7 @@ unlink_agent_window() (
       >/dev/null 2>&1 || true
     return 1
   fi
+  sync_dashboard
 )
 
 set_status() {
