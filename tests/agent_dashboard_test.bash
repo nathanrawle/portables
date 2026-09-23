@@ -623,6 +623,49 @@ test_dashboard_cleans_state_persistence_failure() {
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
+test_dashboard_tracks_window_when_persistence_cleanup_fails() {
+  local project home wrapper pane pending_window
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-pending-window-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+
+  if TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE=1 \
+    TAW_FAKE_GHOSTTY_CLOSE_ERROR_ONCE=1 \
+    TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-18\nterminal-22' \
+    run_dashboard "$wrapper" open; then
+    fail "expected dashboard creation to fail when cleanup close is deferred"
+  fi
+  pending_window="$(awk -F '\t' '$1 == "pending" { print $2 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  assert_eq dashboard-window-18 "$pending_window" \
+    "expected the failed cleanup window to be persisted"
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" $'window\t'
+
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-19\nterminal-23' \
+    run_dashboard "$wrapper" open
+  if grep -Fq $'pending\t' "$TEST_TMPDIR/dashboard.state"; then
+    fail "expected pending window cleanup to clear on retry"
+  fi
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" \
+    $'window\tdashboard-window-19'
+}
+
 test_dashboard_build_errors_close_partial_window() {
   local project home wrapper pane
 
@@ -1385,7 +1428,7 @@ test_dashboard_preserves_state_when_rebuild_fails() {
 
 test_dashboard_preserves_old_state_when_cleanup_is_deferred() {
   local project home wrapper pane old_window old_session old_source new_source
-  local pending_session
+  local pending_session pending_window
 
   DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
   [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
@@ -1425,6 +1468,7 @@ test_dashboard_preserves_old_state_when_cleanup_is_deferred() {
 
   if TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE=1 \
     TAW_DASHBOARD_FAIL_KILL_SESSION=1 \
+    TAW_FAKE_GHOSTTY_CLOSE_ERROR_ONCE=1 \
     TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-17\nterminal-21\nterminal-22' \
     run_dashboard "$wrapper" sync; then
     fail "expected rebuild to fail when replacement state persistence fails"
@@ -1437,6 +1481,10 @@ test_dashboard_preserves_old_state_when_cleanup_is_deferred() {
     "$TEST_TMPDIR/dashboard.state")"
   [[ -n "$pending_session" ]] \
     || fail "expected deferred replacement cleanup to persist its session"
+  pending_window="$(awk -F '\t' '$1 == "pending" { print $2; exit }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  assert_eq dashboard-window-17 "$pending_window" \
+    "expected deferred replacement cleanup to persist its window"
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
     -t "=$pending_session"
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
@@ -1682,6 +1730,8 @@ test_case "agent dashboard: preserves link cleanup failure" \
   test_dashboard_preserves_link_cleanup_failure
 test_case "agent dashboard: cleans state persistence failures" \
   test_dashboard_cleans_state_persistence_failure
+test_case "agent dashboard: tracks pending windows after cleanup failures" \
+  test_dashboard_tracks_window_when_persistence_cleanup_fails
 test_case "agent dashboard: build errors close partial windows" \
   test_dashboard_build_errors_close_partial_window
 test_case "agent dashboard: preserves failed initial cleanup" \
