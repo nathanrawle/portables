@@ -20,6 +20,7 @@ STATE_TERMINALS=()
 STATE_SESSIONS=()
 STATE_SOURCE_WINDOWS=()
 STATE_EXCLUDED_SOURCE_WINDOWS=()
+STATE_EXCLUSIONS_PRUNED=0
 DESIRED_WINDOWS=()
 
 tmux_available() {
@@ -156,12 +157,16 @@ apply_state_exclusions() {
   local source window
   local -a active_exclusions filtered_windows
 
+  STATE_EXCLUSIONS_PRUNED=0
   active_exclusions=()
   for source in "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}"; do
     array_contains "$source" "${DESIRED_WINDOWS[@]+${DESIRED_WINDOWS[@]}}" \
       || continue
     active_exclusions+=( "$source" )
   done
+  if ((${#active_exclusions[@]} < ${#STATE_EXCLUDED_SOURCE_WINDOWS[@]})); then
+    STATE_EXCLUSIONS_PRUNED=1
+  fi
   STATE_EXCLUDED_SOURCE_WINDOWS=( "${active_exclusions[@]}" )
 
   filtered_windows=()
@@ -333,14 +338,25 @@ ensure_view_session() {
     -s "$session_name" -c "$source_path" 2>/dev/null)" || return 1
   session_id="${created%%"$tab"*}"
   window_index="${created#*"$tab"}"
-  [[ -n "$session_id" && "$session_id" != "$created" && -n "$window_index" ]] \
-    || return 1
+  if [[ -z "$session_id" || "$session_id" = "$created" || -z "$window_index" ]]; then
+    tmux kill-session -t "=$session_name" >/dev/null 2>&1 || true
+    return 1
+  fi
   tmux set-option -t "$session_id" "$DASHBOARD_SESSION_MARKER" 1 >/dev/null \
-    || return 1
+    || {
+      tmux kill-session -t "=$session_name" >/dev/null 2>&1 || true
+      return 1
+    }
   tmux set-option -t "$session_id" "$DASHBOARD_SOURCE_WINDOW_OPTION" \
-    "$source_window" >/dev/null || return 1
+    "$source_window" >/dev/null || {
+      tmux kill-session -t "=$session_name" >/dev/null 2>&1 || true
+      return 1
+    }
   tmux link-window -d -k -s "$MANAGED_SESSION_ID:$source_window" \
-    -t "$session_id:$window_index" >/dev/null || return 1
+    -t "$session_id:$window_index" >/dev/null || {
+      tmux kill-session -t "=$session_name" >/dev/null 2>&1 || true
+      return 1
+    }
   printf '%s\n' "$session_name"
 }
 
@@ -502,7 +518,12 @@ sync_dashboard() {
     clear_state
     return 0
   fi
-  state_matches_desired && return 0
+  if state_matches_desired; then
+    if ((STATE_EXCLUSIONS_PRUNED)); then
+      write_state "$STATE_WINDOW_ID" || return 1
+    fi
+    return 0
+  fi
   rebuild_dashboard
 }
 

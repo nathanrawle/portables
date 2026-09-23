@@ -23,6 +23,11 @@ set -euo pipefail
   done
   printf '\n'
 } >>"$TAW_DASHBOARD_TMUX_LOG"
+if [[ "${TAW_DASHBOARD_FAIL_LINK_WINDOW:-0}" = 1 && "$1" = link-window \
+  && ! -e "$TAW_DASHBOARD_LINK_FAILURE_MARKER" ]]; then
+  : >"$TAW_DASHBOARD_LINK_FAILURE_MARKER"
+  exit 1
+fi
 exec "$TAW_DASHBOARD_REAL_TMUX" -L "$TAW_DASHBOARD_SOCKET" -f /dev/null "$@"
 EOF
   chmod +x "$bin/tmux"
@@ -86,6 +91,8 @@ run_dashboard() {
     TAW_DASHBOARD_OSASCRIPT_LOG="$TEST_TMPDIR/osascript.log" \
     TAW_AGENT_DASHBOARD_STATE_FILE="$TEST_TMPDIR/dashboard.state" \
     TAW_AGENT_DASHBOARD_OSASCRIPT="$bin/osascript" \
+    TAW_DASHBOARD_FAIL_LINK_WINDOW="${TAW_DASHBOARD_FAIL_LINK_WINDOW:-0}" \
+    TAW_DASHBOARD_LINK_FAILURE_MARKER="$TEST_TMPDIR/link-window-failure" \
     TAW_FAKE_GHOSTTY_BUILD="${TAW_FAKE_GHOSTTY_BUILD:-}" \
     TAW_FAKE_GHOSTTY_HEALTH="${TAW_FAKE_GHOSTTY_HEALTH:-1}" \
     "$DASHBOARD_SCRIPT" "$@"
@@ -344,6 +351,60 @@ test_dashboard_preserves_explicitly_closed_views() {
   assert_eq 2 "$($DASHBOARD_REAL_TMUX -L "$DASHBOARD_SOCKET" \
     list-windows -t agents -F '#{window_id}' | wc -l | tr -d ' ')" \
     "expected source windows to remain managed"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" unlink-window \
+    -t "agents:$source_window"
+  run_dashboard "$wrapper" sync
+  if grep -Fq $'exclude\t' "$TEST_TMPDIR/dashboard.state"; then
+    fail "expected expired exclusion to be removed from dashboard state"
+  fi
+  assert_eq "$build_count" "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
+    "expected pruning an expired exclusion not to rebuild the dashboard"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -d \
+    -s "source:$source_window" -t agents:
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-6\nterminal-9\nterminal-10' \
+    run_dashboard "$wrapper" sync
+  assert_eq $((build_count + 1)) \
+    "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
+    "expected a managed source window to return after its exclusion expired"
+  if ! awk -F '\t' -v source="$source_window" \
+    '$1 == "terminal" && $4 == source { found = 1 } END { exit !found }' \
+    "$TEST_TMPDIR/dashboard.state"; then
+    fail "expected the re-managed source window to return to dashboard state"
+  fi
+}
+
+test_dashboard_cleans_failed_new_view_session() {
+  local project home wrapper pane session_count
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-failed-view-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+
+  if TAW_DASHBOARD_FAIL_LINK_WINDOW=1 run_dashboard "$wrapper" open; then
+    fail "expected dashboard creation to fail when linking the view window fails"
+  fi
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  session_count="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-sessions \
+    -F '#{@taw_agent_dashboard_session}' | awk '$1 == 1 { print }')"
+  [[ -z "$session_count" ]] || fail "expected failed view session to be removed"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
 test_agent_unlink_syncs_dashboard() {
@@ -396,5 +457,7 @@ test_case "agent dashboard: unlink resolves session IDs" \
   test_dashboard_unlink_resolves_session_id
 test_case "agent dashboard: preserves explicitly closed views" \
   test_dashboard_preserves_explicitly_closed_views
+test_case "agent dashboard: cleans failed view sessions" \
+  test_dashboard_cleans_failed_new_view_session
 test_case "agent dashboard: agent unlink syncs dashboard" \
   test_agent_unlink_syncs_dashboard
