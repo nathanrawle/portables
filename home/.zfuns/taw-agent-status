@@ -31,6 +31,9 @@ dashboard_state_file() {
   runtime_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
   server_key="${TMUX:-}"
   server_key="${server_key%%,*}"
+  if [[ -z "$server_key" ]] && command -v tmux >/dev/null 2>&1; then
+    server_key="$(tmux display-message -p '#{socket_path}' 2>/dev/null || true)"
+  fi
   server_key="${server_key//\//_}"
   server_key="${server_key//:/_}"
   server_key="${server_key//[^[:alnum:]_.-]/_}"

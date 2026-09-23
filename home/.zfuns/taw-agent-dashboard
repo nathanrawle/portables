@@ -14,6 +14,9 @@ DASHBOARD_LOCK=taw-agent-dashboard
 DASHBOARD_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 DASHBOARD_SERVER_KEY="${TMUX:-}"
 DASHBOARD_SERVER_KEY="${DASHBOARD_SERVER_KEY%%,*}"
+if [[ -z "$DASHBOARD_SERVER_KEY" ]] && command -v tmux >/dev/null 2>&1; then
+  DASHBOARD_SERVER_KEY="$(tmux display-message -p '#{socket_path}' 2>/dev/null || true)"
+fi
 DASHBOARD_SERVER_KEY="${DASHBOARD_SERVER_KEY//\//_}"
 DASHBOARD_SERVER_KEY="${DASHBOARD_SERVER_KEY//:/_}"
 DASHBOARD_SERVER_KEY="${DASHBOARD_SERVER_KEY//[^[:alnum:]_.-]/_}"

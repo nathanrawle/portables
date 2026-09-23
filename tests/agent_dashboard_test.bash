@@ -155,7 +155,7 @@ run_dashboard() {
   real_mv="$(command -v mv)"
   state_file="${TAW_AGENT_DASHBOARD_STATE_FILE:-$TEST_TMPDIR/dashboard.state}"
   [[ "${TAW_DASHBOARD_USE_DEFAULT_STATE:-0}" = 1 ]] && state_file=
-  tmux_environment="${TAW_DASHBOARD_TMUX:-/tmp}"
+  tmux_environment="${TAW_DASHBOARD_TMUX-/tmp}"
   runtime_dir="${TAW_DASHBOARD_RUNTIME_DIR:-}"
 
   TMUX="$tmux_environment" XDG_RUNTIME_DIR="$runtime_dir" PATH="$bin:$PATH" \
@@ -200,7 +200,7 @@ run_dashboard_status() {
 
   state_file="$TEST_TMPDIR/dashboard.state"
   [[ "${TAW_DASHBOARD_USE_DEFAULT_STATE:-0}" = 1 ]] && state_file=
-  tmux_environment="${TAW_DASHBOARD_TMUX:-/tmp}"
+  tmux_environment="${TAW_DASHBOARD_TMUX-/tmp}"
   runtime_dir="${TAW_DASHBOARD_RUNTIME_DIR:-}"
 
   TMUX="$tmux_environment" XDG_RUNTIME_DIR="$runtime_dir" \
@@ -269,7 +269,7 @@ test_dashboard_namespaces_default_state_by_tmux_server() {
     run_dashboard_status "$wrapper" "$home" "$pane" codex
   TAW_DASHBOARD_USE_DEFAULT_STATE=1 \
     TAW_DASHBOARD_RUNTIME_DIR="$runtime" \
-    TAW_DASHBOARD_TMUX="$socket_a,123,0" \
+    TAW_DASHBOARD_TMUX= \
     TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-a\nterminal-a' \
     run_dashboard "$wrapper" open
 
