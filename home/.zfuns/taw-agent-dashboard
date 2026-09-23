@@ -20,6 +20,7 @@ STATE_TERMINALS=()
 STATE_SESSIONS=()
 STATE_SOURCE_WINDOWS=()
 STATE_EXCLUDED_SOURCE_WINDOWS=()
+STATE_PENDING_WINDOW_ID=
 STATE_EXCLUSIONS_PRUNED=0
 DESIRED_WINDOWS=()
 PRESERVED_VIEW_SESSIONS=()
@@ -82,6 +83,7 @@ load_state() {
   STATE_SESSIONS=()
   STATE_SOURCE_WINDOWS=()
   STATE_EXCLUDED_SOURCE_WINDOWS=()
+  STATE_PENDING_WINDOW_ID=
   [[ -s "$DASHBOARD_STATE_FILE" ]] || return 1
 
   while IFS= read -r line; do
@@ -106,6 +108,10 @@ load_state() {
         [[ -n "$value" ]] || return 1
         STATE_EXCLUDED_SOURCE_WINDOWS+=( "$value" )
         ;;
+      pending)
+        [[ -n "$value" ]] || return 1
+        STATE_PENDING_WINDOW_ID="$value"
+        ;;
       *)
         return 1
         ;;
@@ -128,6 +134,9 @@ write_state() {
   temp="$DASHBOARD_STATE_FILE.$$"
   {
     printf 'window\t%s\n' "$window_id"
+    if [[ -n "$STATE_PENDING_WINDOW_ID" ]]; then
+      printf 'pending\t%s\n' "$STATE_PENDING_WINDOW_ID"
+    fi
     for ((i = 0; i < ${#STATE_SESSIONS[@]}; i++)); do
       printf 'terminal\t%s\t%s\t%s\n' \
         "${STATE_TERMINALS[$i]}" "${STATE_SESSIONS[$i]}" \
@@ -148,6 +157,7 @@ write_state() {
 
 clear_state() {
   rm -f "$DASHBOARD_STATE_FILE"
+  STATE_PENDING_WINDOW_ID=
 }
 
 array_contains() {
@@ -470,6 +480,13 @@ close_dashboard_window() {
   return 0
 }
 
+cleanup_pending_window() {
+  [[ -n "$STATE_PENDING_WINDOW_ID" ]] || return 0
+  dashboard_script close "$STATE_PENDING_WINDOW_ID" >/dev/null 2>&1 || return 1
+  STATE_PENDING_WINDOW_ID=
+  write_state "$STATE_WINDOW_ID"
+}
+
 parse_build_result() {
   local result="$1" line
   local -a result_lines
@@ -530,7 +547,7 @@ create_dashboard() {
 }
 
 rebuild_dashboard() {
-  local old_window_id="$STATE_WINDOW_ID" session
+  local old_window_id="$STATE_WINDOW_ID" replacement_window_id session
   local -a old_terminals old_sessions old_sources old_exclusions
 
   old_terminals=( "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" )
@@ -553,7 +570,10 @@ rebuild_dashboard() {
   fi
   if [[ -n "$old_window_id" && "$old_window_id" != "$STATE_WINDOW_ID" ]] && \
     ! dashboard_script close "$old_window_id" >/dev/null 2>&1; then
-    dashboard_script close "$STATE_WINDOW_ID" >/dev/null 2>&1 || true
+    replacement_window_id="$STATE_WINDOW_ID"
+    if ! dashboard_script close "$replacement_window_id" >/dev/null 2>&1; then
+      STATE_PENDING_WINDOW_ID="$replacement_window_id"
+    fi
     cleanup_created_view_sessions
     STATE_WINDOW_ID="$old_window_id"
     STATE_TERMINALS=( "${old_terminals[@]+${old_terminals[@]}}" )
@@ -588,6 +608,7 @@ open_dashboard() {
   }
 
   if load_state; then
+    cleanup_pending_window || return 1
     if dashboard_is_live; then
       if ((${#STATE_EXCLUDED_SOURCE_WINDOWS[@]} > 0)); then
         STATE_EXCLUDED_SOURCE_WINDOWS=()
@@ -608,13 +629,15 @@ open_dashboard() {
   else
     clear_state
   fi
-  create_dashboard
+  create_dashboard || return 1
+  sync_dashboard
 }
 
 sync_dashboard() {
   local health_status membership_status
 
   load_state || return 0
+  cleanup_pending_window || return 1
   if dashboard_is_live; then
     :
   else
@@ -652,6 +675,7 @@ sync_dashboard() {
 
 close_dashboard() {
   load_state || return 0
+  cleanup_pending_window || return 1
   close_dashboard_window || return 1
   cleanup_state_view_sessions || return 1
   clear_state
@@ -674,6 +698,7 @@ unlink_dashboard_window() {
   [[ "$source" = "$2" ]] || return 0
 
   if load_state; then
+    cleanup_pending_window || return 1
     old_window_id="$STATE_WINDOW_ID"
     old_terminals=( "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" )
     old_sessions=( "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" )
