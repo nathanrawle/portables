@@ -193,6 +193,7 @@ state_matches_desired() {
   local i marker source session
 
   ((${#STATE_SOURCE_WINDOWS[@]} == ${#DESIRED_WINDOWS[@]})) || return 1
+  dashboard_terminals_are_live || return 1
   for ((i = 0; i < ${#DESIRED_WINDOWS[@]}; i++)); do
     [[ "${STATE_SOURCE_WINDOWS[$i]}" = "${DESIRED_WINDOWS[$i]}" ]] || return 1
     session="${STATE_SESSIONS[$i]}"
@@ -221,6 +222,21 @@ on run argv
                 if (id of candidateWindow as text) is targetWindowID then return "1"
             end repeat
             return "0"
+        end if
+
+        if mode is "terminals-health" then
+            repeat with terminalIndex from 2 to (count of argv)
+                set targetTerminalID to item terminalIndex of argv
+                set foundTerminal to false
+                repeat with candidateTerminal in terminals
+                    if (id of candidateTerminal as text) is targetTerminalID then
+                        set foundTerminal to true
+                        exit repeat
+                    end if
+                end repeat
+                if not foundTerminal then return "0"
+            end repeat
+            return "1"
         end if
 
         if mode is "focus" then
@@ -407,11 +423,12 @@ cleanup_created_view_sessions() {
 }
 
 cleanup_state_view_sessions() {
-  local session
+  local session status=0
   for session in "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}"; do
     [[ -n "$session" ]] || continue
-    destroy_view_session "$session" || true
+    destroy_view_session "$session" || status=1
   done
+  return "$status"
 }
 
 dashboard_is_live() {
@@ -419,6 +436,14 @@ dashboard_is_live() {
 
   osascript_available || return 1
   health="$(dashboard_script health "$STATE_WINDOW_ID" 2>/dev/null)" || return 2
+  [[ "$health" = 1 ]]
+}
+
+dashboard_terminals_are_live() {
+  local health
+
+  health="$(dashboard_script terminals-health \
+    "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" 2>/dev/null)" || return 1
   [[ "$health" = 1 ]]
 }
 
@@ -506,6 +531,14 @@ create_dashboard() {
 
 rebuild_dashboard() {
   local old_window_id="$STATE_WINDOW_ID" session
+  local -a old_terminals old_sessions old_sources old_exclusions
+
+  old_terminals=( "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" )
+  old_sessions=( "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" )
+  old_sources=( "${STATE_SOURCE_WINDOWS[@]+${STATE_SOURCE_WINDOWS[@]}}" )
+  old_exclusions=(
+    "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}"
+  )
 
   PRESERVED_VIEW_SESSIONS=()
   for session in "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}"; do
@@ -518,8 +551,22 @@ rebuild_dashboard() {
     PRESERVE_STATE_ON_FAILURE=0
     return 1
   fi
-  [[ -z "$old_window_id" || "$old_window_id" = "$STATE_WINDOW_ID" ]] || \
-    dashboard_script close "$old_window_id" >/dev/null 2>&1 || true
+  if [[ -n "$old_window_id" && "$old_window_id" != "$STATE_WINDOW_ID" ]] && \
+    ! dashboard_script close "$old_window_id" >/dev/null 2>&1; then
+    dashboard_script close "$STATE_WINDOW_ID" >/dev/null 2>&1 || true
+    cleanup_created_view_sessions
+    STATE_WINDOW_ID="$old_window_id"
+    STATE_TERMINALS=( "${old_terminals[@]+${old_terminals[@]}}" )
+    STATE_SESSIONS=( "${old_sessions[@]+${old_sessions[@]}}" )
+    STATE_SOURCE_WINDOWS=( "${old_sources[@]+${old_sources[@]}}" )
+    STATE_EXCLUDED_SOURCE_WINDOWS=(
+      "${old_exclusions[@]+${old_exclusions[@]}}"
+    )
+    write_state "$old_window_id" || true
+    PRESERVED_VIEW_SESSIONS=()
+    PRESERVE_STATE_ON_FAILURE=0
+    return 1
+  fi
   for session in "${PRESERVED_VIEW_SESSIONS[@]+${PRESERVED_VIEW_SESSIONS[@]}}"; do
     array_contains "$session" "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" \
       || destroy_view_session "$session" || true
@@ -556,7 +603,7 @@ open_dashboard() {
     fi
     health_status=$?
     [[ "$health_status" -eq 2 ]] && return 1
-    cleanup_state_view_sessions
+    cleanup_state_view_sessions || return 1
     clear_state
   else
     clear_state
@@ -573,7 +620,7 @@ sync_dashboard() {
   else
     health_status=$?
     [[ "$health_status" -eq 2 ]] && return 1
-    cleanup_state_view_sessions
+    cleanup_state_view_sessions || return 1
     clear_state
     return 0
   fi
@@ -583,14 +630,14 @@ sync_dashboard() {
     membership_status=$?
     [[ "$membership_status" -eq 2 ]] && return 1
     close_dashboard_window || return 1
-    cleanup_state_view_sessions
+    cleanup_state_view_sessions || return 1
     clear_state
     return 0
   fi
   apply_state_exclusions
   if ((${#DESIRED_WINDOWS[@]} == 0)); then
     close_dashboard_window || return 1
-    cleanup_state_view_sessions
+    cleanup_state_view_sessions || return 1
     clear_state
     return 0
   fi
@@ -606,7 +653,7 @@ sync_dashboard() {
 close_dashboard() {
   load_state || return 0
   close_dashboard_window || return 1
-  cleanup_state_view_sessions
+  cleanup_state_view_sessions || return 1
   clear_state
 }
 
