@@ -156,8 +156,12 @@ write_state() {
 }
 
 clear_state() {
+  local status
+
   rm -f "$DASHBOARD_STATE_FILE"
+  status=$?
   STATE_PENDING_WINDOW_ID=
+  return "$status"
 }
 
 array_contains() {
@@ -625,9 +629,9 @@ open_dashboard() {
     health_status=$?
     [[ "$health_status" -eq 2 ]] && return 1
     cleanup_state_view_sessions || return 1
-    clear_state
+    clear_state || return 1
   else
-    clear_state
+    clear_state || :
   fi
   create_dashboard || return 1
   sync_dashboard
@@ -644,7 +648,7 @@ sync_dashboard() {
     health_status=$?
     [[ "$health_status" -eq 2 ]] && return 1
     cleanup_state_view_sessions || return 1
-    clear_state
+    clear_state || return 1
     return 0
   fi
   if collect_desired_windows; then
@@ -654,14 +658,14 @@ sync_dashboard() {
     [[ "$membership_status" -eq 2 ]] && return 1
     close_dashboard_window || return 1
     cleanup_state_view_sessions || return 1
-    clear_state
+    clear_state || return 1
     return 0
   fi
   apply_state_exclusions
   if ((${#DESIRED_WINDOWS[@]} == 0)); then
     close_dashboard_window || return 1
     cleanup_state_view_sessions || return 1
-    clear_state
+    clear_state || return 1
     return 0
   fi
   if state_matches_desired; then

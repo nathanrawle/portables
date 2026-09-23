@@ -598,6 +598,65 @@ test_dashboard_preserves_state_on_unlink_persistence_failure() {
   assert_dashboard_file_contains "$state_file" $'exclude\t'"$first_source"
 }
 
+test_dashboard_preserves_state_when_clear_fails() {
+  local project home wrapper pane first_session first_source session_id
+  local state_dir state_file
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-clear-failure-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  state_dir="$TEST_TMPDIR/state"
+  state_file="$state_dir/dashboard.state"
+  mkdir -p "$project" "$home/.zfuns" "$state_dir"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+  TAW_AGENT_DASHBOARD_STATE_FILE="$state_file" \
+    TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-37\nterminal-46' \
+    run_dashboard "$wrapper" open
+  first_session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$state_file")"
+  first_source="$(awk -F '\t' '$1 == "terminal" { print $4 }' \
+    "$state_file")"
+  session_id="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-sessions \
+    -F $'#{session_id}\t#{session_name}' \
+    | awk -F '\t' -v name="$first_session" '$2 == name { print $1 }')"
+  [[ -n "$session_id" ]] || fail "expected a tmux session ID for $first_session"
+
+  chmod u-w "$state_dir"
+  if TAW_AGENT_DASHBOARD_STATE_FILE="$state_file" \
+    run_dashboard "$wrapper" unlink "$session_id" "$first_source"; then
+    chmod u+w "$state_dir"
+    fail "expected unlink to fail when state removal is unavailable"
+  fi
+  chmod u+w "$state_dir"
+  if ! awk -F '\t' -v session="$first_session" \
+    '$1 == "terminal" && $3 == session { found = 1 } END { exit !found }' \
+    "$state_file"; then
+    fail "expected clear failure to preserve the prior dashboard state"
+  fi
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$first_session"
+
+  TAW_AGENT_DASHBOARD_STATE_FILE="$state_file" \
+    run_dashboard "$wrapper" unlink "$session_id" "$first_source"
+  assert_not_exists "$state_file"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$first_session" 2>/dev/null; then
+    fail "expected a successful retry to remove the private session"
+  fi
+}
+
 test_dashboard_cleans_source_lookup_failure() {
   local project home wrapper pane session_count
 
@@ -1199,6 +1258,8 @@ test_case "agent dashboard: build errors close partial windows" \
   test_dashboard_build_errors_close_partial_window
 test_case "agent dashboard: preserves state on unlink persistence failure" \
   test_dashboard_preserves_state_on_unlink_persistence_failure
+test_case "agent dashboard: preserves state when clear fails" \
+  test_dashboard_preserves_state_when_clear_fails
 test_case "agent dashboard: cleans source lookup failures" \
   test_dashboard_cleans_source_lookup_failure
 test_case "agent dashboard: preserves state on health query failure" \
