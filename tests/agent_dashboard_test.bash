@@ -150,16 +150,20 @@ cleanup_dashboard_server() {
 }
 
 run_dashboard() {
-  local bin="$1" real_mv
+  local bin="$1" real_mv state_file tmux_environment runtime_dir
   shift
   real_mv="$(command -v mv)"
+  state_file="${TAW_AGENT_DASHBOARD_STATE_FILE:-$TEST_TMPDIR/dashboard.state}"
+  [[ "${TAW_DASHBOARD_USE_DEFAULT_STATE:-0}" = 1 ]] && state_file=
+  tmux_environment="${TAW_DASHBOARD_TMUX:-/tmp}"
+  runtime_dir="${TAW_DASHBOARD_RUNTIME_DIR:-}"
 
-  TMUX=/tmp PATH="$bin:$PATH" \
+  TMUX="$tmux_environment" XDG_RUNTIME_DIR="$runtime_dir" PATH="$bin:$PATH" \
     TAW_DASHBOARD_REAL_TMUX="$DASHBOARD_REAL_TMUX" \
     TAW_DASHBOARD_SOCKET="$DASHBOARD_SOCKET" \
     TAW_DASHBOARD_TMUX_LOG="$TEST_TMPDIR/tmux.log" \
     TAW_DASHBOARD_OSASCRIPT_LOG="$TEST_TMPDIR/osascript.log" \
-    TAW_AGENT_DASHBOARD_STATE_FILE="${TAW_AGENT_DASHBOARD_STATE_FILE:-$TEST_TMPDIR/dashboard.state}" \
+    TAW_AGENT_DASHBOARD_STATE_FILE="$state_file" \
     TAW_AGENT_DASHBOARD_OSASCRIPT="$bin/osascript" \
     TAW_DASHBOARD_FAIL_LINK_WINDOW="${TAW_DASHBOARD_FAIL_LINK_WINDOW:-0}" \
     TAW_DASHBOARD_LINK_FAILURE_MARKER="$TEST_TMPDIR/link-window-failure" \
@@ -192,13 +196,20 @@ run_dashboard() {
 
 run_dashboard_status() {
   local bin="$1" home="$2" pane="$3" agent="$4"
+  local state_file tmux_environment runtime_dir
 
-  TMUX=/tmp TMUX_PANE="$pane" HOME="$home" PATH="$bin:$PATH" \
+  state_file="$TEST_TMPDIR/dashboard.state"
+  [[ "${TAW_DASHBOARD_USE_DEFAULT_STATE:-0}" = 1 ]] && state_file=
+  tmux_environment="${TAW_DASHBOARD_TMUX:-/tmp}"
+  runtime_dir="${TAW_DASHBOARD_RUNTIME_DIR:-}"
+
+  TMUX="$tmux_environment" XDG_RUNTIME_DIR="$runtime_dir" \
+    TMUX_PANE="$pane" HOME="$home" PATH="$bin:$PATH" \
     TAW_DASHBOARD_REAL_TMUX="$DASHBOARD_REAL_TMUX" \
     TAW_DASHBOARD_SOCKET="$DASHBOARD_SOCKET" \
     TAW_DASHBOARD_TMUX_LOG="$TEST_TMPDIR/tmux.log" \
     TAW_DASHBOARD_OSASCRIPT_LOG="$TEST_TMPDIR/osascript.log" \
-    TAW_AGENT_DASHBOARD_STATE_FILE="$TEST_TMPDIR/dashboard.state" \
+    TAW_AGENT_DASHBOARD_STATE_FILE="$state_file" \
     TAW_AGENT_DASHBOARD_OSASCRIPT="$bin/osascript" \
     TAW_AGENT_LINK_REAL_TMUX="$DASHBOARD_REAL_TMUX" \
     TAW_AGENT_LINK_SOCKET="$DASHBOARD_SOCKET" \
@@ -225,6 +236,85 @@ assert_dashboard_file_contains() {
 
   grep -Fq -- "$expected" "$path" \
     || fail "expected $path to contain: $expected"
+}
+
+test_dashboard_namespaces_default_state_by_tmux_server() {
+  local project home wrapper pane state_count state_a state_b runtime
+  local socket_a socket_b
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  socket_a="portables-agent-dashboard-server-a-$$-$RANDOM"
+  socket_b="portables-agent-dashboard-server-b-$$-$RANDOM"
+  DASHBOARD_SOCKET="$socket_b"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  runtime="$TEST_TMPDIR/runtime"
+  mkdir -p "$project" "$home/.zfuns" "$runtime"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  DASHBOARD_SOCKET="$socket_a"
+  "$DASHBOARD_REAL_TMUX" -L "$socket_a" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$socket_a" display-message \
+    -p -t source:work '#{pane_id}')"
+  TAW_DASHBOARD_USE_DEFAULT_STATE=1 \
+    TAW_DASHBOARD_RUNTIME_DIR="$runtime" \
+    TAW_DASHBOARD_TMUX="$socket_a,123,0" \
+    run_dashboard_status "$wrapper" "$home" "$pane" codex
+  TAW_DASHBOARD_USE_DEFAULT_STATE=1 \
+    TAW_DASHBOARD_RUNTIME_DIR="$runtime" \
+    TAW_DASHBOARD_TMUX="$socket_a,123,0" \
+    TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-a\nterminal-a' \
+    run_dashboard "$wrapper" open
+
+  state_count="$(find "$runtime" -type f \
+    -name 'taw-agent-dashboard.*.state' | wc -l | tr -d ' ')"
+  assert_eq 1 "$state_count" "expected one server-scoped state file"
+  state_a="$(rg -l 'dashboard-window-a' "$runtime" | head -n 1)"
+  assert_exists "$state_a"
+
+  DASHBOARD_SOCKET="$socket_b"
+  "$DASHBOARD_REAL_TMUX" -L "$socket_b" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$socket_b" display-message \
+    -p -t source:work '#{pane_id}')"
+  TAW_DASHBOARD_USE_DEFAULT_STATE=1 \
+    TAW_DASHBOARD_RUNTIME_DIR="$runtime" \
+    TAW_DASHBOARD_TMUX="$socket_b,123,0" \
+    run_dashboard_status "$wrapper" "$home" "$pane" codex
+  TAW_DASHBOARD_USE_DEFAULT_STATE=1 \
+    TAW_DASHBOARD_RUNTIME_DIR="$runtime" \
+    TAW_DASHBOARD_TMUX="$socket_b,123,0" \
+    TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-b\nterminal-b' \
+    run_dashboard "$wrapper" open
+
+  state_count="$(find "$runtime" -type f \
+    -name 'taw-agent-dashboard.*.state' | wc -l | tr -d ' ')"
+  assert_eq 2 "$state_count" "expected independent state files per server"
+  state_b="$(rg -l 'dashboard-window-b' "$runtime" | head -n 1)"
+  assert_exists "$state_b"
+  [[ "$state_a" != "$state_b" ]] \
+    || fail "expected different tmux servers to use different state files"
+
+  DASHBOARD_SOCKET="$socket_a"
+  TAW_DASHBOARD_USE_DEFAULT_STATE=1 \
+    TAW_DASHBOARD_RUNTIME_DIR="$runtime" \
+    TAW_DASHBOARD_TMUX="$socket_a,123,0" \
+    run_dashboard "$wrapper" sync
+  DASHBOARD_SOCKET="$socket_b"
+  TAW_DASHBOARD_USE_DEFAULT_STATE=1 \
+    TAW_DASHBOARD_RUNTIME_DIR="$runtime" \
+    TAW_DASHBOARD_TMUX="$socket_b,123,0" \
+    run_dashboard "$wrapper" sync
+  "$DASHBOARD_REAL_TMUX" -L "$socket_a" has-session -t source
+  "$DASHBOARD_REAL_TMUX" -L "$socket_b" has-session -t source
+  "$DASHBOARD_REAL_TMUX" -L "$socket_a" kill-server >/dev/null 2>&1 || true
 }
 
 test_dashboard_uses_private_views_and_does_not_reopen() {
@@ -1714,6 +1804,8 @@ test_agent_unlink_syncs_dashboard() {
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
+test_case "agent dashboard: namespaces state by tmux server" \
+  test_dashboard_namespaces_default_state_by_tmux_server
 test_case "agent dashboard: private views and no reopen" \
   test_dashboard_uses_private_views_and_does_not_reopen
 test_case "agent dashboard: restores active private windows" \

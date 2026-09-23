@@ -26,7 +26,19 @@ DESIRED_WINDOW_IDS=()
 SOURCE_WINDOW_INDEX=-1
 
 dashboard_state_file() {
-  printf '%s\n' "${TAW_AGENT_DASHBOARD_STATE_FILE:-${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/taw-agent-dashboard.state}"
+  local runtime_dir server_key
+
+  runtime_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
+  server_key="${TMUX:-}"
+  server_key="${server_key%%,*}"
+  server_key="${server_key//\//_}"
+  server_key="${server_key//:/_}"
+  server_key="${server_key//[^[:alnum:]_.-]/_}"
+  if [[ -n "$server_key" ]]; then
+    printf '%s\n' "${TAW_AGENT_DASHBOARD_STATE_FILE:-$runtime_dir/taw-agent-dashboard.$server_key.state}"
+  else
+    printf '%s\n' "${TAW_AGENT_DASHBOARD_STATE_FILE:-$runtime_dir/taw-agent-dashboard.state}"
+  fi
 }
 
 sync_dashboard() {
