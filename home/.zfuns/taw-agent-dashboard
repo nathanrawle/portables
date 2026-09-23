@@ -135,7 +135,10 @@ write_state() {
     rm -f "$temp"
     return 1
   }
-  mv -f "$temp" "$DASHBOARD_STATE_FILE"
+  mv -f "$temp" "$DASHBOARD_STATE_FILE" || {
+    rm -f "$temp"
+    return 1
+  }
 }
 
 clear_state() {
@@ -425,14 +428,13 @@ parse_build_result() {
 VIEW_SESSIONS=()
 
 create_dashboard() {
-  local window source_path view_session result
+  local window source_path view_session result session
 
   VIEW_SESSIONS=()
   for window in "${DESIRED_WINDOWS[@]}"; do
     source_path="$(tmux display-message -p -t "$MANAGED_SESSION_ID:$window" \
       '#{pane_current_path}' 2>/dev/null)" || return 1
     view_session="$(ensure_view_session "$window" "$source_path")" || {
-      local session
       for session in "${VIEW_SESSIONS[@]}"; do
         destroy_view_session "$session" || true
       done
@@ -442,7 +444,6 @@ create_dashboard() {
   done
 
   result="$(dashboard_script build "${VIEW_SESSIONS[@]}" 2>/dev/null)" || {
-    local session
     for session in "${VIEW_SESSIONS[@]}"; do
       destroy_view_session "$session" || true
     done
@@ -450,13 +451,19 @@ create_dashboard() {
   }
   parse_build_result "$result" || {
     dashboard_script close "$STATE_WINDOW_ID" >/dev/null 2>&1 || true
-    local session
     for session in "${VIEW_SESSIONS[@]}"; do
       destroy_view_session "$session" || true
     done
     return 1
   }
-  write_state "$STATE_WINDOW_ID" || return 1
+  write_state "$STATE_WINDOW_ID" || {
+    dashboard_script close >/dev/null 2>&1 || true
+    for session in "${VIEW_SESSIONS[@]}"; do
+      destroy_view_session "$session" || true
+    done
+    clear_state
+    return 1
+  }
 }
 
 rebuild_dashboard() {
