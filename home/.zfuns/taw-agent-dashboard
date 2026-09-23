@@ -124,6 +124,16 @@ load_state() {
     esac
   done <"$DASHBOARD_STATE_FILE"
 
+  if [[ -n "$STATE_WINDOW_ID" ]]; then
+    [[ ${#STATE_TERMINALS[@]} -gt 0 \
+      && ${#STATE_TERMINALS[@]} -eq ${#STATE_SESSIONS[@]} \
+      && ${#STATE_TERMINALS[@]} -eq ${#STATE_SOURCE_WINDOWS[@]} ]]
+  else
+    ((${#STATE_PENDING_SESSIONS[@]} > 0 && ${#STATE_TERMINALS[@]} == 0))
+  fi
+}
+
+state_has_dashboard() {
   [[ -n "$STATE_WINDOW_ID" && ${#STATE_TERMINALS[@]} -gt 0 \
     && ${#STATE_TERMINALS[@]} -eq ${#STATE_SESSIONS[@]} \
     && ${#STATE_TERMINALS[@]} -eq ${#STATE_SOURCE_WINDOWS[@]} ]]
@@ -445,14 +455,22 @@ destroy_view_session() {
 }
 
 cleanup_created_view_sessions() {
-  local session
+  local session status=0
 
+  STATE_PENDING_SESSIONS=()
   for session in "${VIEW_SESSIONS[@]+${VIEW_SESSIONS[@]}}"; do
     array_contains "$session" \
       "${PRESERVED_VIEW_SESSIONS[@]+${PRESERVED_VIEW_SESSIONS[@]}}" \
       && continue
-    destroy_view_session "$session" || true
+    if ! destroy_view_session "$session"; then
+      STATE_PENDING_SESSIONS+=( "$session" )
+      status=1
+    fi
   done
+  if ((status)); then
+    write_state "$STATE_WINDOW_ID" || true
+  fi
+  return "$status"
 }
 
 cleanup_state_view_sessions() {
@@ -486,6 +504,7 @@ focus_dashboard() {
 
 focus_existing_dashboard() {
   load_state || return 0
+  state_has_dashboard || return 0
   dashboard_is_live || return 0
   focus_dashboard
 }
@@ -669,7 +688,9 @@ open_dashboard() {
   if load_state; then
     cleanup_pending_window || return 1
     cleanup_pending_sessions || return 1
-    if dashboard_is_live; then
+    if ! state_has_dashboard; then
+      clear_state || return 1
+    elif dashboard_is_live; then
       if ((${#STATE_EXCLUDED_SOURCE_WINDOWS[@]} > 0)); then
         STATE_EXCLUDED_SOURCE_WINDOWS=()
         rebuild_dashboard
@@ -700,6 +721,10 @@ sync_dashboard() {
   load_state || return 0
   cleanup_pending_window || return 1
   cleanup_pending_sessions || return 1
+  if ! state_has_dashboard; then
+    clear_state
+    return
+  fi
   if dashboard_is_live; then
     :
   else
@@ -742,6 +767,10 @@ close_dashboard() {
   load_state || return 0
   cleanup_pending_window || return 1
   cleanup_pending_sessions || return 1
+  if ! state_has_dashboard; then
+    clear_state
+    return
+  fi
   close_dashboard_window || return 1
   cleanup_state_view_sessions || return 1
   clear_state

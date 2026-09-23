@@ -588,6 +588,53 @@ test_dashboard_build_errors_close_partial_window() {
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
+test_dashboard_preserves_failed_initial_cleanup() {
+  local project home wrapper pane session session_id
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-initial-cleanup-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+
+  if TAW_FAKE_GHOSTTY_BUILD_ERROR=1 \
+    TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE=1 \
+    run_dashboard "$wrapper" open; then
+    fail "expected dashboard creation to fail when the build script fails"
+  fi
+  session="$(awk -F '\t' '$1 == "pending-session" { print $2; exit }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  [[ -n "$session" ]] || fail "expected failed cleanup to persist its session"
+  session_id="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-sessions \
+    -F $'#{session_id}\t#{session_name}' \
+    | awk -F '\t' -v name="$session" '$2 == name { print $1 }')"
+  [[ -n "$session_id" ]] || fail "expected a tmux session ID for $session"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session_id"
+
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-10\nterminal-12' \
+    run_dashboard "$wrapper" open
+  if grep -Fq $'pending-session\t' "$TEST_TMPDIR/dashboard.state"; then
+    fail "expected a retry to clear the pending session record"
+  fi
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$session_id" 2>/dev/null; then
+    fail "expected the initial failed-cleanup session to be removed on retry"
+  fi
+}
+
 test_dashboard_preserves_state_on_unlink_persistence_failure() {
   local project home wrapper pane first_session first_source session_id
   local state_dir state_file
@@ -1453,6 +1500,8 @@ test_case "agent dashboard: cleans state persistence failures" \
   test_dashboard_cleans_state_persistence_failure
 test_case "agent dashboard: build errors close partial windows" \
   test_dashboard_build_errors_close_partial_window
+test_case "agent dashboard: preserves failed initial cleanup" \
+  test_dashboard_preserves_failed_initial_cleanup
 test_case "agent dashboard: preserves state on unlink persistence failure" \
   test_dashboard_preserves_state_on_unlink_persistence_failure
 test_case "agent dashboard: preserves state when clear fails" \
