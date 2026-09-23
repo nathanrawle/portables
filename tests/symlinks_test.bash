@@ -56,6 +56,17 @@ run_symlinks() {
   HOME="$home" OS="$os" LOG_THRESHOLD=4 LINK_CONFLICT_MODE="$conflict_mode" bash "$repo/symlinks" "$@"
 }
 
+test_repository_shared_skill_aliases() {
+  local provider target
+
+  for provider in codex claude copilot; do
+    target="$REPO_ROOT/home/.$provider/skills"
+    [[ -L "$target" ]] || fail "missing shared skill alias: $target"
+    assert_eq "../.agent-generics/skills" "$(readlink "$target")" \
+      "unexpected shared skill alias target: $target"
+  done
+}
+
 test_default_links_tree_and_preserves_existing_files() {
   local repo home
 
@@ -219,6 +230,8 @@ test_no_ignore_overrides_default_ignore_behavior() {
 
 test_case "symlinks: default run links tree and preserves existing files" \
   test_default_links_tree_and_preserves_existing_files
+test_case "symlinks: repository agent skill aliases stay shared" \
+  test_repository_shared_skill_aliases
 test_case "symlinks: explicit file links only that file" \
   test_explicit_file_links_only_that_file
 test_case "symlinks: explicit directory links that subtree" \
