@@ -314,7 +314,8 @@ test_agent_link_bindings_load() {
     && "$prefix_binding" = *'#{==:#{@taw_agent_link_session},1}'* ]] \
     || fail "expected safe bindings to require managed-session ownership"
   [[ "$root_binding" = *'#{==:#{@taw_agent_dashboard_session},1}'* \
-    && "$prefix_binding" = *taw-agent-dashboard*unlink*session_id*window_id* ]] \
+    && "$prefix_binding" = *taw-agent-dashboard*unlink*'#{q:session_id}'*window_id* \
+    && "$root_binding" = *taw-agent-dashboard*unlink*'#{q:session_id}'*window_id* ]] \
     || fail "expected dashboard views to use safe unlink handling"
   assert_eq 1 "$lower" "expected lowercase confirmation"
   assert_eq 1 "$upper" "expected uppercase confirmation"
