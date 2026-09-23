@@ -392,7 +392,7 @@ dashboard_is_live() {
   local health
 
   osascript_available || return 1
-  health="$(dashboard_script health "$STATE_WINDOW_ID" 2>/dev/null)" || return 1
+  health="$(dashboard_script health "$STATE_WINDOW_ID" 2>/dev/null)" || return 2
   [[ "$health" = 1 ]]
 }
 
@@ -440,7 +440,12 @@ create_dashboard() {
   VIEW_SESSIONS=()
   for window in "${DESIRED_WINDOWS[@]}"; do
     source_path="$(tmux display-message -p -t "$MANAGED_SESSION_ID:$window" \
-      '#{pane_current_path}' 2>/dev/null)" || return 1
+      '#{pane_current_path}' 2>/dev/null)" || {
+        for session in "${VIEW_SESSIONS[@]}"; do
+          destroy_view_session "$session" || true
+        done
+        return 1
+      }
     view_session="$(ensure_view_session "$window" "$source_path")" || {
       for session in "${VIEW_SESSIONS[@]}"; do
         destroy_view_session "$session" || true
@@ -481,6 +486,8 @@ rebuild_dashboard() {
 }
 
 open_dashboard() {
+  local health_status
+
   collect_desired_windows || {
     printf 'taw-agent-dashboard: no managed Codex or Claude windows found\n' >&2
     return 1
@@ -504,6 +511,8 @@ open_dashboard() {
       rebuild_dashboard
       return
     fi
+    health_status=$?
+    [[ "$health_status" -eq 2 ]] && return 1
     cleanup_state_view_sessions
     clear_state
   else
@@ -513,8 +522,14 @@ open_dashboard() {
 }
 
 sync_dashboard() {
+  local health_status
+
   load_state || return 0
-  if ! dashboard_is_live; then
+  if dashboard_is_live; then
+    :
+  else
+    health_status=$?
+    [[ "$health_status" -eq 2 ]] && return 1
     cleanup_state_view_sessions
     clear_state
     return 0
