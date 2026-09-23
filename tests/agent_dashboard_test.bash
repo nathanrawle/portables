@@ -46,6 +46,11 @@ if [[ "${TAW_DASHBOARD_FAIL_KILL_SESSION:-0}" = 1 \
   && "$1" = kill-session ]]; then
   exit 1
 fi
+if [[ "${TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE:-0}" = 1 \
+  && "$1" = kill-session && ! -e "${TAW_DASHBOARD_KILL_FAILURE_MARKER}" ]]; then
+  : >"${TAW_DASHBOARD_KILL_FAILURE_MARKER}"
+  exit 1
+fi
 exec "$TAW_DASHBOARD_REAL_TMUX" -L "$TAW_DASHBOARD_SOCKET" -f /dev/null "$@"
 EOF
   chmod +x "$bin/tmux"
@@ -76,6 +81,7 @@ case "$mode" in
     printf '%s\n' "${TAW_FAKE_GHOSTTY_HEALTH:-1}"
     ;;
   terminals-health)
+    [[ "${TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR:-0}" = 1 ]] && exit 1
     printf '%s\n' "$([[ "${TAW_FAKE_GHOSTTY_MISSING_TERMINAL:-0}" = 1 ]] \
       && printf 0 || printf 1)"
     ;;
@@ -145,11 +151,14 @@ run_dashboard() {
     TAW_DASHBOARD_FAIL_LIST_WINDOWS="${TAW_DASHBOARD_FAIL_LIST_WINDOWS:-0}" \
     TAW_DASHBOARD_LIST_FAILURE_MARKER="$TEST_TMPDIR/list-windows-failure" \
     TAW_DASHBOARD_FAIL_KILL_SESSION="${TAW_DASHBOARD_FAIL_KILL_SESSION:-0}" \
+    TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE="${TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE:-0}" \
+    TAW_DASHBOARD_KILL_FAILURE_MARKER="$TEST_TMPDIR/kill-session-failure" \
     TAW_FAKE_GHOSTTY_BUILD_ERROR="${TAW_FAKE_GHOSTTY_BUILD_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_BUILD="${TAW_FAKE_GHOSTTY_BUILD:-}" \
     TAW_FAKE_GHOSTTY_HEALTH="${TAW_FAKE_GHOSTTY_HEALTH:-1}" \
     TAW_FAKE_GHOSTTY_HEALTH_ERROR="${TAW_FAKE_GHOSTTY_HEALTH_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_MISSING_TERMINAL="${TAW_FAKE_GHOSTTY_MISSING_TERMINAL:-0}" \
+    TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR="${TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_CLOSE_TERMINAL_ERROR="${TAW_FAKE_GHOSTTY_CLOSE_TERMINAL_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_CLOSE_ERROR_ONCE="${TAW_FAKE_GHOSTTY_CLOSE_ERROR_ONCE:-0}" \
     TAW_FAKE_GHOSTTY_CLOSE_ERROR_COUNT="${TAW_FAKE_GHOSTTY_CLOSE_ERROR_COUNT:-0}" \
@@ -897,6 +906,44 @@ test_dashboard_rebuilds_missing_terminal() {
   fi
 }
 
+test_dashboard_preserves_state_on_terminal_health_query_failure() {
+  local project home wrapper pane session old_state
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-terminal-health-failure-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-38\nterminal-47' \
+    run_dashboard "$wrapper" open
+  old_state="$(<"$TEST_TMPDIR/dashboard.state")"
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+
+  if TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR=1 \
+    run_dashboard "$wrapper" sync; then
+    fail "expected sync to preserve state on a terminal health query failure"
+  fi
+  [[ "$old_state" = "$(<"$TEST_TMPDIR/dashboard.state")" ]] || \
+    fail "expected terminal probe failure not to rebuild the dashboard"
+  assert_eq 1 "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
+    "expected terminal probe failure not to create a replacement dashboard"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"
+}
+
 test_dashboard_rolls_back_when_old_window_close_fails() {
   local project home wrapper pane old_window old_session
 
@@ -950,6 +997,63 @@ test_dashboard_rolls_back_when_old_window_close_fails() {
     run_dashboard "$wrapper" sync
   assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" \
     $'terminal\tterminal-31'
+}
+
+test_dashboard_tracks_obsolete_session_teardown_failures() {
+  local project home wrapper pane first_session first_source second_session
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-obsolete-session-failure-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n first -c "$project" 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-window -d -t source: -n second -c "$project" 'sleep 300'
+  while IFS= read -r pane; do
+    run_dashboard_status "$wrapper" "$home" "$pane" codex
+  done < <("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-panes -a \
+    -t source -F '#{pane_id}')
+
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-39\nterminal-48\nterminal-49' \
+    run_dashboard "$wrapper" open
+  first_source="$(awk -F '\t' '$1 == "terminal" { print $4; exit }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  first_session="$(awk -F '\t' '$1 == "terminal" { print $3; exit }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  second_session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$TEST_TMPDIR/dashboard.state" | tail -n 1)"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" unlink-window \
+    -t "agents:$first_source"
+
+  if TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE=1 \
+    TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-40\nterminal-50' \
+    run_dashboard "$wrapper" sync; then
+    fail "expected sync to report an obsolete-session teardown failure"
+  fi
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" \
+    $'pending-session\t'"$first_session"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$first_session"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$second_session"
+
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-41\nterminal-51' \
+    run_dashboard "$wrapper" sync
+  if grep -Fq $'pending-session\t' "$TEST_TMPDIR/dashboard.state"; then
+    fail "expected a retry to clear the obsolete session record"
+  fi
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$first_session" 2>/dev/null; then
+    fail "expected the obsolete private session to be removed on retry"
+  fi
 }
 
 test_dashboard_preserves_state_when_view_teardown_fails() {
@@ -1200,6 +1304,53 @@ test_dashboard_preserves_state_when_close_terminal_fails() {
   fi
 }
 
+test_dashboard_tracks_unlinked_session_teardown_failures() {
+  local project home wrapper pane first_session first_source session_id
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-unlink-teardown-failure-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-42\nterminal-52' \
+    run_dashboard "$wrapper" open
+  first_session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  first_source="$(awk -F '\t' '$1 == "terminal" { print $4 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  session_id="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-sessions \
+    -F $'#{session_id}\t#{session_name}' \
+    | awk -F '\t' -v name="$first_session" '$2 == name { print $1 }')"
+
+  if TAW_DASHBOARD_FAIL_KILL_SESSION=1 \
+    run_dashboard "$wrapper" unlink "$session_id" "$first_source"; then
+    fail "expected unlink to report a private-session teardown failure"
+  fi
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" \
+    $'pending-session\t'"$first_session"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$first_session"
+
+  run_dashboard "$wrapper" sync
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$first_session" 2>/dev/null; then
+    fail "expected the unlinked private session to be removed on retry"
+  fi
+}
+
 test_agent_unlink_syncs_dashboard() {
   local project home wrapper source_window pane session
   local attempt
@@ -1272,8 +1423,12 @@ test_case "agent dashboard: rebuilds missing saved views" \
   test_dashboard_rebuilds_missing_saved_view
 test_case "agent dashboard: rebuilds missing terminals" \
   test_dashboard_rebuilds_missing_terminal
+test_case "agent dashboard: preserves state on terminal probe failures" \
+  test_dashboard_preserves_state_on_terminal_health_query_failure
 test_case "agent dashboard: rolls back old-window close failures" \
   test_dashboard_rolls_back_when_old_window_close_fails
+test_case "agent dashboard: tracks obsolete session teardown failures" \
+  test_dashboard_tracks_obsolete_session_teardown_failures
 test_case "agent dashboard: preserves state on teardown failures" \
   test_dashboard_preserves_state_when_view_teardown_fails
 test_case "agent dashboard: rechecks membership after initial state write" \
@@ -1284,5 +1439,7 @@ test_case "agent dashboard: tracks rollback close failures" \
   test_dashboard_tracks_replacement_when_rollback_close_fails
 test_case "agent dashboard: preserves state when close-terminal fails" \
   test_dashboard_preserves_state_when_close_terminal_fails
+test_case "agent dashboard: tracks unlinked session teardown failures" \
+  test_dashboard_tracks_unlinked_session_teardown_failures
 test_case "agent dashboard: agent unlink syncs dashboard" \
   test_agent_unlink_syncs_dashboard

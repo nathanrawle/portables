@@ -21,6 +21,7 @@ STATE_SESSIONS=()
 STATE_SOURCE_WINDOWS=()
 STATE_EXCLUDED_SOURCE_WINDOWS=()
 STATE_PENDING_WINDOW_ID=
+STATE_PENDING_SESSIONS=()
 STATE_EXCLUSIONS_PRUNED=0
 DESIRED_WINDOWS=()
 PRESERVED_VIEW_SESSIONS=()
@@ -84,6 +85,7 @@ load_state() {
   STATE_SOURCE_WINDOWS=()
   STATE_EXCLUDED_SOURCE_WINDOWS=()
   STATE_PENDING_WINDOW_ID=
+  STATE_PENDING_SESSIONS=()
   [[ -s "$DASHBOARD_STATE_FILE" ]] || return 1
 
   while IFS= read -r line; do
@@ -112,6 +114,10 @@ load_state() {
         [[ -n "$value" ]] || return 1
         STATE_PENDING_WINDOW_ID="$value"
         ;;
+      pending-session)
+        [[ -n "$value" ]] || return 1
+        STATE_PENDING_SESSIONS+=( "$value" )
+        ;;
       *)
         return 1
         ;;
@@ -126,7 +132,7 @@ load_state() {
 write_state() {
   local window_id="$1"
   shift
-  local parent temp i source
+  local parent temp i source session
 
   parent="${DASHBOARD_STATE_FILE%/*}"
   [[ "$parent" != "$DASHBOARD_STATE_FILE" ]] || parent=.
@@ -137,6 +143,9 @@ write_state() {
     if [[ -n "$STATE_PENDING_WINDOW_ID" ]]; then
       printf 'pending\t%s\n' "$STATE_PENDING_WINDOW_ID"
     fi
+    for session in "${STATE_PENDING_SESSIONS[@]}"; do
+      printf 'pending-session\t%s\n' "$session"
+    done
     for ((i = 0; i < ${#STATE_SESSIONS[@]}; i++)); do
       printf 'terminal\t%s\t%s\t%s\n' \
         "${STATE_TERMINALS[$i]}" "${STATE_SESSIONS[$i]}" \
@@ -161,6 +170,7 @@ clear_state() {
   rm -f "$DASHBOARD_STATE_FILE"
   status=$?
   STATE_PENDING_WINDOW_ID=
+  STATE_PENDING_SESSIONS=()
   return "$status"
 }
 
@@ -207,7 +217,7 @@ state_matches_desired() {
   local i marker source session
 
   ((${#STATE_SOURCE_WINDOWS[@]} == ${#DESIRED_WINDOWS[@]})) || return 1
-  dashboard_terminals_are_live || return 1
+  dashboard_terminals_are_live || return $?
   for ((i = 0; i < ${#DESIRED_WINDOWS[@]}; i++)); do
     [[ "${STATE_SOURCE_WINDOWS[$i]}" = "${DESIRED_WINDOWS[$i]}" ]] || return 1
     session="${STATE_SESSIONS[$i]}"
@@ -457,7 +467,7 @@ dashboard_terminals_are_live() {
   local health
 
   health="$(dashboard_script terminals-health \
-    "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" 2>/dev/null)" || return 1
+    "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" 2>/dev/null)" || return 2
   [[ "$health" = 1 ]]
 }
 
@@ -489,6 +499,30 @@ cleanup_pending_window() {
   dashboard_script close "$STATE_PENDING_WINDOW_ID" >/dev/null 2>&1 || return 1
   STATE_PENDING_WINDOW_ID=
   write_state "$STATE_WINDOW_ID"
+}
+
+cleanup_pending_sessions() {
+  local session status=0 had_pending=0
+  local -a remaining
+
+  remaining=()
+  for session in "${STATE_PENDING_SESSIONS[@]+${STATE_PENDING_SESSIONS[@]}}"; do
+    had_pending=1
+    if destroy_view_session "$session"; then
+      continue
+    fi
+    remaining+=( "$session" )
+    status=1
+  done
+  STATE_PENDING_SESSIONS=( "${remaining[@]+${remaining[@]}}" )
+  if ((status)); then
+    write_state "$STATE_WINDOW_ID" || true
+    return 1
+  fi
+  if ((had_pending)); then
+    write_state "$STATE_WINDOW_ID"
+  fi
+  return 0
 }
 
 parse_build_result() {
@@ -552,7 +586,9 @@ create_dashboard() {
 
 rebuild_dashboard() {
   local old_window_id="$STATE_WINDOW_ID" replacement_window_id session
+  local cleanup_status=0
   local -a old_terminals old_sessions old_sources old_exclusions
+  local -a failed_sessions
 
   old_terminals=( "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" )
   old_sessions=( "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" )
@@ -591,16 +627,26 @@ rebuild_dashboard() {
     PRESERVE_STATE_ON_FAILURE=0
     return 1
   fi
+  failed_sessions=()
   for session in "${PRESERVED_VIEW_SESSIONS[@]+${PRESERVED_VIEW_SESSIONS[@]}}"; do
     array_contains "$session" "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" \
-      || destroy_view_session "$session" || true
+      && continue
+    if ! destroy_view_session "$session"; then
+      failed_sessions+=( "$session" )
+      cleanup_status=1
+    fi
   done
+  STATE_PENDING_SESSIONS=( "${failed_sessions[@]+${failed_sessions[@]}}" )
+  if ((cleanup_status)); then
+    write_state "$STATE_WINDOW_ID" || true
+  fi
   PRESERVED_VIEW_SESSIONS=()
   PRESERVE_STATE_ON_FAILURE=0
+  return "$cleanup_status"
 }
 
 open_dashboard() {
-  local health_status
+  local health_status match_status
 
   collect_desired_windows || {
     printf 'taw-agent-dashboard: no managed Codex or Claude windows found\n' >&2
@@ -613,6 +659,7 @@ open_dashboard() {
 
   if load_state; then
     cleanup_pending_window || return 1
+    cleanup_pending_sessions || return 1
     if dashboard_is_live; then
       if ((${#STATE_EXCLUDED_SOURCE_WINDOWS[@]} > 0)); then
         STATE_EXCLUDED_SOURCE_WINDOWS=()
@@ -622,26 +669,28 @@ open_dashboard() {
       if state_matches_desired; then
         focus_dashboard
         return
+      else
+        match_status=$?
+        [[ "$match_status" -eq 2 ]] && return 1
+        rebuild_dashboard
+        return
       fi
-      rebuild_dashboard
-      return
     fi
     health_status=$?
     [[ "$health_status" -eq 2 ]] && return 1
     cleanup_state_view_sessions || return 1
     clear_state || return 1
-  else
-    clear_state || :
   fi
   create_dashboard || return 1
   sync_dashboard
 }
 
 sync_dashboard() {
-  local health_status membership_status
+  local health_status membership_status match_status
 
   load_state || return 0
   cleanup_pending_window || return 1
+  cleanup_pending_sessions || return 1
   if dashboard_is_live; then
     :
   else
@@ -673,13 +722,17 @@ sync_dashboard() {
       write_state "$STATE_WINDOW_ID" || return 1
     fi
     return 0
+  else
+    match_status=$?
+    [[ "$match_status" -eq 2 ]] && return 1
+    rebuild_dashboard
   fi
-  rebuild_dashboard
 }
 
 close_dashboard() {
   load_state || return 0
   cleanup_pending_window || return 1
+  cleanup_pending_sessions || return 1
   close_dashboard_window || return 1
   cleanup_state_view_sessions || return 1
   clear_state
@@ -703,6 +756,7 @@ unlink_dashboard_window() {
 
   if load_state; then
     cleanup_pending_window || return 1
+    cleanup_pending_sessions || return 1
     old_window_id="$STATE_WINDOW_ID"
     old_terminals=( "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" )
     old_sessions=( "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" )
@@ -729,14 +783,13 @@ unlink_dashboard_window() {
     array_contains "$source" \
       "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}" \
       || STATE_EXCLUDED_SOURCE_WINDOWS+=( "$source" )
-    if ((${#remaining_sessions[@]} == 0)); then
-      clear_state || return 1
-    else
+
+    if ((${#remaining_sessions[@]} > 0)); then
       STATE_TERMINALS=( "${remaining_terminals[@]}" )
       STATE_SESSIONS=( "${remaining_sessions[@]}" )
       STATE_SOURCE_WINDOWS=( "${remaining_sources[@]}" )
-      write_state "$STATE_WINDOW_ID" || return 1
     fi
+    write_state "$STATE_WINDOW_ID" || return 1
     if [[ -n "$terminal" ]] && \
       ! dashboard_script close-terminal "$terminal" >/dev/null 2>&1; then
       STATE_WINDOW_ID="$old_window_id"
@@ -749,9 +802,16 @@ unlink_dashboard_window() {
       write_state "$old_window_id" || true
       return 1
     fi
-    destroy_view_session "$session_name" || true
+    if ! destroy_view_session "$session_name"; then
+      STATE_PENDING_SESSIONS+=( "$session_name" )
+      write_state "$STATE_WINDOW_ID" || true
+      return 1
+    fi
+    if ((${#remaining_sessions[@]} == 0)); then
+      clear_state || return 1
+    fi
   else
-    destroy_view_session "$session_name" || true
+    destroy_view_session "$session_name" || return 1
   fi
 }
 
