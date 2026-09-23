@@ -2880,6 +2880,32 @@ test_project_picker_rejects_control_characters_in_tmux_sessions() {
   assert_no_tmux_work_window "$log"
 }
 
+test_project_picker_rejects_shifted_dashboard_marker() {
+  local xdg empty_search session_path elsewhere fake_bin log output sessions
+
+  xdg="$TEST_TMPDIR/xdg"
+  empty_search="$TEST_TMPDIR/empty"
+  session_path="$TEST_TMPDIR/session-path"
+  elsewhere="$TEST_TMPDIR/elsewhere"
+  mkdir -p "$xdg/tmux-sessionizer" "$empty_search" "$session_path" \
+    "$elsewhere"
+  printf 'TS_SEARCH_PATHS=("%s")\n' "$empty_search" >"$xdg/tmux-sessionizer/tmux-sessionizer.conf"
+  sessions=$'$7\tordinary\t'"$session_path"$'\t1\t\t__taw_picker_end__'
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  log="$TEST_TMPDIR/tmux.log"
+
+  if output="$(XDG_CONFIG_HOME="$xdg" EDITOR=vim \
+    TAW_FAKE_TMUX_RAW_SESSIONS=1 TAW_FAKE_TMUX_SESSIONS="$sessions" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    run_taw "$elsewhere" --pick-project 2>&1)"; then
+    fail "expected a shifted dashboard marker to be rejected"
+  fi
+
+  assert_string_contains "$output" "tmux returned invalid session metadata"
+  assert_no_tmux_work_window "$log"
+}
+
 test_project_picker_batches_tmux_session_metadata() {
   local xdg empty_search first_path second_path elsewhere fake_bin
   local sessions log fzf_log metadata_call metadata_call_count
@@ -5697,6 +5723,8 @@ test_case "taw: project picker skips control characters in paths" \
   test_project_picker_skips_control_characters_in_discovered_paths
 test_case "taw: project picker rejects control characters in tmux sessions" \
   test_project_picker_rejects_control_characters_in_tmux_sessions
+test_case "taw: project picker rejects shifted dashboard markers" \
+  test_project_picker_rejects_shifted_dashboard_marker
 test_case "taw: project picker batches tmux session metadata" \
   test_project_picker_batches_tmux_session_metadata
 test_case "taw: project picker hides owned dashboard sessions only" \

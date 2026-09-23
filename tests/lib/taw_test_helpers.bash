@@ -161,6 +161,11 @@ case "${1:-}" in
       esac
     done
     if [[ -n "$format" ]]; then
+      if [[ "${TAW_FAKE_TMUX_RAW_SESSIONS:-0}" = 1 ]]; then
+        printf '%b' "$sessions"
+        [[ "$sessions" = *$'\n' ]] || printf '\n'
+        exit 0
+      fi
       line_number=0
       while IFS= read -r line || [[ -n "$line" ]]; do
         line_number=$((line_number + 1))
