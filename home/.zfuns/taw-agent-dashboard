@@ -214,7 +214,7 @@ apply_state_exclusions() {
 }
 
 state_matches_desired() {
-  local i marker source session
+  local i marker source session active_window
 
   ((${#STATE_SOURCE_WINDOWS[@]} == ${#DESIRED_WINDOWS[@]})) || return 1
   dashboard_terminals_are_live || return $?
@@ -228,6 +228,15 @@ state_matches_desired() {
       "$DASHBOARD_SOURCE_WINDOW_OPTION" 2>/dev/null)" || return 1
     [[ "$marker" = 1 && "$source" = "${STATE_SOURCE_WINDOWS[$i]}" ]] \
       || return 1
+    active_window="$(tmux display-message -p -t "$session:" '#{window_id}' \
+      2>/dev/null)" || return 1
+    if [[ "$active_window" != "${STATE_SOURCE_WINDOWS[$i]}" ]]; then
+      tmux select-window -t "$session:${STATE_SOURCE_WINDOWS[$i]}" \
+        >/dev/null 2>&1 || return 1
+      active_window="$(tmux display-message -p -t "$session:" '#{window_id}' \
+        2>/dev/null)" || return 1
+      [[ "$active_window" = "${STATE_SOURCE_WINDOWS[$i]}" ]] || return 1
+    fi
   done
 }
 

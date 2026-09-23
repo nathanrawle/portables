@@ -287,6 +287,50 @@ test_dashboard_uses_private_views_and_does_not_reopen() {
     "expected sync without state not to reopen Ghostty"
 }
 
+test_dashboard_restores_active_private_window() {
+  local project home wrapper pane source_window session new_window active_window
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-active-window-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-43\nterminal-53' \
+    run_dashboard "$wrapper" open
+  source_window="$(awk -F '\t' '$1 == "terminal" { print $4 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+  new_window="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-window \
+    -d -P -F '#{window_id}' -t "$session:" -n shell -c "$project" 'sleep 300')"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" select-window -t "$new_window"
+  active_window="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t "$session:" '#{window_id}')"
+  assert_eq "$new_window" "$active_window" \
+    "expected the private view to switch to the new shell window"
+
+  run_dashboard "$wrapper" sync
+  active_window="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t "$session:" '#{window_id}')"
+  assert_eq "$source_window" "$active_window" \
+    "expected sync to restore the managed source window"
+  assert_eq 1 "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
+    "expected active-window repair not to rebuild Ghostty"
+}
+
 test_dashboard_closes_private_views_but_keeps_source_alive() {
   local project home wrapper first_window pane session
 
@@ -1395,6 +1439,8 @@ test_agent_unlink_syncs_dashboard() {
 
 test_case "agent dashboard: private views and no reopen" \
   test_dashboard_uses_private_views_and_does_not_reopen
+test_case "agent dashboard: restores active private windows" \
+  test_dashboard_restores_active_private_window
 test_case "agent dashboard: close preserves source" \
   test_dashboard_closes_private_views_but_keeps_source_alive
 test_case "agent dashboard: unlink resolves session IDs" \
