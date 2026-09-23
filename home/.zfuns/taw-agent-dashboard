@@ -22,6 +22,8 @@ STATE_SOURCE_WINDOWS=()
 STATE_EXCLUDED_SOURCE_WINDOWS=()
 STATE_EXCLUSIONS_PRUNED=0
 DESIRED_WINDOWS=()
+PRESERVED_VIEW_SESSIONS=()
+PRESERVE_STATE_ON_FAILURE=0
 
 tmux_available() {
   command -v tmux >/dev/null 2>&1
@@ -57,10 +59,13 @@ locate_managed_session() {
 }
 
 collect_desired_windows() {
-  local windows window
+  local windows window status
 
   DESIRED_WINDOWS=()
-  locate_managed_session || return 1
+  locate_managed_session || {
+    status=$?
+    return "$status"
+  }
   windows="$(tmux list-windows -t "$MANAGED_SESSION_ID" -F '#{window_id}' 2>/dev/null)" \
     || return 2
   while IFS= read -r window; do
@@ -170,7 +175,9 @@ apply_state_exclusions() {
   if ((${#active_exclusions[@]} < ${#STATE_EXCLUDED_SOURCE_WINDOWS[@]})); then
     STATE_EXCLUSIONS_PRUNED=1
   fi
-  STATE_EXCLUDED_SOURCE_WINDOWS=( "${active_exclusions[@]}" )
+  STATE_EXCLUDED_SOURCE_WINDOWS=(
+    "${active_exclusions[@]+${active_exclusions[@]}}"
+  )
 
   filtered_windows=()
   for window in "${DESIRED_WINDOWS[@]}"; do
@@ -183,11 +190,19 @@ apply_state_exclusions() {
 }
 
 state_matches_desired() {
-  local i
+  local i marker source session
 
   ((${#STATE_SOURCE_WINDOWS[@]} == ${#DESIRED_WINDOWS[@]})) || return 1
   for ((i = 0; i < ${#DESIRED_WINDOWS[@]}; i++)); do
     [[ "${STATE_SOURCE_WINDOWS[$i]}" = "${DESIRED_WINDOWS[$i]}" ]] || return 1
+    session="${STATE_SESSIONS[$i]}"
+    tmux has-session -t "=$session" >/dev/null 2>&1 || return 1
+    marker="$(tmux show-option -qv -t "$session" \
+      "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" || return 1
+    source="$(tmux show-option -qv -t "$session" \
+      "$DASHBOARD_SOURCE_WINDOW_OPTION" 2>/dev/null)" || return 1
+    [[ "$marker" = 1 && "$source" = "${STATE_SOURCE_WINDOWS[$i]}" ]] \
+      || return 1
   done
 }
 
@@ -339,7 +354,7 @@ ensure_view_session() {
   session_name="$(view_session_name "$source_window")" || return 1
   if tmux has-session -t "=$session_name" >/dev/null 2>&1; then
     tmux link-window -d -k -s "$MANAGED_SESSION_ID:$source_window" \
-      -t "=$session_name:{end}" >/dev/null 2>&1 || return 1
+      -t "$session_name:" >/dev/null 2>&1 || return 1
     printf '%s\n' "$session_name"
     return 0
   fi
@@ -378,6 +393,17 @@ destroy_view_session() {
     || marker=
   [[ "$marker" = 1 ]] || return 1
   tmux kill-session -t "=$session_name" >/dev/null 2>&1
+}
+
+cleanup_created_view_sessions() {
+  local session
+
+  for session in "${VIEW_SESSIONS[@]+${VIEW_SESSIONS[@]}}"; do
+    array_contains "$session" \
+      "${PRESERVED_VIEW_SESSIONS[@]+${PRESERVED_VIEW_SESSIONS[@]}}" \
+      && continue
+    destroy_view_session "$session" || true
+  done
 }
 
 cleanup_state_view_sessions() {
@@ -423,12 +449,13 @@ parse_build_result() {
   local result="$1" line
   local -a result_lines
 
+  STATE_WINDOW_ID=
   result_lines=()
   while IFS= read -r line; do
     [[ -n "$line" ]] && result_lines+=( "$line" )
   done <<<"$result"
+  ((${#result_lines[@]} > 0)) && STATE_WINDOW_ID="${result_lines[0]}"
   (( ${#result_lines[@]} == ${#DESIRED_WINDOWS[@]} + 1 )) || return 1
-  STATE_WINDOW_ID="${result_lines[0]}"
   STATE_TERMINALS=()
   STATE_SESSIONS=()
   STATE_SOURCE_WINDOWS=()
@@ -449,48 +476,56 @@ create_dashboard() {
   for window in "${DESIRED_WINDOWS[@]}"; do
     source_path="$(tmux display-message -p -t "$MANAGED_SESSION_ID:$window" \
       '#{pane_current_path}' 2>/dev/null)" || {
-        for session in "${VIEW_SESSIONS[@]}"; do
-          destroy_view_session "$session" || true
-        done
+        cleanup_created_view_sessions
         return 1
       }
     view_session="$(ensure_view_session "$window" "$source_path")" || {
-      for session in "${VIEW_SESSIONS[@]}"; do
-        destroy_view_session "$session" || true
-      done
+      cleanup_created_view_sessions
       return 1
     }
     VIEW_SESSIONS+=( "$view_session" )
   done
 
   result="$(dashboard_script build "${VIEW_SESSIONS[@]}" 2>/dev/null)" || {
-    for session in "${VIEW_SESSIONS[@]}"; do
-      destroy_view_session "$session" || true
-    done
+    cleanup_created_view_sessions
     return 1
   }
   parse_build_result "$result" || {
-    dashboard_script close "$STATE_WINDOW_ID" >/dev/null 2>&1 || true
-    for session in "${VIEW_SESSIONS[@]}"; do
-      destroy_view_session "$session" || true
-    done
+    [[ -z "$STATE_WINDOW_ID" ]] || \
+      dashboard_script close "$STATE_WINDOW_ID" >/dev/null 2>&1 || true
+    cleanup_created_view_sessions
     return 1
   }
   write_state "$STATE_WINDOW_ID" || {
     dashboard_script close "$STATE_WINDOW_ID" >/dev/null 2>&1 || true
-    for session in "${VIEW_SESSIONS[@]}"; do
-      destroy_view_session "$session" || true
-    done
-    clear_state
+    cleanup_created_view_sessions
+    ((PRESERVE_STATE_ON_FAILURE)) || clear_state
     return 1
   }
 }
 
 rebuild_dashboard() {
-  close_dashboard_window || return 1
-  cleanup_state_view_sessions
-  clear_state
-  create_dashboard
+  local old_window_id="$STATE_WINDOW_ID" session
+
+  PRESERVED_VIEW_SESSIONS=()
+  for session in "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}"; do
+    tmux has-session -t "=$session" >/dev/null 2>&1 \
+      && PRESERVED_VIEW_SESSIONS+=( "$session" )
+  done
+  PRESERVE_STATE_ON_FAILURE=1
+  if ! create_dashboard; then
+    PRESERVED_VIEW_SESSIONS=()
+    PRESERVE_STATE_ON_FAILURE=0
+    return 1
+  fi
+  [[ -z "$old_window_id" || "$old_window_id" = "$STATE_WINDOW_ID" ]] || \
+    dashboard_script close "$old_window_id" >/dev/null 2>&1 || true
+  for session in "${PRESERVED_VIEW_SESSIONS[@]+${PRESERVED_VIEW_SESSIONS[@]}}"; do
+    array_contains "$session" "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" \
+      || destroy_view_session "$session" || true
+  done
+  PRESERVED_VIEW_SESSIONS=()
+  PRESERVE_STATE_ON_FAILURE=0
 }
 
 open_dashboard() {
@@ -577,7 +612,9 @@ close_dashboard() {
 
 unlink_dashboard_window() {
   local session_target="$1" source_window marker source terminal i session_name
+  local old_window_id
   local -a remaining_terminals remaining_sessions remaining_sources
+  local -a old_terminals old_sessions old_sources old_exclusions
 
   session_name="$(tmux display-message -p -t "$session_target" '#{session_name}' \
     2>/dev/null)" || return 0
@@ -590,6 +627,14 @@ unlink_dashboard_window() {
   [[ "$source" = "$2" ]] || return 0
 
   if load_state; then
+    old_window_id="$STATE_WINDOW_ID"
+    old_terminals=( "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" )
+    old_sessions=( "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" )
+    old_sources=( "${STATE_SOURCE_WINDOWS[@]+${STATE_SOURCE_WINDOWS[@]}}" )
+    old_exclusions=(
+      "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}"
+    )
+    terminal=
     for ((i = 0; i < ${#STATE_SESSIONS[@]}; i++)); do
       if [[ "${STATE_SESSIONS[$i]}" = "$session_name" ]]; then
         terminal="${STATE_TERMINALS[$i]}"
@@ -616,8 +661,18 @@ unlink_dashboard_window() {
       STATE_SOURCE_WINDOWS=( "${remaining_sources[@]}" )
       write_state "$STATE_WINDOW_ID" || return 1
     fi
-    [[ -z "$terminal" ]] || \
-      dashboard_script close-terminal "$terminal" >/dev/null 2>&1 || true
+    if [[ -n "$terminal" ]] && \
+      ! dashboard_script close-terminal "$terminal" >/dev/null 2>&1; then
+      STATE_WINDOW_ID="$old_window_id"
+      STATE_TERMINALS=( "${old_terminals[@]+${old_terminals[@]}}" )
+      STATE_SESSIONS=( "${old_sessions[@]+${old_sessions[@]}}" )
+      STATE_SOURCE_WINDOWS=( "${old_sources[@]+${old_sources[@]}}" )
+      STATE_EXCLUDED_SOURCE_WINDOWS=(
+        "${old_exclusions[@]+${old_exclusions[@]}}"
+      )
+      write_state "$old_window_id" || true
+      return 1
+    fi
     destroy_view_session "$session_name" || true
   else
     destroy_view_session "$session_name" || true
