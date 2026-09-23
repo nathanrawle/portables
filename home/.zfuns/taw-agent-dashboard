@@ -474,9 +474,15 @@ cleanup_new_view_session() {
 }
 
 destroy_view_session() {
-  local session_name="$1" marker
+  local session_name="$1" marker actual sessions
 
-  tmux has-session -t "=$session_name" >/dev/null 2>&1 || return 0
+  if ! tmux has-session -t "=$session_name" >/dev/null 2>&1; then
+    sessions="$(tmux list-sessions -F '#{session_name}' 2>/dev/null)" || return 1
+    while IFS= read -r actual; do
+      [[ "$actual" = "$session_name" ]] && return 1
+    done <<<"$sessions"
+    return 0
+  fi
   marker="$(tmux show-option -qv -t "$session_name" "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" \
     || marker=
   [[ "$marker" = 1 ]] || return 1

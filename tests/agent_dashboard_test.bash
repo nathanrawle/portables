@@ -42,6 +42,10 @@ if [[ "${TAW_DASHBOARD_FAIL_LIST_WINDOWS:-0}" = 1 \
   : >"$TAW_DASHBOARD_LIST_FAILURE_MARKER"
   exit 1
 fi
+if [[ "${TAW_DASHBOARD_FAIL_HAS_SESSION:-0}" = 1 \
+  && "$1" = has-session ]]; then
+  exit 1
+fi
 if [[ "${TAW_DASHBOARD_FAIL_KILL_SESSION:-0}" = 1 \
   && "$1" = kill-session ]]; then
   exit 1
@@ -171,6 +175,7 @@ run_dashboard() {
     TAW_DASHBOARD_DISPLAY_FAILURE_MARKER="$TEST_TMPDIR/display-message-failure" \
     TAW_DASHBOARD_FAIL_LIST_WINDOWS="${TAW_DASHBOARD_FAIL_LIST_WINDOWS:-0}" \
     TAW_DASHBOARD_LIST_FAILURE_MARKER="$TEST_TMPDIR/list-windows-failure" \
+    TAW_DASHBOARD_FAIL_HAS_SESSION="${TAW_DASHBOARD_FAIL_HAS_SESSION:-0}" \
     TAW_DASHBOARD_FAIL_KILL_SESSION="${TAW_DASHBOARD_FAIL_KILL_SESSION:-0}" \
     TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE="${TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE:-0}" \
     TAW_DASHBOARD_KILL_FAILURE_MARKER="$TEST_TMPDIR/kill-session-failure" \
@@ -1070,6 +1075,46 @@ test_dashboard_health_sync_does_not_launch_stopped_ghostty() {
   fi
 }
 
+test_dashboard_preserves_state_on_session_query_failure() {
+  local project home wrapper pane session
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-session-query-failure-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+  TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-query\nterminal-query' \
+    run_dashboard "$wrapper" open
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' \
+    "$TEST_TMPDIR/dashboard.state")"
+
+  if TAW_DASHBOARD_FAIL_HAS_SESSION=1 run_dashboard "$wrapper" close; then
+    fail "expected close to report a session query failure"
+  fi
+  assert_exists "$TEST_TMPDIR/dashboard.state"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"
+
+  run_dashboard "$wrapper" close
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$session" 2>/dev/null; then
+    fail "expected the marked view session to be removed on retry"
+  fi
+}
+
 test_dashboard_preserves_state_on_close_health_query_failure() {
   local project home wrapper pane session
 
@@ -1838,6 +1883,8 @@ test_case "agent dashboard: preserves state on health query failure" \
   test_dashboard_preserves_state_on_health_query_failure
 test_case "agent dashboard: health sync does not launch stopped Ghostty" \
   test_dashboard_health_sync_does_not_launch_stopped_ghostty
+test_case "agent dashboard: preserves state on session query failure" \
+  test_dashboard_preserves_state_on_session_query_failure
 test_case "agent dashboard: preserves state on close health query failure" \
   test_dashboard_preserves_state_on_close_health_query_failure
 test_case "agent dashboard: preserves state on tmux query failure" \
