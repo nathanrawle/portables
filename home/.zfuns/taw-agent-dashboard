@@ -626,13 +626,16 @@ rebuild_dashboard() {
   local old_window_id="$STATE_WINDOW_ID" replacement_window_id session
   local cleanup_status=0
   local -a old_terminals old_sessions old_sources old_exclusions
-  local -a failed_sessions
+  local -a old_pending_sessions failed_sessions
 
   old_terminals=( "${STATE_TERMINALS[@]+${STATE_TERMINALS[@]}}" )
   old_sessions=( "${STATE_SESSIONS[@]+${STATE_SESSIONS[@]}}" )
   old_sources=( "${STATE_SOURCE_WINDOWS[@]+${STATE_SOURCE_WINDOWS[@]}}" )
   old_exclusions=(
     "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}"
+  )
+  old_pending_sessions=(
+    "${STATE_PENDING_SESSIONS[@]+${STATE_PENDING_SESSIONS[@]}}"
   )
 
   PRESERVED_VIEW_SESSIONS=()
@@ -642,6 +645,23 @@ rebuild_dashboard() {
   done
   PRESERVE_STATE_ON_FAILURE=1
   if ! create_dashboard; then
+    failed_sessions=(
+      "${STATE_PENDING_SESSIONS[@]+${STATE_PENDING_SESSIONS[@]}}"
+    )
+    STATE_WINDOW_ID="$old_window_id"
+    STATE_TERMINALS=( "${old_terminals[@]+${old_terminals[@]}}" )
+    STATE_SESSIONS=( "${old_sessions[@]+${old_sessions[@]}}" )
+    STATE_SOURCE_WINDOWS=( "${old_sources[@]+${old_sources[@]}}" )
+    STATE_EXCLUDED_SOURCE_WINDOWS=(
+      "${old_exclusions[@]+${old_exclusions[@]}}"
+    )
+    STATE_PENDING_SESSIONS=( "${old_pending_sessions[@]+${old_pending_sessions[@]}}" )
+    for session in "${failed_sessions[@]+${failed_sessions[@]}}"; do
+      array_contains "$session" \
+        "${STATE_PENDING_SESSIONS[@]+${STATE_PENDING_SESSIONS[@]}}" \
+        || STATE_PENDING_SESSIONS+=( "$session" )
+    done
+    write_state "$old_window_id" || true
     PRESERVED_VIEW_SESSIONS=()
     PRESERVE_STATE_ON_FAILURE=0
     return 1
