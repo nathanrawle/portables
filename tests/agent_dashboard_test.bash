@@ -57,12 +57,14 @@ case "$mode" in
     printf '%s\n' "${TAW_FAKE_GHOSTTY_HEALTH:-1}"
     ;;
   build)
+    [[ "${TAW_FAKE_GHOSTTY_BUILD_ERROR:-0}" = 1 ]] && exit 1
     printf '%s' "${TAW_FAKE_GHOSTTY_BUILD:?}"
     ;;
   close-terminal)
     printf '1\n'
     ;;
   close|focus)
+    printf 'target=%s\n' "${3:-}"
     printf '1\n'
     ;;
   *)
@@ -93,6 +95,7 @@ run_dashboard() {
     TAW_AGENT_DASHBOARD_OSASCRIPT="$bin/osascript" \
     TAW_DASHBOARD_FAIL_LINK_WINDOW="${TAW_DASHBOARD_FAIL_LINK_WINDOW:-0}" \
     TAW_DASHBOARD_LINK_FAILURE_MARKER="$TEST_TMPDIR/link-window-failure" \
+    TAW_FAKE_GHOSTTY_BUILD_ERROR="${TAW_FAKE_GHOSTTY_BUILD_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_BUILD="${TAW_FAKE_GHOSTTY_BUILD:-}" \
     TAW_FAKE_GHOSTTY_HEALTH="${TAW_FAKE_GHOSTTY_HEALTH:-1}" \
     "$DASHBOARD_SCRIPT" "$@"
@@ -441,6 +444,101 @@ test_dashboard_cleans_state_persistence_failure() {
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
+test_dashboard_build_errors_close_partial_window() {
+  local project home wrapper pane
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-build-failure-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  mkdir -p "$project" "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n work -c "$project" 'sleep 300'
+  pane="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" display-message \
+    -p -t source:work '#{pane_id}')"
+  run_dashboard_status "$wrapper" "$home" "$pane" codex
+
+  if TAW_FAKE_GHOSTTY_BUILD_ERROR=1 run_dashboard "$wrapper" open; then
+    fail "expected dashboard creation to fail when the build script fails"
+  fi
+  assert_dashboard_file_contains "$TEST_TMPDIR/osascript.log" \
+    'on error errorMessage number errorNumber'
+  assert_dashboard_file_contains "$TEST_TMPDIR/osascript.log" 'close window win'
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_dashboard_preserves_state_on_unlink_persistence_failure() {
+  local project home wrapper pane first_session first_source session_id
+  local state_dir state_file
+
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 0
+  DASHBOARD_SOCKET="portables-agent-dashboard-unlink-state-failure-$$-$RANDOM"
+  trap cleanup_dashboard_server EXIT
+  project="$TEST_TMPDIR/project"
+  home="$TEST_TMPDIR/home"
+  state_dir="$TEST_TMPDIR/state"
+  state_file="$state_dir/dashboard.state"
+  mkdir -p "$project" "$home/.zfuns" "$state_dir"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  wrapper="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/tmux-wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/tmux-wrapper" >/dev/null
+  : >"$TEST_TMPDIR/tmux.log"
+  : >"$TEST_TMPDIR/osascript.log"
+
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source -n first -c "$project" 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-window -d -t source: -n second -c "$project" 'sleep 300'
+  while IFS= read -r pane; do
+    run_dashboard_status "$wrapper" "$home" "$pane" codex
+  done < <("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-panes -a \
+    -t source -F '#{pane_id}')
+
+  TAW_AGENT_DASHBOARD_STATE_FILE="$state_file" \
+    TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-10\nterminal-12\nterminal-13' \
+    run_dashboard "$wrapper" open
+  first_session="$(awk -F '\t' '$1 == "terminal" { print $3; exit }' \
+    "$state_file")"
+  first_source="$(awk -F '\t' '$1 == "terminal" { print $4; exit }' \
+    "$state_file")"
+  session_id="$("$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" list-sessions \
+    -F $'#{session_id}\t#{session_name}' \
+    | awk -F '\t' -v name="$first_session" '$2 == name { print $1 }')"
+  [[ -n "$session_id" ]] || fail "expected a tmux session ID for $first_session"
+
+  chmod u-w "$state_dir"
+  if TAW_AGENT_DASHBOARD_STATE_FILE="$state_file" \
+    run_dashboard "$wrapper" unlink "$session_id" "$first_source"; then
+    chmod u+w "$state_dir"
+    fail "expected unlink to fail when state persistence is unavailable"
+  fi
+  chmod u+w "$state_dir"
+  if ! awk -F '\t' -v session="$first_session" \
+    '$1 == "terminal" && $3 == session { found = 1 } END { exit !found }' \
+    "$state_file"; then
+    fail "expected failed unlink to preserve the prior dashboard state"
+  fi
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$first_session"
+
+  TAW_AGENT_DASHBOARD_STATE_FILE="$state_file" \
+    run_dashboard "$wrapper" unlink "$session_id" "$first_source"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
+    -t "=$first_session" 2>/dev/null; then
+    fail "expected successful unlink to remove the private view session"
+  fi
+  assert_dashboard_file_contains "$state_file" $'exclude\t'"$first_source"
+}
+
 test_agent_unlink_syncs_dashboard() {
   local project home wrapper source_window pane session
   local attempt
@@ -495,5 +593,9 @@ test_case "agent dashboard: cleans failed view sessions" \
   test_dashboard_cleans_failed_new_view_session
 test_case "agent dashboard: cleans state persistence failures" \
   test_dashboard_cleans_state_persistence_failure
+test_case "agent dashboard: build errors close partial windows" \
+  test_dashboard_build_errors_close_partial_window
+test_case "agent dashboard: preserves state on unlink persistence failure" \
+  test_dashboard_preserves_state_on_unlink_persistence_failure
 test_case "agent dashboard: agent unlink syncs dashboard" \
   test_agent_unlink_syncs_dashboard

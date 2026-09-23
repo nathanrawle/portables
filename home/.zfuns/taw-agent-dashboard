@@ -252,50 +252,57 @@ on run argv
             end repeat
             set rowCount to (surfaceCount + columnCount - 1) div columnCount
 
-            set cfg to new surface configuration
-            set win to new window with configuration cfg
-            set firstTerminal to terminal 1 of selected tab of win
-            set allTerms to {firstTerminal}
-            set rowAnchors to {firstTerminal}
-
-            repeat with column from 2 to columnCount
-                set anchorTerminal to item (column - 1) of rowAnchors
-                set newTerminal to split anchorTerminal direction right with configuration cfg
-                set end of rowAnchors to newTerminal
-                set end of allTerms to newTerminal
-            end repeat
-
-            set nextSurface to columnCount + 1
-            repeat with row from 2 to rowCount
-                repeat with column from 1 to columnCount
-                    if nextSurface is less than or equal to surfaceCount then
-                        set anchorTerminal to item column of rowAnchors
-                        set newTerminal to split anchorTerminal direction down with configuration cfg
-                        set item column of rowAnchors to newTerminal
-                        set end of allTerms to newTerminal
-                        set nextSurface to nextSurface + 1
-                    end if
-                end repeat
-            end repeat
-
-            repeat with surfaceIndex from 1 to surfaceCount
-                set sessionName to item surfaceIndex of sessionNames
-                set currentTerminal to item surfaceIndex of allTerms
-                input text ("env -u TMUX tmux attach-session -t " & sessionName) to currentTerminal
-                send key "enter" to currentTerminal
-            end repeat
-
             try
-                perform action "equalize_splits" on firstTerminal
-            end try
-            focus firstTerminal
+                set cfg to new surface configuration
+                set win to new window with configuration cfg
+                set firstTerminal to terminal 1 of selected tab of win
+                set allTerms to {firstTerminal}
+                set rowAnchors to {firstTerminal}
 
-            set outputLines to {(id of win as text)}
-            repeat with currentTerminal in allTerms
-                set end of outputLines to (id of currentTerminal as text)
-            end repeat
-            set AppleScript's text item delimiters to linefeed
-            return outputLines as text
+                repeat with column from 2 to columnCount
+                    set anchorTerminal to item (column - 1) of rowAnchors
+                    set newTerminal to split anchorTerminal direction right with configuration cfg
+                    set end of rowAnchors to newTerminal
+                    set end of allTerms to newTerminal
+                end repeat
+
+                set nextSurface to columnCount + 1
+                repeat with row from 2 to rowCount
+                    repeat with column from 1 to columnCount
+                        if nextSurface is less than or equal to surfaceCount then
+                            set anchorTerminal to item column of rowAnchors
+                            set newTerminal to split anchorTerminal direction down with configuration cfg
+                            set item column of rowAnchors to newTerminal
+                            set end of allTerms to newTerminal
+                            set nextSurface to nextSurface + 1
+                        end if
+                    end repeat
+                end repeat
+
+                repeat with surfaceIndex from 1 to surfaceCount
+                    set sessionName to item surfaceIndex of sessionNames
+                    set currentTerminal to item surfaceIndex of allTerms
+                    input text ("env -u TMUX tmux attach-session -t " & sessionName) to currentTerminal
+                    send key "enter" to currentTerminal
+                end repeat
+
+                try
+                    perform action "equalize_splits" on firstTerminal
+                end try
+                focus firstTerminal
+
+                set outputLines to {(id of win as text)}
+                repeat with currentTerminal in allTerms
+                    set end of outputLines to (id of currentTerminal as text)
+                end repeat
+                set AppleScript's text item delimiters to linefeed
+                return outputLines as text
+            on error errorMessage number errorNumber
+                try
+                    close window win
+                end try
+                error errorMessage number errorNumber
+            end try
         end if
     end tell
 
@@ -457,7 +464,7 @@ create_dashboard() {
     return 1
   }
   write_state "$STATE_WINDOW_ID" || {
-    dashboard_script close >/dev/null 2>&1 || true
+    dashboard_script close "$STATE_WINDOW_ID" >/dev/null 2>&1 || true
     for session in "${VIEW_SESSIONS[@]}"; do
       destroy_view_session "$session" || true
     done
@@ -559,7 +566,6 @@ unlink_dashboard_window() {
     for ((i = 0; i < ${#STATE_SESSIONS[@]}; i++)); do
       if [[ "${STATE_SESSIONS[$i]}" = "$session_name" ]]; then
         terminal="${STATE_TERMINALS[$i]}"
-        dashboard_script close-terminal "$terminal" >/dev/null 2>&1 || true
         break
       fi
     done
@@ -575,15 +581,17 @@ unlink_dashboard_window() {
     array_contains "$source" \
       "${STATE_EXCLUDED_SOURCE_WINDOWS[@]+${STATE_EXCLUDED_SOURCE_WINDOWS[@]}}" \
       || STATE_EXCLUDED_SOURCE_WINDOWS+=( "$source" )
-    destroy_view_session "$session_name" || true
     if ((${#remaining_sessions[@]} == 0)); then
-      clear_state
+      clear_state || return 1
     else
       STATE_TERMINALS=( "${remaining_terminals[@]}" )
       STATE_SESSIONS=( "${remaining_sessions[@]}" )
       STATE_SOURCE_WINDOWS=( "${remaining_sources[@]}" )
-      write_state "$STATE_WINDOW_ID"
+      write_state "$STATE_WINDOW_ID" || return 1
     fi
+    [[ -z "$terminal" ]] || \
+      dashboard_script close-terminal "$terminal" >/dev/null 2>&1 || true
+    destroy_view_session "$session_name" || true
   else
     destroy_view_session "$session_name" || true
   fi
