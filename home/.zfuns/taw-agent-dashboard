@@ -716,6 +716,8 @@ rebuild_dashboard() {
     replacement_window_id="$STATE_WINDOW_ID"
     if ! dashboard_script close "$replacement_window_id" >/dev/null 2>&1; then
       STATE_PENDING_WINDOW_ID="$replacement_window_id"
+    else
+      STATE_PENDING_WINDOW_ID="$old_pending_window_id"
     fi
     cleanup_created_view_sessions
     STATE_WINDOW_ID="$old_window_id"
@@ -725,7 +727,13 @@ rebuild_dashboard() {
     STATE_EXCLUDED_SOURCE_WINDOWS=(
       "${old_exclusions[@]+${old_exclusions[@]}}"
     )
-    write_state "$old_window_id" || true
+    if ! write_state "$old_window_id"; then
+      write_state "$old_window_id" || {
+        PRESERVED_VIEW_SESSIONS=()
+        PRESERVE_STATE_ON_FAILURE=0
+        return 1
+      }
+    fi
     PRESERVED_VIEW_SESSIONS=()
     PRESERVE_STATE_ON_FAILURE=0
     return 1

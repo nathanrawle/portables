@@ -67,6 +67,15 @@ if [[ "${TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE:-0}" = 1 \
   : >"${TAW_DASHBOARD_STATE_WRITE_FAILURE_MARKER}"
   exit 1
 fi
+if [[ "${TAW_DASHBOARD_FAIL_STATE_WRITE_AT:-0}" =~ ^[1-9][0-9]*$ \
+  && "$1" = -f ]]; then
+  state_write_count=0
+  [[ -e "${TAW_DASHBOARD_STATE_WRITE_COUNT_MARKER}" ]] \
+    && state_write_count="$(<"$TAW_DASHBOARD_STATE_WRITE_COUNT_MARKER")"
+  state_write_count=$((state_write_count + 1))
+  printf '%s\n' "$state_write_count" >"$TAW_DASHBOARD_STATE_WRITE_COUNT_MARKER"
+  ((state_write_count == TAW_DASHBOARD_FAIL_STATE_WRITE_AT)) && exit 1
+fi
 exec "${TAW_DASHBOARD_REAL_MV}" "$@"
 EOF
   chmod +x "$bin/mv"
@@ -181,6 +190,8 @@ run_dashboard() {
     TAW_DASHBOARD_KILL_FAILURE_MARKER="$TEST_TMPDIR/kill-session-failure" \
     TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE="${TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE:-0}" \
     TAW_DASHBOARD_STATE_WRITE_FAILURE_MARKER="$TEST_TMPDIR/state-write-failure" \
+    TAW_DASHBOARD_FAIL_STATE_WRITE_AT="${TAW_DASHBOARD_FAIL_STATE_WRITE_AT:-0}" \
+    TAW_DASHBOARD_STATE_WRITE_COUNT_MARKER="$TEST_TMPDIR/state-write-count" \
     TAW_DASHBOARD_REAL_MV="$real_mv" \
     TAW_FAKE_GHOSTTY_RUNNING="${TAW_FAKE_GHOSTTY_RUNNING:-1}" \
     TAW_FAKE_GHOSTTY_BUILD_ERROR="${TAW_FAKE_GHOSTTY_BUILD_ERROR:-0}" \
@@ -1352,7 +1363,8 @@ test_dashboard_rolls_back_when_old_window_close_fails() {
     -p -t source:second '#{pane_id}')"
   run_dashboard_status "$wrapper" "$home" "$pane" codex
 
-  if TAW_FAKE_GHOSTTY_CLOSE_ERROR_ONCE=1 \
+  if TAW_DASHBOARD_FAIL_STATE_WRITE_AT=2 \
+    TAW_FAKE_GHOSTTY_CLOSE_ERROR_ONCE=1 \
     TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-21\nterminal-28\nterminal-29' \
     run_dashboard "$wrapper" sync; then
     fail "expected rebuild to report failure closing the old dashboard"
