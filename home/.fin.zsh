@@ -1,6 +1,23 @@
 # Bash completion compatibility
 autoload -Uz +X bashcompinit
-complete -o nospace -C "$(command -v terraform)" terraform
+if (( $+commands[terraform] )); then
+  _portables_terraform_complete() {
+    case $words[CURRENT] in
+      -var-file=*|-backend-config=*)
+        compset -P '*='
+        _files
+        ;;
+      *)
+        _bash_complete -o nospace -C "$commands[terraform]" && return
+        if [[ $words[CURRENT] == *=* ]]; then
+          compset -P '*='
+        fi
+        _files
+        ;;
+    esac
+  }
+  compdef _portables_terraform_complete terraform
+fi
 
 if [[ "$PROMPT_FW" = "p10k" ]]; then
   source "$HOME/.p10k.zsh"

@@ -1074,6 +1074,31 @@ EOF
   assert_eq '1:1' "$output"
 }
 
+test_maintenance_terraform_completion_registers_only_when_available() {
+  maintenance_fixture
+  cat >"$TEST_TMPDIR/bin/terraform" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+  chmod +x "$TEST_TMPDIR/bin/terraform"
+  local output
+  output="$(PATH="$TEST_TMPDIR/bin:/usr/bin:/bin" zsh -dfc '
+    autoload -Uz compinit
+    compinit -D -i
+    source "$1"
+    print -r -- "${_comps[terraform]:-unset}"
+  ' _ "$REPO_ROOT/home/.fin.zsh")"
+  assert_eq _portables_terraform_complete "$output"
+
+  output="$(PATH=/usr/bin:/bin zsh -dfc '
+    autoload -Uz compinit
+    compinit -D -i
+    source "$1"
+    print -r -- "${_comps[terraform]:-unset}"
+  ' _ "$REPO_ROOT/home/.fin.zsh")"
+  assert_eq unset "$output"
+}
+
 test_case 'maintenance: unattempted requirements do not poison independent owners' test_maintenance_skipped_requirement_does_not_block_independent_owner
 test_case 'maintenance: machine environment preserves settings and permissions' test_maintenance_machine_env_preserves_settings_and_mode
 test_case 'maintenance: machine environment preserves conflicting home files' test_maintenance_machine_env_preserves_home_conflict
@@ -1087,6 +1112,7 @@ test_case 'maintenance: Zsh preserves unmanaged function links' test_maintenance
 test_case 'maintenance: zsh-autocomplete selects supported installers' test_maintenance_zsh_autocomplete_install_matrix
 test_case 'maintenance: zsh-autocomplete pins Linux self-install' test_maintenance_zsh_autocomplete_pins_linux_clone
 test_case 'maintenance: zsh-autocomplete loads XDG source before compinit' test_maintenance_zsh_autocomplete_loads_xdg_source
+test_case 'maintenance: Terraform completion registers only when available' test_maintenance_terraform_completion_registers_only_when_available
 
 test_maintenance_default_python_reuses_installed_version() {
   maintenance_fixture
