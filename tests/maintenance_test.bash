@@ -968,10 +968,7 @@ zsh_config_fixture() {
 printf '%s\n' "$ZMV_TARGET"
 EOF
   chmod +x "$TEST_TMPDIR/bin/zsh"
-  mkdir -p "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" \
-    "$HOME/.oh-my-zsh/custom/plugins/zsh-completions" \
-    "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" \
-    "$HOME/.oh-my-zsh/custom/themes/powerlevel10k"
+  mkdir -p "$HOME/.oh-my-zsh"
   printf '# framework\n' >"$HOME/.oh-my-zsh/oh-my-zsh.sh"
 }
 
@@ -1069,9 +1066,69 @@ EOF
   output="$(HOME="$HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PATH=/usr/bin:/bin zsh -dfc '
     source "$1"
     source "$2"
-    print -r -- "$PORTABLES_AUTOCOMPLETE_LOADS:$skip_global_compinit"
+    for directory in $fpath; do
+      [[ "$directory" = "$XDG_DATA_HOME/portables/zsh/zsh-completions/src" ]] && found=1
+    done
+    print -r -- "$PORTABLES_AUTOCOMPLETE_LOADS:$skip_global_compinit:${found:-0}"
   ' _ "$REPO_ROOT/home/.zshenv" "$init")"
-  assert_eq '1:1' "$output"
+  assert_eq '1:1:0' "$output"
+}
+
+test_maintenance_zsh_plugins_install_and_load_from_xdg() {
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/zsh-plugins.sh" "$FIXTURE/machine-tools/"
+  local tool="$FIXTURE/machine-tools/zsh-plugins.sh"
+  assert_eq $'syspkgmgr:zsh-autosuggestions\nsyspkgmgr:zsh-syntax-highlighting\nsyspkgmgr:zsh-completions\nsyspkgmgr:powerlevel10k' \
+    "$(OS=Darwin ID= bash "$tool" install)"
+  assert_eq self-install "$(OS=Linux ID=ubuntu bash "$tool" install)"
+
+  export OS=Linux ID=ubuntu XDG_DATA_HOME="$HOME/.local/share"
+  cat >"$TEST_TMPDIR/bin/git" <<'EOF'
+#!/usr/bin/env bash
+printf 'git %s\n' "$*" >>"$TRACE"
+destination=${!#}
+mkdir -p "$destination"
+case "$*" in
+  *zsh-autosuggestions*) printf '# autosuggestions\n' >"$destination/zsh-autosuggestions.zsh" ;;
+  *zsh-syntax-highlighting*) printf '# syntax highlighting\n' >"$destination/zsh-syntax-highlighting.zsh" ;;
+  *zsh-completions*) mkdir -p "$destination/src"; printf '# completion\n' >"$destination/src/_git" ;;
+  *powerlevel10k*) printf '# powerlevel10k\n' >"$destination/powerlevel10k.zsh-theme" ;;
+esac
+EOF
+  chmod +x "$TEST_TMPDIR/bin/git"
+  bash "$tool" self-install
+  assert_exists "$XDG_DATA_HOME/portables/zsh/zsh-autosuggestions/zsh-autosuggestions.zsh"
+  assert_exists "$XDG_DATA_HOME/portables/zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+  assert_exists "$XDG_DATA_HOME/portables/zsh/zsh-completions/src/_git"
+  assert_exists "$XDG_DATA_HOME/portables/zsh/powerlevel10k/powerlevel10k.zsh-theme"
+  grep -Eq '^git clone --depth 1 --branch 0\.7\.1 -- https://github\.com/zsh-users/zsh-autosuggestions\.git ' "$TRACE" ||
+    fail 'zsh-autosuggestions clone was not pinned'
+  grep -Eq '^git clone --depth 1 --branch v1\.20\.0 -- https://github\.com/romkatv/powerlevel10k\.git ' "$TRACE" ||
+    fail 'powerlevel10k clone was not pinned'
+
+  mkdir -p "$XDG_DATA_HOME/portables/zsh/zsh-completions"
+  printf 'preserve\n' >"$XDG_DATA_HOME/portables/zsh/zsh-completions/local-file"
+  rm "$XDG_DATA_HOME/portables/zsh/zsh-completions/src/_git"
+  if bash "$tool" self-install; then fail 'conflicting zsh plugin path was replaced'; fi
+  assert_file_contents "$XDG_DATA_HOME/portables/zsh/zsh-completions/local-file" preserve
+
+  cat >"$XDG_DATA_HOME/portables/zsh/zsh-autosuggestions/zsh-autosuggestions.zsh" <<'EOF'
+typeset -gi PORTABLES_AUTOSUGGESTIONS_LOADS=$(( ${PORTABLES_AUTOSUGGESTIONS_LOADS:-0} + 1 ))
+EOF
+  cat >"$XDG_DATA_HOME/portables/zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" <<'EOF'
+typeset -gi PORTABLES_SYNTAX_HIGHLIGHTING_LOADS=$(( ${PORTABLES_SYNTAX_HIGHLIGHTING_LOADS:-0} + 1 ))
+EOF
+  local plugin_inits="$TEST_TMPDIR/zsh-plugin-inits.zsh"
+  local syntax_highlighting="$TEST_TMPDIR/zsh-syntax-highlighting.zsh"
+  awk '!/^[[:space:]]+\/(opt\/homebrew|usr\/local)\//' \
+    "$REPO_ROOT/home/.zsh-plugin-inits.zsh" >"$plugin_inits"
+  awk '!/^[[:space:]]+\/(opt\/homebrew|usr\/local)\//' \
+    "$REPO_ROOT/home/.zsh-syntax-highlighting.zsh" >"$syntax_highlighting"
+  assert_eq '1:1' "$(HOME="$HOME" XDG_DATA_HOME="$XDG_DATA_HOME" PROMPT_FW= zsh -dfc '
+    source "$1"
+    source "$2"
+    print -r -- "$PORTABLES_AUTOSUGGESTIONS_LOADS:$PORTABLES_SYNTAX_HIGHLIGHTING_LOADS"
+  ' _ "$plugin_inits" "$syntax_highlighting")"
 }
 
 test_maintenance_terraform_completion_registers_only_when_available() {
@@ -1112,6 +1169,7 @@ test_case 'maintenance: Zsh preserves unmanaged function links' test_maintenance
 test_case 'maintenance: zsh-autocomplete selects supported installers' test_maintenance_zsh_autocomplete_install_matrix
 test_case 'maintenance: zsh-autocomplete pins Linux self-install' test_maintenance_zsh_autocomplete_pins_linux_clone
 test_case 'maintenance: zsh-autocomplete loads XDG source before compinit' test_maintenance_zsh_autocomplete_loads_xdg_source
+test_case 'maintenance: managed Zsh plugins install and load from XDG' test_maintenance_zsh_plugins_install_and_load_from_xdg
 test_case 'maintenance: Terraform completion registers only when available' test_maintenance_terraform_completion_registers_only_when_available
 
 test_maintenance_default_python_reuses_installed_version() {

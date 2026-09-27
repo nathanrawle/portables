@@ -12,6 +12,16 @@ do
 done
 unset zsh_autocomplete
 
+# Completion functions must be available before Oh My Zsh runs compinit.
+for zsh_completions in \
+  /opt/homebrew/share/zsh-completions \
+  /usr/local/share/zsh-completions \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/portables/zsh/zsh-completions/src"
+do
+  [[ -d "$zsh_completions" ]] && fpath+=( "$zsh_completions" )
+done
+unset zsh_completions
+
 export HOMEBREW_NO_ENV_HINTS=1
 [[ -x /opt/homebrew/bin/brew ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
 

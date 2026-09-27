@@ -9,13 +9,6 @@ case "$1" in
     require_commands zsh git
     clone_missing https://github.com/ohmyzsh/ohmyzsh.git "$HOME/.oh-my-zsh"
     require_files "$HOME/.oh-my-zsh/oh-my-zsh.sh"
-    custom="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
-    for plugin in zsh-syntax-highlighting zsh-completions zsh-autosuggestions; do
-      clone_missing "https://github.com/zsh-users/$plugin.git" "$custom/plugins/$plugin" ||
-        failure "plugin $plugin"
-    done
-    clone_missing https://github.com/romkatv/powerlevel10k.git "$custom/themes/powerlevel10k" ||
-      failure "theme powerlevel10k"
     zmv="$(zsh -fc 'for dir in $fpath; do if [[ -r "$dir/zmv" ]]; then print -r -- "$dir/zmv"; break; fi; done')"
     require_files "$zmv"
     if [[ ! -d "$HOME/.zfuns" ]]; then

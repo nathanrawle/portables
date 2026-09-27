@@ -10,12 +10,13 @@ source "$ZSH"/oh-my-zsh.sh
 # oh-my-zsh may read zstyles during setup, but also override them, so I have to source
 # styles before *and* after:
 source ~/.zstyles # undo any mods made by omz
+source ~/.zsh-plugin-inits.zsh
 source ~/.aliases.zsh
 source ~/.keybinds.zsh
 source ~/.named-dirs.zsh
 source ~/.fin.zsh
 [[ -r ~/.tmux-pane-titles.zsh ]] && source ~/.tmux-pane-titles.zsh
+source ~/.zsh-syntax-highlighting.zsh
 
 # Anything below this comment has been added by a wayward shell command and will be
 # dealt with appropriately in due course. LOOKING AT YOU TERRAFORM 👀
-
