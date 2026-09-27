@@ -7,9 +7,6 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 mkdir -p "$XDG_CACHE_HOME/zsh"
 ZSH_COMPDUMP="$XDG_CACHE_HOME/zsh/compdump-${HOST%%.*}-${ZSH_VERSION}"
 
-# Homebrew owns the completion directory even though OMZ flags its group mode.
-ZSH_DISABLE_COMPFIX=true
-
 # Oh My Zsh auto-update
 zstyle ':omz:update' mode auto
 
