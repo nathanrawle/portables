@@ -53,7 +53,11 @@ collect() {
   local source="$1" relative="$2" ancestor physical child name
   shift 2
   if [[ "$APPLY_IGNORE_RULES" = 1 && "${source##*/}" = .DS_Store ]]; then return 0; fi
-  if [[ -d "$source" ]]; then
+  if [[ -L "$source" && -d "$source" && -f "$source/SKILL.md" ]]; then
+    physical="$(cd -- "$(dirname "$source")" && pwd -P)" || { failure "resolve $source"; return; }
+    SOURCES+=( "$relative" )
+    IGNORE_PATHS+=( "${physical#$PORTABLES/}/${source##*/}" )
+  elif [[ -d "$source" ]]; then
     physical="$(cd -- "$source" && pwd -P)" || { failure "traverse $source"; return; }
     within "$physical" "$PORTABLE_HOME" || { failure "source directory escapes payload: $source"; return; }
     for ancestor in "$@"; do
@@ -78,6 +82,9 @@ collect() {
 link_file() {
   local relative="$1" source="$PORTABLE_HOME/$1" destination="$HOME/$1"
   local parent existing physical backup index=0
+  if [[ -L "$source" && -d "$source" && -f "$source/SKILL.md" ]]; then
+    source="$(cd -- "$source" && pwd -P)" || return 1
+  fi
   if [[ "$source" -ef "$destination" ]]; then return 0; fi
   if [[ -L "$destination" && "$(readlink "$destination")" = "$source" ]]; then return 0; fi
   parent="$(dirname "$destination")"

@@ -7,7 +7,7 @@ make_symlinks_fixture() {
   mkdir -p \
     "$repo/home/.config/git" \
     "$repo/home/.config/nvim" \
-    "$repo/home/.codex" \
+    "$repo/home/.codex/skills" \
     "$repo/home/.claude" \
     "$repo/home/.copilot" \
     "$repo/home/.zfuns" \
@@ -39,7 +39,7 @@ EOF
   ln -s plain-func "$repo/home/.zfuns/symlink-func"
   mkdir -p "$repo/home/.agent-generics/skills/test-skill"
   printf 'skill body\n' >"$repo/home/.agent-generics/skills/test-skill/SKILL.md"
-  ln -s ../.agent-generics/skills "$repo/home/.codex/skills"
+  ln -s ../../.agent-generics/skills/test-skill "$repo/home/.codex/skills/test-skill"
   ln -s ../.agent-generics/skills "$repo/home/.claude/skills"
   ln -s ../.agent-generics/skills "$repo/home/.copilot/skills"
 
@@ -59,12 +59,15 @@ run_symlinks() {
 test_repository_shared_skill_aliases() {
   local provider target
 
-  for provider in codex claude copilot; do
+  for provider in claude copilot; do
     target="$REPO_ROOT/home/.$provider/skills"
     [[ -L "$target" ]] || fail "missing shared skill alias: $target"
     assert_eq "../.agent-generics/skills" "$(readlink "$target")" \
       "unexpected shared skill alias target: $target"
   done
+  assert_eq ../../.agent-generics/skills/pr-review-followup-loop \
+    "$(readlink "$REPO_ROOT/home/.codex/skills/pr-review-followup-loop")" \
+    'unexpected Codex skill alias target'
 }
 
 test_default_links_tree_and_preserves_existing_files() {
@@ -196,15 +199,18 @@ test_symlinked_directory_tree_links_into_existing_destination() {
 
   repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
   home="$TEST_TMPDIR/home"
-  mkdir -p "$home/.codex/skills/.system" "$home/.claude/skills" "$home/.copilot/skills"
+  mkdir -p \
+    "$home/.codex/skills/.system" \
+    "$home/.claude/skills" \
+    "$home/.copilot/skills"
   printf 'keep\n' >"$home/.codex/skills/.system/existing"
 
   run_symlinks "$repo" "$home" .codex .claude .copilot
 
   assert_file_contents "$home/.codex/skills/.system/existing" "keep"
   assert_symlink_to \
-    "$home/.codex/skills/test-skill/SKILL.md" \
-    "$repo/home/.codex/skills/test-skill/SKILL.md"
+    "$home/.codex/skills/test-skill" \
+    "$repo/home/.agent-generics/skills/test-skill"
   assert_symlink_to \
     "$home/.claude/skills/test-skill/SKILL.md" \
     "$repo/home/.claude/skills/test-skill/SKILL.md"
@@ -313,7 +319,7 @@ test_unusual_filenames_and_mount_ignores() {
   printf hidden >"$repo/home/.agent-generics/skills/test-skill/ignored"
   run_symlinks "$repo" "$home"
   assert_symlink_to "$home/$name" "$repo/home/$name"
-  assert_not_exists "$home/.codex/skills/test-skill/ignored"
+  assert_file_contents "$home/.codex/skills/test-skill/ignored" hidden
 }
 
 test_loop_reports_failure_without_hiding_other_links() {
