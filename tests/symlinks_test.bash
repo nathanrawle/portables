@@ -94,6 +94,17 @@ test_default_links_tree_and_preserves_existing_files() {
   assert_file_contents "$home/.config/git/local-only" "local only"
 }
 
+test_shared_skill_source_stays_repository_only() {
+  local repo home
+
+  repo="$(make_symlinks_fixture "$TEST_TMPDIR")"
+  home="$TEST_TMPDIR/home"
+
+  run_symlinks "$repo" "$home" --no-ignore .agent-generics
+
+  assert_not_exists "$home/.agent-generics"
+}
+
 test_explicit_file_links_only_that_file() {
   local repo home
 
@@ -236,6 +247,8 @@ test_no_ignore_overrides_default_ignore_behavior() {
 
 test_case "symlinks: default run links tree and preserves existing files" \
   test_default_links_tree_and_preserves_existing_files
+test_case "symlinks: shared skill source stays in the repository" \
+  test_shared_skill_source_stays_repository_only
 test_case "symlinks: repository agent skill aliases stay shared" \
   test_repository_shared_skill_aliases
 test_case "symlinks: explicit file links only that file" \

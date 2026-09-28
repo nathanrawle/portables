@@ -52,6 +52,7 @@ within() {
 collect() {
   local source="$1" relative="$2" ancestor physical child name
   shift 2
+  if [[ "$relative" = .agent-generics || "$relative" = .agent-generics/* ]]; then return 0; fi
   if [[ "$APPLY_IGNORE_RULES" = 1 && "${source##*/}" = .DS_Store ]]; then return 0; fi
   if [[ -L "$source" && -d "$source" && -f "$source/SKILL.md" ]]; then
     physical="$(cd -- "$(dirname "$source")" && pwd -P)" || { failure "resolve $source"; return; }
