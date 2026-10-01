@@ -22,6 +22,8 @@ AGENT_SESSION_NAMED_ID=
 SOURCE_WINDOW_IDS=()
 SOURCE_WINDOW_MEMBERS=()
 SOURCE_WINDOW_SUPPRESSIONS=()
+SOURCE_WINDOW_SESSIONS=()
+SOURCE_WINDOW_LABELS=()
 DESIRED_WINDOW_IDS=()
 SOURCE_WINDOW_INDEX=-1
 
@@ -145,14 +147,16 @@ locate_agent_session() {
 collect_source_windows() {
   local panes line session_id window_id pane_id agent agent_pane_pid pane_pid
   local suppression dashboard_session_marker rest tab=$'\t'
-  local member i fingerprint
+  local member i fingerprint session_name
 
   SOURCE_WINDOW_IDS=()
   SOURCE_WINDOW_MEMBERS=()
   SOURCE_WINDOW_SUPPRESSIONS=()
+  SOURCE_WINDOW_SESSIONS=()
+  SOURCE_WINDOW_LABELS=()
   DESIRED_WINDOW_IDS=()
   panes="$(tmux list-panes -a \
-    -F $'#{session_id}\t#{window_id}\t#{pane_id}\t#{@taw_agent}\t#{@taw_agent_pane_pid}\t#{pane_pid}\t#{@taw_agent_link_suppressed}\t#{@taw_agent_dashboard_session}' \
+    -F $'#{session_id}\t#{window_id}\t#{pane_id}\t#{@taw_agent}\t#{@taw_agent_pane_pid}\t#{pane_pid}\t#{@taw_agent_link_suppressed}\t#{@taw_agent_dashboard_session}\t#{session_name}' \
     2>/dev/null)" || return 1
 
   while IFS= read -r line; do
@@ -172,8 +176,14 @@ collect_source_windows() {
     if [[ "$suppression" = *"$tab"* ]]; then
       dashboard_session_marker="${suppression#*"$tab"}"
       suppression="${suppression%%"$tab"*}"
+      session_name=
+      if [[ "$dashboard_session_marker" = *"$tab"* ]]; then
+        session_name="${dashboard_session_marker#*"$tab"}"
+        dashboard_session_marker="${dashboard_session_marker%%"$tab"*}"
+      fi
     else
       dashboard_session_marker=
+      session_name=
     fi
     [[ -n "$session_id" && -n "$window_id" && -n "$pane_id" ]] || continue
     [[ -z "$AGENT_SESSION_ID" || "$session_id" != "$AGENT_SESSION_ID" ]] || continue
@@ -183,8 +193,22 @@ collect_source_windows() {
       SOURCE_WINDOW_IDS+=( "$window_id" )
       SOURCE_WINDOW_MEMBERS+=( "" )
       SOURCE_WINDOW_SUPPRESSIONS+=( "$suppression" )
+      SOURCE_WINDOW_SESSIONS+=( "" )
+      SOURCE_WINDOW_LABELS+=( "" )
       SOURCE_WINDOW_INDEX=$((${#SOURCE_WINDOW_IDS[@]} - 1))
     fi
+    case $'\n'"${SOURCE_WINDOW_SESSIONS[$SOURCE_WINDOW_INDEX]}" in
+      *$'\n'"$session_id"$'\n'*) ;;
+      *)
+        SOURCE_WINDOW_SESSIONS[$SOURCE_WINDOW_INDEX]+="$session_id"$'\n'
+        if [[ -n "$session_name" ]]; then
+          if [[ -n "${SOURCE_WINDOW_LABELS[$SOURCE_WINDOW_INDEX]}" ]]; then
+            SOURCE_WINDOW_LABELS[$SOURCE_WINDOW_INDEX]+=', '
+          fi
+          SOURCE_WINDOW_LABELS[$SOURCE_WINDOW_INDEX]+="$session_name"
+        fi
+        ;;
+    esac
     supported_agent "$agent" || continue
     if [[ -n "$agent_pane_pid" && "$agent_pane_pid" != "$pane_pid" ]]; then
       clear_status "$pane_id"
@@ -221,6 +245,8 @@ collect_source_windows() {
         "$AGENT_SUPPRESSION_OPTION" >/dev/null 2>&1 || true
     fi
     SOURCE_WINDOW_MEMBERS[$i]="$fingerprint"
+    tmux set-option -w -t "${SOURCE_WINDOW_IDS[$i]}" @taw_agent_source_sessions \
+      "${SOURCE_WINDOW_LABELS[$i]}" >/dev/null || return 1
     DESIRED_WINDOW_IDS+=( "${SOURCE_WINDOW_IDS[$i]}" )
   done
 }
@@ -269,6 +295,12 @@ remove_agent_session_window() {
   tmux unlink-window -t "$AGENT_SESSION_ID:$window" >/dev/null 2>&1 \
     || tmux kill-window -t "$AGENT_SESSION_ID:$window" >/dev/null 2>&1 \
     || true
+}
+
+renumber_agent_session() {
+  tmux has-session -t "$AGENT_SESSION_ID" 2>/dev/null || return 0
+  # tmux's renumber-windows option does not close gaps left by unlink-window.
+  tmux move-window -r -t "$AGENT_SESSION_ID:" >/dev/null
 }
 
 reconcile_agent_session() {
@@ -329,6 +361,7 @@ reconcile_agent_session() {
     tmux link-window -d -a -s "$window" \
       -t "$AGENT_SESSION_ID:{end}" >/dev/null || return 1
   done
+  renumber_agent_session
 }
 
 sync_agent_session() (
@@ -369,6 +402,7 @@ unlink_agent_window() (
       >/dev/null 2>&1 || true
     return 1
   fi
+  renumber_agent_session || return 1
   sync_dashboard
 )
 
