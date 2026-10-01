@@ -55,7 +55,7 @@ render_tmux_agent_icon() {
 
 test_tmux_status_formats_show_agent_state_and_priority() {
   local first second third fourth state expected actual pane pane_tabs window_tab i
-  local inactive_window_tab
+  local inactive_window_tab codex_binding
   local -a panes states icons
 
   TMUX_AGENT_STATUS_BIN="$(command -v tmux || true)"
@@ -68,6 +68,10 @@ test_tmux_status_formats_show_agent_state_and_priority() {
       -f "$TMUX_AGENT_STATUS_CONFIG" new-session -d -P -F '#{pane_id}' \
       -s agent-status -n agents 'sleep 120'
   )"
+  codex_binding="$("$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    list-keys -T prefix C-x)"
+  assert_tmux_status_contains "$codex_binding" '"codex --no-daemon"' \
+    "expected the Codex shortcut to bypass the shared daemon"
   second="$(
     "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" split-window \
       -d -P -F '#{pane_id}' -t agent-status:agents 'sleep 120'

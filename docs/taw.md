@@ -134,7 +134,7 @@ Acceptance keys choose the layout for a newly created target:
 | Opt-Enter | editor, agent, and shell |
 
 An explicit `-agent` supplies the agent command. Otherwise, an agent-containing
-acceptance layout uses trimmed `TAW_AGENT` when set and falls back to `codex`.
+acceptance layout uses trimmed `TAW_AGENT` when set and falls back to `codex --no-daemon`.
 Plain Enter does not enable an agent from `TAW_AGENT`. Acceptance modifiers are
 ignored for a selected tmux session or an exact matching worktree window.
 
@@ -316,6 +316,20 @@ and preserves unrelated settings, file permissions, and symlink targets. It
 requires `jq`, which is already managed by this repository. Restart existing
 agent sessions after configuration. Codex requires reviewing the new handlers
 with `/hooks`; Claude Code requires the workspace to be trusted before hooks run.
+
+Codex's shared daemon inherits the environment of the terminal that started it,
+so hooks from other terminals can receive the wrong `TMUX_PANE`. Until Codex
+provides client-specific terminal routing ([upstream issue #48500](https://github.com/openai/codex/issues/48500)),
+the shell alias, taw's default agent command, and tmux's `C-x` binding use
+`codex --no-daemon`. Explicit `-agent` and non-empty `TAW_AGENT` commands are
+preserved; include `--no-daemon` in those commands when using Codex status hooks.
+Use `command codex` to bypass the shell alias intentionally.
+
+Existing daemon-backed terminals must exit and resume their conversations with
+`command codex --no-daemon resume <session-id>`. Record each conversation's ID from
+`/status` before exiting. The shared daemon can stay running for other clients.
+After updating Portables, reload the shell aliases and tmux configuration;
+start a new shell to reload taw as well.
 
 The status publisher is a no-op outside tmux. For an existing tmux server,
 reload `~/.config/tmux/tmux.conf` after updating Portables so pane-focus events
