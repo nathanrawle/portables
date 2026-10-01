@@ -574,7 +574,7 @@ test_taw_agent_whitespace_only_defaults_to_codex() {
   TAW_AGENT='   ' TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" -p "$repo"
 
-  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tcodex'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tcodex --no-daemon'
   assert_file_contains "$log" $'select-pane\t-t\t%1'
 }
 
@@ -690,7 +690,7 @@ test_named_branch_checks_out_normal_repo() {
     "expected the primary worktree branch to remain unchanged"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$worktree_real"$'\tvim -u NONE'
   assert_file_contains "$log" $'rename-window\t-t\t@1\t🌲main'
-  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex --no-daemon'
   assert_file_not_contains "$log" $'send-keys\t'
 }
 
@@ -1543,7 +1543,7 @@ test_bare_positional_worktree_supports_shell_equals_command() {
 
   worktree_real="$(cd "$project/.worktrees/provisional-venues" && pwd -P)"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
-  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex'
+  assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex --no-daemon'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$worktree_real"$'\tADDR=:8081 go run ./cmd/web'
 }
 
@@ -4736,6 +4736,13 @@ test_picker_accept_keys_select_layouts() {
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_not_contains "$log" $'\tvim'
   assert_file_contains "$log" $'select-pane\t-t\t%1'
+
+  log="$TEST_TMPDIR/tmux-default-agent.log"
+  XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT=' ' TAW_FAKE_FZF_KEYS=ctrl-a \
+    TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts
+  assert_file_contains "$log" $'-s\ttarget\t-n\t🌲main\t-c\t'"$target_real"$'\tcodex --no-daemon'
+  assert_file_not_contains "$log" $'split-window\t'
 
   log="$TEST_TMPDIR/tmux-editor-shell.log"
   args_log="$TEST_TMPDIR/fzf-args.log"

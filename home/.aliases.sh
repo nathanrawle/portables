@@ -21,6 +21,9 @@ alias rnsort='sort -rn'
 alias reshell='exec $SHELL'
 alias :q=exit
 
+# Shared daemon hooks inherit another terminal's environment.
+alias codex='codex --no-daemon'
+
 # utilities: python
 alias wp='which python'
 alias pw='pyenv which'
