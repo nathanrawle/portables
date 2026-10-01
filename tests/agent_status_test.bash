@@ -111,6 +111,7 @@ test_agent_status_config_creates_native_hooks() {
   assert_eq 8 "$(owned_hook_count "$codex")" "expected Codex status handlers"
   assert_eq 1 "$(nvim_hook_count "$codex")" "expected Codex Neovim context handler"
   assert_eq 11 "$(owned_hook_count "$claude")" "expected Claude status handlers"
+  assert_eq 1 "$(nvim_hook_count "$claude")" "expected Claude Neovim context handler"
 }
 
 test_agent_status_config_preserves_unrelated_settings() {
@@ -151,25 +152,32 @@ EOF
 }
 
 test_agent_status_config_is_idempotent() {
-  local home codex before after
+  local home codex claude codex_before codex_after claude_before claude_after
 
   home="$TEST_TMPDIR/home"
   codex="$home/.codex/hooks.json"
+  claude="$home/.claude/settings.json"
   HOME="$home" bash "$AGENT_STATUS_CONFIG" config
-  before="$(cksum "$codex")"
+  codex_before="$(cksum "$codex")"
+  claude_before="$(cksum "$claude")"
   HOME="$home" bash "$AGENT_STATUS_CONFIG" config
-  after="$(cksum "$codex")"
+  codex_after="$(cksum "$codex")"
+  claude_after="$(cksum "$claude")"
 
-  assert_eq "$before" "$after" "expected repeated hook configuration to be stable"
+  assert_eq "$codex_before" "$codex_after" "expected repeated Codex configuration to be stable"
+  assert_eq "$claude_before" "$claude_after" "expected repeated Claude configuration to be stable"
   assert_eq 8 "$(owned_hook_count "$codex")" "expected no duplicate Codex handlers"
   assert_eq 1 "$(nvim_hook_count "$codex")" "expected no duplicate Neovim handlers"
+  assert_eq 11 "$(owned_hook_count "$claude")" "expected no duplicate Claude handlers"
+  assert_eq 1 "$(nvim_hook_count "$claude")" "expected no duplicate Claude Neovim handlers"
 }
 
 test_agent_status_config_quotes_home_with_spaces() {
-  local home codex bin log command nvim_command
+  local home codex claude bin log command nvim_command
 
   home="$TEST_TMPDIR/home with spaces"
   codex="$home/.codex/hooks.json"
+  claude="$home/.claude/settings.json"
   bin="$(make_status_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
   mkdir -p "$home/.zfuns"
@@ -185,6 +193,9 @@ test_agent_status_config_quotes_home_with_spaces() {
   assert_file_contains "$log" 'set-option -p -t %4 @taw_agent_state idle'
 
   nvim_command="$(jq -r '.hooks.SessionStart[0].hooks[] | select(.command | contains("nvim-tmux")) | .command' "$codex")"
+  HOME="$home" TMUX= bash -c "$nvim_command"
+
+  nvim_command="$(jq -r '.hooks.SessionStart[0].hooks[] | select(.command | contains("nvim-tmux")) | .command' "$claude")"
   HOME="$home" TMUX= bash -c "$nvim_command"
 }
 

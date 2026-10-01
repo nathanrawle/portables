@@ -386,10 +386,11 @@ The first use may ask macOS to allow the shell to automate Ghostty. Ghostty
 1.3 or newer is required, and the dashboard's view sessions are hidden from
 the `taw` project picker.
 
-## Codex Neovim Bridge
+## Codex and Claude Neovim Bridge
 
-Codex can discover and query a live Neovim without MCP when both processes are
-in the same exact tmux window. Each Neovim publishes its Unix RPC socket and PID
+Codex and Claude can discover and query a live Neovim without MCP when both
+processes are in the same exact tmux window. Each Neovim publishes its Unix RPC
+socket and PID
 in its pane's registration list; `nvim-tmux` filters panes by the caller's
 stable `window_id` and validates each socket against its PID before using it.
 
@@ -430,12 +431,13 @@ Run the normal symlink step and reinstall the agent hooks after updating:
 bash ./configure agent-status
 ```
 
-Restart Neovim so it publishes its pane metadata, restart Codex, then inspect
-and trust the changed hook with `/hooks`. The Codex `SessionStart` hook adds a
-compact routing and connection summary plus concise usage guidance as developer
+Restart Neovim so it publishes its pane metadata, restart Codex or Claude, then
+inspect and trust the changed hook with `/hooks`. Their `SessionStart` hooks add
+a compact routing and connection summary plus concise usage guidance as developer
 context. Live editor state remains available on demand through `nvim-tmux
-context`. The guidance tells Codex to use the exact Neovim pane conservatively
-for useful visual handoffs and to refresh only after a connection attempt fails.
+context`. The guidance tells Codex or Claude to use the exact Neovim pane
+conservatively for useful visual handoffs and to refresh only after a connection
+attempt fails.
 
 The hook is advisory and produces no output outside tmux or when no editor is
 available. The helper exposes fixed operations, but it is not a privilege

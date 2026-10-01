@@ -5,7 +5,9 @@ def owned_handler:
     | ($command | startswith("$HOME/.zfuns/taw-agent-status "))
       or ($command | startswith("\"$HOME/.zfuns/taw-agent-status\" "))
       or ($command == "$HOME/.zfuns/nvim-tmux codex-context")
-      or ($command == "\"$HOME/.zfuns/nvim-tmux\" codex-context"));
+      or ($command == "\"$HOME/.zfuns/nvim-tmux\" codex-context")
+      or ($command == "$HOME/.zfuns/nvim-tmux claude-context")
+      or ($command == "\"$HOME/.zfuns/nvim-tmux\" claude-context"));
 
 def without_owned_handlers:
   if ((.hooks? | type) != "array") then

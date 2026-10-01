@@ -3,7 +3,8 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" start claude", "timeout": 3 }
+          { "type": "command", "command": "\"$HOME/.zfuns/taw-agent-status\" start claude", "timeout": 3 },
+          { "type": "command", "command": "\"$HOME/.zfuns/nvim-tmux\" claude-context", "timeout": 3, "additionalContextLimit": 1000 }
         ]
       }
     ],
