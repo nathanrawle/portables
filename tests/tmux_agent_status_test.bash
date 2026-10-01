@@ -195,6 +195,15 @@ test_tmux_agent_source_labels() {
     assert_tmux_status_not_contains "$actual" 'source, other' "expected labels only in managed agents"
   done
   "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    set-option -w -t source:original @taw_agent_source_sessions 0
+  actual="$(render_tmux_agent_icon agents:original @window_status_name)"
+  assert_eq 0 "$actual" "expected a zero-valued source session name to remain visible"
+  for format in window-status-format window-status-current-format; do
+    actual="$(render_tmux_agent_icon agents:original "$format")"
+    assert_tmux_status_contains "$actual" '0 ' "expected numeric source names in managed tabs"
+    assert_tmux_status_not_contains "$actual" original "expected zero to replace the window label"
+  done
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
     set-option -wu -t source:original @taw_agent_source_sessions
   actual="$(render_tmux_agent_icon agents:original @window_status_name)"
   assert_eq original "$actual" "expected the window name when source metadata is missing"
