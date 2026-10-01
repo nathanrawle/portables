@@ -165,3 +165,49 @@ test_tmux_status_formats_show_agent_state_and_priority() {
 
 test_case "tmux agent status: formats show pane state and window priority" \
   test_tmux_status_formats_show_agent_state_and_priority
+
+
+test_tmux_agent_source_labels() {
+  local format actual
+
+  TMUX_AGENT_STATUS_BIN="$(command -v tmux || true)"
+  [[ -n "$TMUX_AGENT_STATUS_BIN" ]] || return 0
+  TMUX_AGENT_STATUS_SOCKET="portables-agent-source-labels-$$-$RANDOM"
+  trap cleanup_tmux_agent_status_server EXIT
+  mkdir -p "$TEST_TMPDIR/home"
+  HOME="$TEST_TMPDIR/home" "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    -f "$TMUX_AGENT_STATUS_CONFIG" new-session -d -s source -n original 'sleep 120'
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    new-session -d -s agents 'sleep 120'
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    set-option -t agents @taw_agent_link_session 1
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    link-window -d -s source:original -t agents:
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    set-option -w -t source:original @taw_agent_source_sessions 'source, other'
+
+  for format in window-status-format window-status-current-format; do
+    actual="$(render_tmux_agent_icon agents:original "$format")"
+    assert_tmux_status_contains "$actual" 'source, other' "expected source names in managed tabs"
+    assert_tmux_status_not_contains "$actual" original "expected source names to replace the window label"
+    actual="$(render_tmux_agent_icon source:original "$format")"
+    assert_tmux_status_contains "$actual" original "expected source tabs to retain window names"
+    assert_tmux_status_not_contains "$actual" 'source, other' "expected labels only in managed agents"
+  done
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    set-option -w -t source:original @taw_agent_source_sessions 0
+  actual="$(render_tmux_agent_icon agents:original @window_status_name)"
+  assert_eq 0 "$actual" "expected a zero-valued source session name to remain visible"
+  for format in window-status-format window-status-current-format; do
+    actual="$(render_tmux_agent_icon agents:original "$format")"
+    assert_tmux_status_contains "$actual" '0 ' "expected numeric source names in managed tabs"
+    assert_tmux_status_not_contains "$actual" original "expected zero to replace the window label"
+  done
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    set-option -wu -t source:original @taw_agent_source_sessions
+  actual="$(render_tmux_agent_icon agents:original @window_status_name)"
+  assert_eq original "$actual" "expected the window name when source metadata is missing"
+}
+
+test_case "tmux agent status: managed tabs display source session names" \
+  test_tmux_agent_source_labels

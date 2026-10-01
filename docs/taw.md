@@ -331,6 +331,20 @@ that it was answered. The next tool completion or turn stop publishes a new
 state. A process killed without its normal session-end hook may leave metadata
 until its tmux pane closes or another lifecycle event updates it.
 
+Claude background workers lose their tmux environment. Their state hooks use
+`taw-agent-status hook claude <idle|thinking|waiting>`, which reads the hook's
+session ID and resolves the original pane through Claude's local session records.
+The fallback supports only the default tmux server and reads session records from
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/`. It checks process start time,
+process ancestry, window/pane IDs, and the pane's existing Claude ownership before
+publishing. Missing, ambiguous, stale, or incompatible records leave status unchanged;
+background subagent events are ignored. Foreground hooks retain their existing path.
+This relies on Claude's internal metadata format, verified on macOS with the current
+sessions; unsupported process domains or changed formats are skipped safely.
+Session-start/end hooks remain foreground-only, so a background worker ending does
+not clear an open interactive pane. Reinstall the hooks after updating Portables;
+already-missed events are not replayed automatically.
+
 The tmux status bars show the same lifecycle state with the Nerd Font glyphs
 from the table above. Each pane tab shows that pane's state on its right-hand
 side. A window tab shows the highest-priority state among its panes using the
