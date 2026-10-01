@@ -20,7 +20,10 @@ the user's direction.
 
 At the start of each review run, record the PR number, head SHA, bot login, request time,
 and reaction target. Default the Codex bot login to `chatgpt-codex-connector` unless the
-user specifies another bot.
+user specifies another bot. Record `BOT_LOGIN` without a trailing `[bot]` for the GraphQL
+thread query below. GitHub REST payloads use `chatgpt-codex-connector[bot]`, while GraphQL
+uses `chatgpt-codex-connector`. The state helper accepts either spelling and matches both
+exact login forms in its REST filters.
 
 - For an automatic review already in flight, monitor the PR body: `--reaction-target pr`.
 - For an explicit request, monitor the new comment returned by the request command:
