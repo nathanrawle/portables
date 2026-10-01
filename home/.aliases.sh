@@ -44,18 +44,6 @@ alias killdocs='pkill -a -f dbt\ docs\ serve'
 # gcloud auth
 alias gauth='gcloud auth'
 
-alias gal-wfid='gcloud auth login --login-config=$HOME/.config/gcloud/blume_login_config.json'
-alias gadl-wfid='gcloud auth application-default login --login-config=$HOME/.config/gcloud/blume_login_config.json'
-alias glogin-wfid='gal-wfid && gadl-wfid'
-
-alias gal-gid='gcloud auth login'
-alias gadl-gid='gcloud auth application-default login'
-alias glogin-gid='gal-gid && gadl-gid'
-
-alias gal='() { if [[ $1 = wf ]]; then gal-wfid; else gal-gid; fi }'
-alias gadl='() { if [[ $1 = wf ]]; then gadl-wfid; else gadl-gid; fi }'
-alias glogin='() { if [[ $1 = wf ]]; then glogin-wfid; else glogin-gid; fi }'
-
 # gcloud config
 alias gconf='gcloud config'
 alias gcfg='gcloud config list'
@@ -112,3 +100,5 @@ alias bpy='~/monty/.venv/bin/bpython'
 alias ipy='~/monty/.venv/bin/ipython'
 alias lzg='lazygit'
 alias gPt='git push --tags'
+
+[[ -s ~/code/pportables/aliases.bash ]] && . ~/code/pportables/aliases.bash

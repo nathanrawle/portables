@@ -40,3 +40,9 @@ alias gconf='() {
     esac
   fi
 }'
+
+# gcloud auth
+alias gal='() { if [[ $1 = lgwf ]]; then gal-lgwf; elif [[ $1 = lg ]]; then gal-lg; elif [[ $1 = su ]]; then gal-su; else gal-lb; fi }'
+alias gadl='() { if [[ $1 = lgwf ]]; then gadl-lgwf; elif [[ $1 = lg ]]; then gadl-lg; elif [[ $1 = su ]]; then gadl-su; else gadl-lb; fi }'
+alias glogin='() { if [[ $1 = lgwf ]]; then glogin-lgwf; elif [[ $1 = lg ]]; then glogin-lg; elif [[ $1 = su ]]; then glogin-su; else glogin-lb; fi }'
+
