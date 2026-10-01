@@ -9,6 +9,7 @@ usage() {
   printf '       nvim-tmux [--pane %%N] [--pid PID] highlight PATH START:END [START:END ...]\n' >&2
   printf '       nvim-tmux [--pane %%N] [--pid PID] clear-highlights [PATH]\n' >&2
   printf '       nvim-tmux [--pane %%N] [--pid PID] codex-context\n' >&2
+  printf '       nvim-tmux [--pane %%N] [--pid PID] claude-context\n' >&2
 }
 
 die() {
@@ -319,8 +320,11 @@ run_clear_highlights() {
     '{connection: $connection, cleared: true}'
 }
 
-run_codex_context() {
-  local selected_status summary pids
+run_agent_context() {
+  local agent pane_key selected_status summary pids
+
+  agent="$1"
+  pane_key="${agent}_pane_id"
 
   select_candidate
   selected_status=$?
@@ -334,12 +338,12 @@ run_codex_context() {
     return 0
   fi
 
-  summary="$(jq -cn --arg codex_pane_id "$CALLER_PANE" \
+  summary="$(jq -cn --arg pane_key "$pane_key" --arg agent_pane_id "$CALLER_PANE" \
     --argjson connection "$(candidate_json "$SELECTED")" \
     '{
       routing: {
         window_id: $connection.window_id,
-        codex_pane_id: $codex_pane_id,
+        ($pane_key): $agent_pane_id,
         nvim_pane_id: $connection.pane_id
       },
       connection: {
@@ -371,7 +375,7 @@ done
 COMMAND="${1:-}"
 [[ -n "$COMMAND" ]] || { usage; exit 2; }
 shift
-if [[ "$COMMAND" == codex-context ]]; then
+if [[ "$COMMAND" == codex-context || "$COMMAND" == claude-context ]]; then
   [[ -n "${TMUX:-}" ]] || exit 0
   for command in tmux nvim jq ps realpath git od tr; do
     command -v "$command" >/dev/null 2>&1 || exit 0
@@ -379,15 +383,15 @@ if [[ "$COMMAND" == codex-context ]]; then
 fi
 require_commands
 if ! resolve_caller; then
-  [[ "$COMMAND" == codex-context ]] && exit 0
+  [[ "$COMMAND" == codex-context || "$COMMAND" == claude-context ]] && exit 0
   die "could not resolve the current tmux pane"
 fi
 validate_target_pane
 discover_candidates
 
-if [[ "$COMMAND" == codex-context ]]; then
+if [[ "$COMMAND" == codex-context || "$COMMAND" == claude-context ]]; then
   [[ $# -eq 0 ]] || { usage; exit 2; }
-  run_codex_context
+  run_agent_context "${COMMAND%-context}"
   exit 0
 fi
 

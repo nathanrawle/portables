@@ -257,6 +257,14 @@ EOF
   assert_eq false "$(jq -r 'has("editor")' <<<"$summary")" \
     "startup context should not include stale editor state"
 
+  output="$(run_bridge "$tmux_environment" "$agent" claude-context)"
+  summary="$(sed -n 's/^A live Neovim is available in this exact tmux window\. Connection context: //p' \
+    <<<"$output")"
+  assert_eq "$agent" "$(jq -r '.routing.claude_pane_id' <<<"$summary")" \
+    "unexpected Claude pane in startup context"
+  assert_eq "$editor" "$(jq -r '.routing.nvim_pane_id' <<<"$summary")" \
+    "unexpected Neovim pane in Claude startup context"
+
   stdin_guard_path="$TEST_TMPDIR/stdin-guard-bin"
   real_nvim="$(command -v nvim)"
   mkdir -p "$stdin_guard_path"
