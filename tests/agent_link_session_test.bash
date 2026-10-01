@@ -331,3 +331,91 @@ test_case "agent link session: refuses an unowned agents session" \
 test_case "agent link session: clears respawned pane metadata" \
   test_agent_link_session_clears_respawned_pane
 test_case "agent link session: safe bindings load" test_agent_link_bindings_load
+
+
+test_agent_link_session_labels_and_renumbers() {
+  local bin first middle last window label
+  local -a panes windows
+
+  AGENT_LINK_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$AGENT_LINK_REAL_TMUX" ]] || return 0
+  AGENT_LINK_SOCKET="portables-agent-link-labels-$$-$RANDOM"
+  trap cleanup_agent_link_server EXIT
+  : >"$TEST_TMPDIR/tmux.log"
+  bin="$(make_agent_link_tmux_wrapper "$TEST_TMPDIR/wrapper")"
+
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" -f /dev/null \
+    new-session -d -s source -n first 'sleep 300'
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" set-option -g base-index 1
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" set-option -g renumber-windows on
+  for window in middle last; do
+    "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" new-window -d \
+      -t source: -n "$window" 'sleep 300'
+  done
+  panes=()
+  windows=()
+  for window in first middle last; do
+    panes+=( "$("$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+      display-message -p -t "source:$window" '#{pane_id}')" )
+    windows+=( "$("$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+      display-message -p -t "source:$window" '#{window_id}')" )
+  done
+  first="${windows[0]}"
+  middle="${windows[1]}"
+  last="${windows[2]}"
+  for window in "${panes[@]}"; do
+    run_agent_link_status "$bin" start codex "$window"
+  done
+
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" new-session -d -s other 'sleep 300'
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" link-window -d -s "$first" -t other:
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" new-session -d -s dashboard 'sleep 300'
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    set-option -t dashboard @taw_agent_dashboard_session 1
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" link-window -d -s "$first" -t dashboard:
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" split-window -d -t "source:$first" 'sleep 300'
+  run_agent_link_status "$bin" sync
+  label="$("$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    show-option -wqv -t "$first" @taw_agent_source_sessions)"
+  assert_eq 'other, source' "$label" "expected unique source names without managed views"
+
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" rename-session -t source renamed
+  run_agent_link_status "$bin" sync
+  label="$("$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    show-option -wqv -t "$first" @taw_agent_source_sessions)"
+  assert_eq 'other, renamed' "$label" "expected source session renaming to refresh labels"
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" unlink-window -t "other:$first"
+  run_agent_link_status "$bin" sync
+  label="$("$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    show-option -wqv -t "$first" @taw_agent_source_sessions)"
+  assert_eq renamed "$label" "expected removed source links to disappear from labels"
+
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" move-window -s "agents:$last" -t agents:9
+  run_agent_link_status "$bin" sync
+  label="$("$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    list-windows -t agents -F '#{window_index}:#{window_id}')"
+  assert_eq "1:$first"$'\n'"2:$middle"$'\n'"3:$last" "$label" \
+    "expected synchronization to repair existing index gaps in order"
+
+  run_agent_link_status "$bin" unlink "$middle"
+  label="$("$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    list-windows -t agents -F '#{window_index}:#{window_id}')"
+  assert_eq "1:$first"$'\n'"2:$last" "$label" "expected managed unlink to close the index gap"
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    display-message -p -t "renamed:$middle" '#{window_id}' >/dev/null
+
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" kill-window -t "renamed:$first"
+  run_agent_link_status "$bin" sync
+  label="$("$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    list-windows -t agents -F '#{window_index}:#{window_id}')"
+  assert_eq "1:$last" "$label" "expected source killing to preserve consecutive indexes"
+  run_agent_link_status "$bin" unlink "$last"
+  if "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" has-session -t agents 2>/dev/null; then
+    fail "expected unlinking the last managed window to remove agents"
+  fi
+  "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" \
+    display-message -p -t "renamed:$last" '#{window_id}' >/dev/null
+}
+
+test_case "agent link session: source labels and consecutive indexes" \
+  test_agent_link_session_labels_and_renumbers
