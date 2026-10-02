@@ -4954,8 +4954,10 @@ test_picker_enter_transform_parses_empty_fzf_placeholder() {
 
   bind="$(tr '\t' '\n' <"$args_log" | grep '^--bind=enter:transform:' | head -n 1)"
   transform="${bind#--bind=enter:transform:}"
+  assert_file_contains "$args_log" 'query={q};'
   empty_placeholder="''"
   expanded="${transform//\{2\}/$empty_placeholder}"
+  expanded="${expanded//\{q\}/\'feature\/new\'}"
   output="$(FZF_MATCH_COUNT=0 FZF_QUERY=feature/new zsh -f -c "$expanded")"
   assert_eq 'print(create)+accept' "$output" \
     "expected an empty fzf placeholder to reach the create action"
