@@ -130,15 +130,23 @@ test_runner_reports_worker_crashes() {
 }
 
 test_runner_interrupts_parallel_workers() {
-  local test_file marker output rc terminated
+  local test_file fixture_file marker output rc kind pid deadline
+  local -a pids survivors
 
   test_file="$TEST_TMPDIR/interrupt_test.bash"
+  fixture_file="$TEST_TMPDIR/interrupt_fixture.bash"
   marker="$TEST_TMPDIR/interrupt-marker"
+  cat >"$fixture_file" <<'EOF'
+trap 'exit 143' TERM
+# Natural completion must outlast the readiness and termination deadlines.
+sleep 30 &
+sleeper=$!
+printf 'pid\t%s\npid\t%s\nready\n' "$$" "$sleeper" >>"$RUNNER_MARKER"
+wait "$sleeper"
+EOF
   cat >"$test_file" <<'EOF'
 test_fixture_wait() {
-  trap 'printf "terminated\n" >>"$RUNNER_MARKER"; exit 143' TERM
-  printf 'ready\n' >>"$RUNNER_MARKER"
-  sleep 5
+  bash "$RUNNER_FIXTURE"
 }
 
 test_case 'fixture: first worker waits' test_fixture_wait
@@ -147,7 +155,7 @@ EOF
 
   if output="$(
     RUNNER_UNDER_TEST="$RUNNER_UNDER_TEST" TEST_FILE="$test_file" \
-      RUNNER_MARKER="$marker" bash -c '
+      RUNNER_MARKER="$marker" RUNNER_FIXTURE="$fixture_file" bash -c '
         target=$$
         (
           attempts=0
@@ -166,9 +174,30 @@ EOF
     rc=$?
   fi
 
+  pids=()
+  while IFS=$'\t' read -r kind pid; do
+    [[ "$kind" != pid ]] || pids+=( "$pid" )
+  done <"$marker"
+  deadline=$((SECONDS + 5))
+  while :; do
+    survivors=()
+    for pid in "${pids[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        survivors+=( "$pid" )
+      fi
+    done
+    [[ ${#survivors[@]} -gt 0 && $SECONDS -lt $deadline ]] || break
+    sleep 0.01
+  done
+  if [[ ${#survivors[@]} -gt 0 ]]; then
+    for pid in "${survivors[@]}"; do
+      kill -TERM "$pid" 2>/dev/null || true
+    done
+    fail "fixture processes survived interruption: ${survivors[*]}"
+  fi
+  assert_eq 2 "$(grep -c '^ready$' "$marker")" "fixtures did not reach readiness"
+  assert_eq 4 "${#pids[@]}" "fixture process IDs were not recorded"
   assert_eq 130 "$rc" "unexpected interrupted runner status"
-  terminated="$(grep -c '^terminated$' "$marker" 2>/dev/null || true)"
-  assert_eq 2 "$terminated" "parallel workers were not terminated"
   case "$output" in
     *'test(s),'*) fail "interrupted runner reported a completed suite" ;;
   esac
