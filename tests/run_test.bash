@@ -2,6 +2,15 @@
 
 RUNNER_UNDER_TEST="$REPO_ROOT/tests/run"
 
+runner_fixture_is_running() {
+  local pid="$1" state
+
+  kill -0 "$pid" 2>/dev/null || return 1
+  state="$(ps -o stat= -p "$pid" 2>/dev/null)" || return 0
+  # Orphaned zombies have exited even when their parent has not reaped them.
+  [[ ! "$state" =~ ^[[:space:]]*Z ]]
+}
+
 assert_runner_output_contains() {
   local output="$1"
   local expected="$2"
@@ -182,7 +191,7 @@ EOF
   while :; do
     survivors=()
     for pid in "${pids[@]}"; do
-      if kill -0 "$pid" 2>/dev/null; then
+      if runner_fixture_is_running "$pid"; then
         survivors+=( "$pid" )
       fi
     done
@@ -201,6 +210,24 @@ EOF
   case "$output" in
     *'test(s),'*) fail "interrupted runner reported a completed suite" ;;
   esac
+}
+
+test_runner_fixture_liveness_handles_zombies() {
+  local fixture_state
+
+  ps() {
+    [[ "$*" == "-o stat= -p $$" ]] || return 2
+    [[ "$fixture_state" != unavailable ]] || return 1
+    printf '%s\n' "$fixture_state"
+  }
+
+  fixture_state=' Z+'
+  if runner_fixture_is_running "$$"; then
+    fail 'zombie fixture treated as running'
+  fi
+  for fixture_state in S unavailable; do
+    runner_fixture_is_running "$$" || fail "live fixture ignored: $fixture_state"
+  done
 }
 
 test_runner_does_not_leak_job_override() {
@@ -232,5 +259,7 @@ test_case 'test runner: reports worker crashes' \
   test_runner_reports_worker_crashes
 test_case 'test runner: interrupts parallel workers' \
   test_runner_interrupts_parallel_workers
+test_case 'test runner: fixture liveness distinguishes zombies' \
+  test_runner_fixture_liveness_handles_zombies
 test_case 'test runner: does not leak job override' \
   test_runner_does_not_leak_job_override
