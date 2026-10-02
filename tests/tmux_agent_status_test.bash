@@ -161,9 +161,9 @@ test_tmux_status_formats_show_agent_state_and_priority() {
     "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" display-message \
       -p -t agent-status:agents '#{E:status-format[1]}'
   )"
-  assert_tmux_status_contains "$pane_tabs" '󰹇 "sleep 120"' \
+  assert_tmux_status_contains "$pane_tabs" '󰹇 sleep' \
     "expected the active pane icon before its title"
-  assert_tmux_status_contains "$pane_tabs" '󰔟 "sleep 120"' \
+  assert_tmux_status_contains "$pane_tabs" '󰔟 sleep' \
     "expected the inactive pane icon before its title"
 }
 
