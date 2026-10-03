@@ -6,7 +6,8 @@ layout_tmux() {
 
 setup_layout_server() {
   export HOME="$TEST_TMPDIR/home"
-  mkdir -p "$HOME/.zfuns"
+  mkdir -p "$HOME/.zfuns" "$HOME/.config/tmux"
+  ln -s "$REPO_ROOT/home/.config/tmux/reshape-pane" "$HOME/.config/tmux/reshape-pane"
   printf '#!/bin/sh\nexit 0\n' >"$HOME/.zfuns/taw-agent-status"
   chmod +x "$HOME/.zfuns/taw-agent-status"
   TMUX_LAYOUT_SOCKET="portables-layout-$$-$RANDOM"
@@ -16,11 +17,16 @@ setup_layout_server() {
 }
 
 create_layout_quadrants() {
-  local window="$1" first second third
+  local window="$1" first second third first_axis=-h second_axis=-v
+  if [[ "${2:-columns}" == rows ]]; then
+    first_axis=-v
+    second_axis=-h
+  fi
   first="$(layout_tmux new-window -d -P -F '#{pane_id}' -n "$window" 'sleep 120')"
-  second="$(layout_tmux split-window -dh -P -F '#{pane_id}' -t "$first" 'sleep 120')"
-  third="$(layout_tmux split-window -dv -P -F '#{pane_id}' -t "$first" 'sleep 120')"
-  LAYOUT_MOVED="$(layout_tmux split-window -dv -P -F '#{pane_id}' -t "$second" 'sleep 120')"
+  second="$(layout_tmux split-window -d "$first_axis" -P -F '#{pane_id}' -t "$first" 'sleep 120')"
+  third="$(layout_tmux split-window -d "$second_axis" -P -F '#{pane_id}' -t "$first" 'sleep 120')"
+  LAYOUT_MOVED="$(layout_tmux split-window -d "$second_axis" -P -F '#{pane_id}' -t "$second" 'sleep 120')"
+  LAYOUT_FIRST="$first"
   layout_tmux resize-pane -t "$third" -y 17
   layout_tmux resize-pane -t "$LAYOUT_MOVED" -y 21
   layout_tmux select-window -t "$LAYOUT_MOVED"
@@ -38,49 +44,32 @@ run_layout_binding() {
   layout_tmux source-file -t "$pane" "$TEST_TMPDIR/binding.conf"
 }
 
-layout_geometry() {
-  layout_tmux list-panes -t "$1" -F '#{pane_left},#{pane_top},#{pane_width},#{pane_height}' | sort
-}
-
-assert_layout_edge() {
-  local pane="$1" direction="$2" actual
-  case "$direction" in
-    left) actual="$(layout_tmux display-message -p -t "$pane" '#{pane_at_left}:#{pane_at_top}:#{pane_at_bottom}')" ;;
-    right) actual="$(layout_tmux display-message -p -t "$pane" '#{pane_at_right}:#{pane_at_top}:#{pane_at_bottom}')" ;;
-    up) actual="$(layout_tmux display-message -p -t "$pane" '#{pane_at_top}:#{pane_at_left}:#{pane_at_right}')" ;;
-    down) actual="$(layout_tmux display-message -p -t "$pane" '#{pane_at_bottom}:#{pane_at_left}:#{pane_at_right}')" ;;
-  esac
-  assert_eq '1:1:1' "$actual" "expected full-span $direction edge"
-  assert_eq 1 "$(layout_tmux display-message -p -t "$pane" '#{pane_active}')" \
-    'expected moved pane to remain active'
-}
-
-test_layout_edges_match_native_equalisation() {
-  local direction flags before expected actual reference
+test_layout_directional_middle_columns_and_rows() {
+  local direction shape moved before span position size total
   command -v tmux >/dev/null 2>&1 || return 0
   setup_layout_server
-  for direction in left right up down; do
-    create_layout_quadrants "actual-$direction"
-    actual="$LAYOUT_MOVED"
-    before="$(layout_tmux list-panes -t "$actual" -F '#{pane_id}:#{pane_pid}' | sort)"
-    create_layout_quadrants "reference-$direction"
-    reference="$LAYOUT_MOVED"
-    case "$direction" in
-      left) flags=-bhf ;;
-      right) flags=-hf ;;
-      up) flags=-bvf ;;
-      down) flags=-vf ;;
-    esac
-    layout_tmux move-pane "$flags" -s "$reference" -t ':.+'
-    layout_tmux select-layout -E -t "$reference"
-    layout_tmux select-layout -E -t "$reference"
-    expected="$(layout_geometry "$reference")"
-    run_layout_binding "S-$direction" "$actual"
-    assert_layout_edge "$actual" "$direction"
-    assert_eq "$before" "$(layout_tmux list-panes -t "$actual" -F '#{pane_id}:#{pane_pid}' | sort)" \
-      'expected pane identities and processes to survive'
-    assert_eq "$expected" "$(layout_geometry "$actual")" \
-      'expected geometry equivalent to two E presses'
+  for shape in columns rows; do
+    for direction in left right up down; do
+      create_layout_quadrants "middle-$shape-$direction" "$shape"
+      case "$direction" in
+        left|up) moved="$LAYOUT_MOVED" ;;
+        right|down) moved="$LAYOUT_FIRST" ;;
+      esac
+      before="$(layout_tmux list-panes -t "$moved" -F '#{pane_id}:#{pane_pid}' | sort)"
+      run_layout_binding "S-$direction" "$moved"
+      if [[ "$direction" == left || "$direction" == right ]]; then
+        read -r position size total span < <(layout_tmux display-message -p -t "$moved" \
+          '#{pane_left} #{pane_width} #{window_width} #{==:#{pane_height},#{window_height}}')
+      else
+        read -r position size total span < <(layout_tmux display-message -p -t "$moved" \
+          '#{pane_top} #{pane_height} #{window_height} #{==:#{pane_width},#{window_width}}')
+      fi
+      assert_eq 1 "$span" 'expected full-span pane'
+      (( position > 0 && position + size < total )) || fail 'expected middle position'
+      (( size >= total / 3 - 1 && size <= total / 3 + 1 )) || fail 'expected one-third size'
+      assert_eq 1 "$(layout_tmux display-message -p -t "$moved" '#{pane_active}')"
+      assert_eq "$before" "$(layout_tmux list-panes -t "$moved" -F '#{pane_id}:#{pane_pid}' | sort)"
+    done
   done
 }
 
@@ -107,32 +96,45 @@ test_layout_zoom_and_marked_pane() {
   moved="$LAYOUT_MOVED"
   layout_tmux resize-pane -Z -t "$moved"
   run_layout_binding S-left "$moved"
-  assert_layout_edge "$moved" left
+  assert_eq 1 "$(layout_tmux display-message -p -t "$moved" '#{==:#{pane_height},#{window_height}}')"
+  assert_eq 1 "$(layout_tmux display-message -p -t "$moved" '#{pane_active}')"
   assert_eq 0 "$(layout_tmux display-message -p -t "$moved" '#{window_zoomed_flag}')"
   assert_eq "$before" "$(layout_tmux display-message -p -t "$marked" '#{window_layout}:#{pane_pid}')" \
     'expected marked pane in another window to stay untouched'
 }
 
-test_layout_middle_column_sequence() {
-  local middle right left width height window_height
+test_layout_three_pane_middle_column() {
+  local left upper moved width peer_width pane
   command -v tmux >/dev/null 2>&1 || return 0
   setup_layout_server
-  create_layout_quadrants middle
-  middle="$LAYOUT_MOVED"
-  right="$(layout_tmux list-panes -t "$middle" -F '#{pane_id}' | sed -n '2p')"
-  run_layout_binding S-right "$middle"
-  run_layout_binding S-right "$right"
-  left="$(layout_tmux display-message -p -t "$middle" '#{pane_left}')"
-  width="$(layout_tmux display-message -p -t "$middle" '#{pane_width}')"
-  height="$(layout_tmux display-message -p -t "$middle" '#{pane_height}')"
-  window_height="$(layout_tmux display-message -p -t "$middle" '#{window_height}')"
-  [[ "$left" -gt 0 ]] || fail 'expected middle column to have space on its left'
-  assert_eq "$window_height" "$height" 'expected full-height middle column'
-  assert_eq "$width" "$(layout_tmux display-message -p -t "$right" '#{pane_width}')" \
-    'expected equal middle and right column widths'
+  left="$(layout_tmux display-message -p -t layout:1 '#{pane_id}')"
+  upper="$(layout_tmux split-window -dh -P -F '#{pane_id}' -t "$left" 'sleep 120')"
+  moved="$(layout_tmux split-window -dv -P -F '#{pane_id}' -t "$upper" 'sleep 120')"
+  run_layout_binding S-left "$moved"
+  width="$(layout_tmux display-message -p -t "$moved" '#{pane_width}')"
+  for pane in "$left" "$upper" "$moved"; do
+    assert_eq 1 "$(layout_tmux display-message -p -t "$pane" '#{==:#{pane_height},#{window_height}}')"
+    peer_width="$(layout_tmux display-message -p -t "$pane" '#{pane_width}')"
+    (( peer_width >= width - 1 && peer_width <= width + 1 )) || fail 'expected equal column widths within rounding'
+  done
+  assert_eq 1 "$(layout_tmux display-message -p -t "$moved" '#{&&:#{>:#{pane_left},0},#{!:#{pane_at_right}}}')"
 }
 
-test_case 'tmux layout: edge moves match two native E presses' test_layout_edges_match_native_equalisation
+test_layout_full_span_pane_moves_to_edge() {
+  local left moved before
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  left="$(layout_tmux display-message -p -t layout:1 '#{pane_id}')"
+  moved="$(layout_tmux split-window -dh -P -F '#{pane_id}' -t "$left" 'sleep 120')"
+  before="$(layout_tmux list-panes -t "$moved" -F '#{pane_id}:#{pane_pid}' | sort)"
+  run_layout_binding S-left "$moved"
+  assert_eq 1 "$(layout_tmux display-message -p -t "$moved" '#{pane_at_left}')"
+  assert_eq 1 "$(layout_tmux display-message -p -t "$moved" '#{==:#{pane_height},#{window_height}}')"
+  assert_eq "$before" "$(layout_tmux list-panes -t "$moved" -F '#{pane_id}:#{pane_pid}' | sort)"
+}
+
+test_case 'tmux layout: directional moves create equal middle columns and rows' test_layout_directional_middle_columns_and_rows
 test_case 'tmux layout: single pane is unchanged' test_layout_single_pane_is_unchanged
 test_case 'tmux layout: zoom and marked pane stay correctly scoped' test_layout_zoom_and_marked_pane
-test_case 'tmux layout: successive edge moves create a middle column' test_layout_middle_column_sequence
+test_case 'tmux layout: three panes become equal full-height columns' test_layout_three_pane_middle_column
+test_case 'tmux layout: full-span panes fall back to edge movement' test_layout_full_span_pane_moves_to_edge

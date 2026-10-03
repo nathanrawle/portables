@@ -1,35 +1,50 @@
 # Reshaping tmux panes
 
 The prefix is Ctrl+backslash. Press it, release it, then press Shift+arrow to
-pull the active pane to that edge of the window:
+reshape the active pane beside its neighbour:
 
 | Key after prefix | Result |
 | --- | --- |
-| Shift+Left | Full-height column on the left |
-| Shift+Right | Full-height column on the right |
-| Shift+Up | Full-width row at the top |
-| Shift+Down | Full-width row at the bottom |
+| Shift+Left/Right | Full-height column to the left/right of its former vertical neighbour |
+| Shift+Up/Down | Full-width row above/below its former horizontal neighbour |
 
-The pane and its running program survive. Its old space collapses, and the
-other panes retain their split structure. The moved pane stays focused; a
-zoomed window becomes unzoomed so the new layout is visible. A single-pane
-window stays unchanged.
+For example, select D in either layout and press prefix, then Shift+Left:
 
-Each move initially uses tmux's default half-size split, then runs
-`select-layout -E` twice on the moved pane, exactly like pressing prefix+E
-twice. This equalises nearby split groups according to tmux's usual behaviour;
-it does not recursively equalise every group in the window.
+```text
+Three panes                 Four panes
+┌─────┬─────┐               ┌─────┬─────┐
+│     │  B  │               │  A  │  B  │
+│  A  ├─────┤               ├─────┼─────┤
+│     │  D  │               │  C  │  D  │
+└─────┴─────┘               └─────┴─────┘
+        ↓                           ↓
+┌─────┬─────┬─────┐         ┌─────┬─────┬─────┐
+│     │     │     │         │  A  │     │     │
+│  A  │  D  │  B  │         ├─────┤  D  │  B  │
+│     │     │     │         │  C  │     │     │
+└─────┴─────┴─────┘         └─────┴─────┴─────┘
+```
 
-To turn the bottom-right pane of a four-pane grid into a middle column:
+Shift+Right instead places B in the middle and D on the right. Up/Down apply
+that same rule to rows. The helper prefers the neighbour above for column
+moves, or the neighbour on the left for row moves, falling back to the other
+side. It first promotes that neighbour to the nearest window edge, then
+inserts the active pane on the requested side. If there is no perpendicular
+neighbour, the active pane moves directly to the requested edge.
 
-1. Select that pane and press prefix, then Shift+Right.
-2. Select the pane above its original position and press prefix, then Shift+Right.
-3. The original pane is now the full-height middle column. The two E operations
-   make the three columns approximately equal in width.
+Pane IDs and running programs survive. The vacated spaces collapse, retaining
+the remaining split structure. The moved pane stays focused; a zoomed window
+becomes unzoomed so the new layout is visible. A single-pane window stays
+unchanged.
+
+Each move finishes with `select-layout -E` twice on the moved pane. In the
+examples above, this makes the three columns equal in width, allowing for
+cell rounding. It does not recursively equalise every nested group.
 
 Ctrl+Shift+Left/Right still swaps panes between existing slots. For manual
 resizing, prefix then Ctrl+arrow adjusts by one cell, or Alt+arrow by five.
 To set a particular width, select the pane and use the tmux command prompt
 (prefix then Ctrl+backslash), entering `resize-pane -x 33%`.
 
-After installing the updated configuration, reload it with prefix then `r`.
+Link both the configuration and its helper with `relink .config/tmux`, then
+reload with prefix followed by `r`.
