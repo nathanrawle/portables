@@ -5,8 +5,10 @@ set -euo pipefail
 pane="$1"
 direction="$2"
 case "$direction" in
-  left|right) axis=h; neighbours=(up-of down-of) ;;
-  up|down) axis=v; neighbours=(left-of right-of) ;;
+  left) axis=h; opposite=right; neighbours=(up-of down-of) ;;
+  right) axis=h; opposite=left; neighbours=(up-of down-of) ;;
+  up) axis=v; opposite=bottom; neighbours=(left-of right-of) ;;
+  down) axis=v; opposite=top; neighbours=(left-of right-of) ;;
   *) printf 'Unknown pane direction: %s\n' "$direction" >&2; exit 2 ;;
 esac
 
@@ -17,32 +19,51 @@ read -r window count zoomed < <(
 [[ "$zoomed" -eq 0 ]] || tmux resize-pane -Z -t "$pane"
 tmux select-pane -t "$pane"
 
-peer=
-for neighbour in "${neighbours[@]}"; do
-  peer="$(tmux display-message -p -t "$window.{$neighbour}" '#{pane_id}' 2>/dev/null || true)"
-  [[ -z "$peer" || "$peer" == "$pane" ]] || break
-  peer=
-done
+case "$direction" in
+  up) edge_name=top; neighbour_name=up-of ;;
+  down) edge_name=bottom; neighbour_name=down-of ;;
+  *) edge_name="$direction"; neighbour_name="$direction-of" ;;
+esac
+read -r at_edge at_opposite width height window_width window_height < <(
+  tmux display-message -p -t "$pane" \
+    "#{pane_at_$edge_name} #{pane_at_$opposite} #{pane_width} #{pane_height} #{window_width} #{window_height}"
+)
+if [[ "$at_edge" -eq 1 ]]; then
+  [[ "$zoomed" -eq 0 ]] || tmux resize-pane -Z -t "$pane"
+  exit 0
+fi
 
 before=
 case "$direction" in left|up) before=b ;; esac
+peer=
+# Restrict promotion to corner panes so interior moves stay beside their neighbour.
+if [[ "$at_opposite" -eq 1 ]] && \
+  { [[ "$axis" == h && "$height" -lt "$window_height" ]] ||
+    [[ "$axis" == v && "$width" -lt "$window_width" ]]; }; then
+  for neighbour in "${neighbours[@]}"; do
+    peer="$(tmux display-message -p -t "$window.{$neighbour}" '#{pane_id}' 2>/dev/null || true)"
+    [[ -z "$peer" || "$peer" == "$pane" ]] || break
+    peer=
+  done
+fi
+
 if [[ -n "$peer" ]]; then
-  read -r x y width height window_width window_height < <(
-    tmux display-message -p -t "$pane" \
-      '#{pane_left} #{pane_top} #{pane_width} #{pane_height} #{window_width} #{window_height}'
-  )
   edge=
-  if [[ "$axis" == h ]]; then
-    (( 2 * x + width >= window_width )) || edge=b
-  else
-    (( 2 * y + height >= window_height )) || edge=b
-  fi
-  # Promoting the peer first works for grids built with either rows or columns first.
+  case "$direction" in right|down) edge=b ;; esac
+  # Promoting the peer first handles corner grids built with either split order.
   tmux move-pane "-${axis}f${edge}" -s "$peer" -t "$pane"
   tmux move-pane "-${axis}${before}" -s "$pane" -t "$peer"
 else
-  target="$(tmux display-message -p -t "$window.{next}" '#{pane_id}')"
-  tmux move-pane "-${axis}f${before}" -s "$pane" -t "$target"
+  target="$(tmux display-message -p -t "$window.{$neighbour_name}" '#{pane_id}')"
+  read -r target_width target_height < <(
+    tmux display-message -p -t "$target" '#{pane_width} #{pane_height}'
+  )
+  if [[ "$axis" == h && "$height" -eq "$window_height" && "$target_height" -eq "$window_height" ]] ||
+    [[ "$axis" == v && "$width" -eq "$window_width" && "$target_width" -eq "$window_width" ]]; then
+    tmux swap-pane -s "$pane" -t "$target"
+  else
+    tmux move-pane "-${axis}${before}" -s "$pane" -t "$target"
+  fi
 fi
 
 tmux select-pane -t "$pane"
