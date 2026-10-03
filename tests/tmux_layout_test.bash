@@ -144,6 +144,7 @@ test_layout_failure_restores_order_geometry_and_zoom() {
   command -v tmux >/dev/null 2>&1 || return 0
   setup_layout_server
   create_transition_layout horizontal rollback
+  layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
   layout_tmux select-pane -t "$FOUR"
   layout_tmux resize-pane -Z -t "$FOUR"
   before="$(layout_tmux display-message -p -t "$FOUR" '#{window_layout}')"
@@ -169,6 +170,7 @@ WRAPPER
   assert_eq "$order" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}')"
   assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{window_zoomed_flag}')"
   assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_active}')"
+  assert_eq "left $TWO" "$(origin_hint "$FOUR")" 'failed movement should preserve the hint'
 }
 
 test_layout_equivalent_nested_containers() {
@@ -326,6 +328,99 @@ test_layout_local_pairing_with_neighbouring_group() {
   assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
 }
 
+create_origin_layout() {
+  local axis="$1" side="$2" across=-h within=-v
+  local -a placement
+  placement=()
+  if [[ "$axis" == vertical ]]; then across=-v; within=-h; fi
+  if [[ "$side" == before ]]; then placement=(-b); fi
+  ONE="$(layout_tmux new-window -d -P -F '#{pane_id}' -n "origin-$axis-$side" 'sleep 120')"
+  TWO="$(layout_tmux split-window -d "$across" -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+  THREE="$(layout_tmux split-window -d "$across" -f -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+  FOUR="$(layout_tmux split-window -d "$within" "${placement[@]}" -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
+}
+
+origin_hint() {
+  layout_tmux display-message -p -t "$1" '#{@reshape_origin}'
+}
+
+test_layout_origin_guides_next_reverse_entry() {
+  local axis side forward backward initial expanded hint before
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  for axis in horizontal vertical; do
+    for side in before after; do
+      create_origin_layout "$axis" "$side"
+      case "$axis:$side" in
+        horizontal:before) forward=S-up; backward=S-down ;;
+        horizontal:after) forward=S-down; backward=S-up ;;
+        vertical:before) forward=S-left; backward=S-right ;;
+        vertical:after) forward=S-right; backward=S-left ;;
+      esac
+      if [[ "$side" == before ]]; then initial='143|123'; expanded='444|123'
+      else initial='123|143'; expanded='123|444'; fi
+      before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+      layout_tmux select-pane -t "$THREE"
+      run_layout_binding "$forward" "$FOUR"
+      assert_transition_layout "$expanded" "$axis"
+      hint="${backward#S-} $TWO"
+      assert_eq "$hint" "$(origin_hint "$FOUR")"
+      run_layout_binding "$forward" "$FOUR"
+      assert_eq "$hint" "$(origin_hint "$FOUR")" 'boundary no-op should preserve the hint'
+      layout_tmux resize-pane -t "$TWO" -x 25 -y 10
+      layout_tmux select-pane -t "$THREE"
+      run_layout_binding "$backward" "$FOUR"
+      assert_transition_layout "$initial" "$axis"
+      assert_eq '' "$(origin_hint "$FOUR")" 'successful entry should consume the hint'
+      assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_active}')"
+      assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+    done
+  done
+}
+
+test_layout_stale_origins_fall_back() {
+  local scenario destination expected
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  for scenario in killed moved hidden malformed; do
+    create_origin_layout horizontal before
+    run_layout_binding S-up "$FOUR"
+    expected='14|13'
+    case "$scenario" in
+      killed) layout_tmux kill-pane -t "$TWO" ;;
+      moved)
+        destination="$(layout_tmux new-window -d -P -F '#{pane_id}' 'sleep 120')"
+        layout_tmux join-pane -d -s "$TWO" -t "$destination" ;;
+      hidden)
+        layout_tmux join-pane -dv -s "$TWO" -t "$THREE"
+        expected='14|13|12' ;;
+      malformed)
+        layout_tmux set-option -p -t "$FOUR" @reshape_origin 'invalid hint'
+        expected='124|123' ;;
+    esac
+    run_layout_binding S-down "$FOUR"
+    assert_transition_layout "$expected" horizontal
+    assert_eq '' "$(origin_hint "$FOUR")" 'stale hints should be discarded'
+  done
+}
+
+test_layout_origin_is_bounded_and_pane_scoped() {
+  local independent
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  independent="$(layout_tmux display-message -p -t layout:1 '#{pane_id}')"
+  layout_tmux set-option -p -t "$independent" @reshape_origin 'left %999999'
+  create_origin_layout horizontal before
+  run_layout_binding S-up "$FOUR"
+  run_layout_binding S-right "$FOUR"
+  assert_eq "left $THREE" "$(origin_hint "$FOUR")" 'another expansion should replace the old hint'
+  run_layout_binding S-left "$FOUR"
+  assert_eq '' "$(origin_hint "$FOUR")" 'the next successful entry should clear the hint'
+  assert_eq 'left %999999' "$(origin_hint "$independent")" 'other panes should keep their own hint'
+  run_layout_binding S-left "$independent"
+  assert_eq '' "$(origin_hint "$independent")" 'a no-op should discard an invalid origin'
+}
+
 test_case 'tmux layout: entry-first horizontal and vertical split transitions' test_layout_entry_first_transition_sequences
 test_case 'tmux layout: single pane is unchanged' test_layout_single_pane_is_unchanged
 test_case 'tmux layout: zoom and marked pane stay correctly scoped' test_layout_zoom_and_marked_pane
@@ -336,3 +431,6 @@ test_case 'tmux layout: invalid layout input leaves panes untouched' test_layout
 test_case 'tmux layout: a middle sibling enters first and expands on the next press' test_layout_middle_sibling_enters_then_expands
 test_case 'tmux layout: larger groups pair locally without moving outer panes' test_layout_larger_groups_pair_locally
 test_case 'tmux layout: local pairing can target a neighbouring group' test_layout_local_pairing_with_neighbouring_group
+test_case 'tmux layout: origin guides the next reverse entry in all directions' test_layout_origin_guides_next_reverse_entry
+test_case 'tmux layout: stale origins fall back to structural selection' test_layout_stale_origins_fall_back
+test_case 'tmux layout: origin hints are bounded and pane scoped' test_layout_origin_is_bounded_and_pane_scoped

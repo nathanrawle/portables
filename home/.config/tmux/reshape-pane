@@ -9,13 +9,13 @@ case "$direction" in
   *) printf 'Unknown pane direction: %s\n' "$direction" >&2; exit 2 ;;
 esac
 
-read -r window zoomed < <(
-  tmux display-message -p -t "$pane" '#{window_id} #{window_zoomed_flag}'
+read -r window zoomed original_hint < <(
+  tmux display-message -p -t "$pane" '#{window_id} #{window_zoomed_flag} #{@reshape_origin}'
 )
 original_layout="$(tmux display-message -p -t "$pane" '#{window_layout}')"
 original_order="$(tmux list-panes -t "$window" -F '#{pane_id}')"
 
-transformation="$(awk -v active="${pane#%}" -v direction="$direction" '
+transformation="$(awk -v active="${pane#%}" -v direction="$direction" -v hint="$original_hint" '
 function invalid() { print "Invalid pane layout" > "/dev/stderr"; exit 1 }
 function number(    value) {
   if (!match(substr(text, pos), /^[0-9]+/)) invalid()
@@ -42,6 +42,7 @@ function parse(owner,    node, char, closing) {
     if (char != closing || count[node] < 2) invalid()
   } else {
     expect(","); id[node] = number()
+    leaf[id[node]] = node
     if (id[node] == active) source = node
   }
   return node
@@ -82,7 +83,45 @@ function beside(target, node, before, orientation,    owner, slot) {
   } else if (before) wrap(target, orientation, node, target)
   else wrap(target, orientation, target, node)
 }
-function lift(container) {
+function descend(node, reverse,    slot) {
+  while (kind[node]) {
+    slot = kind[node] == perpendicular || reverse ? count[node] : 1
+    node = child[node, slot]
+  }
+  return node
+}
+function reachable(group, node, orientation, reverse,    owner, edge) {
+  while (node && node != group) {
+    owner = parent[node]
+    if (kind[owner] == orientation) {
+      edge = reverse ? count[owner] : 1
+      if (position(node) != edge) return 0
+    }
+    node = owner
+  }
+  return node == group
+}
+function valid_origin(    fields, orientation, reverse, owner, slot, group) {
+  if (split(hint, fields, " ") != 2 || fields[2] !~ /^%[0-9]+$/) return 0
+  if (fields[1] !~ /^(left|right|up|down)$/) return 0
+  origin_direction = fields[1]; origin = leaf[substr(fields[2], 2)]
+  if (!origin || origin == source) return 0
+  orientation = origin_direction == "left" || origin_direction == "right" ? "{" : "["
+  reverse = origin_direction == "left" || origin_direction == "up"
+  owner = parent[source]
+  if (kind[owner] != orientation) return 0
+  slot = position(source) + (reverse ? -1 : 1)
+  if (slot < 1 || slot > count[owner]) return 0
+  group = child[owner, slot]
+  return reachable(group, origin, orientation, reverse)
+}
+function unchanged() { print hint_valid ? hint : ""; exit }
+function lift(container,    owner, slot, anchor, reverse_direction) {
+  owner = parent[source]; slot = position(source)
+  anchor = child[owner, slot > 1 ? slot - 1 : slot + 1]
+  anchor = descend(anchor, !backwards)
+  reverse_direction = direction == "left" ? "right" : direction == "right" ? "left" : direction == "up" ? "down" : "up"
+  next_hint = reverse_direction " %" id[anchor]
   detach(source)
   beside(container, source, backwards, axis)
 }
@@ -152,8 +191,9 @@ function render(node, w, h, x, y,    out, i, descendant, available, total, amoun
   perpendicular = axis == "{" ? "[" : "{"
   backwards = direction == "left" || direction == "up"
   root = normalize(root)
+  hint_valid = valid_origin()
   owner = parent[source]
-  if (!owner) exit
+  if (!owner) unchanged()
   if (kind[owner] != axis) {
     # Pairing locally avoids lifting across unrelated sibling regions.
     if (count[owner] > 2) {
@@ -169,15 +209,13 @@ function render(node, w, h, x, y,    out, i, descendant, available, total, amoun
     if (neighbour < 1 || neighbour > count[owner]) {
       container = parent[owner]
       while (container && kind[container] != perpendicular) container = parent[container]
-      if (!container) exit
+      if (!container) unchanged()
       lift(container)
     } else {
       target = child[owner, neighbour]
       if (kind[target]) {
-        while (kind[target]) {
-          slot = kind[target] == perpendicular || backwards ? count[target] : 1
-          target = child[target, slot]
-        }
+        if (hint_valid && direction == origin_direction) target = origin
+        else target = descend(target, backwards)
         detach(source)
         beside(target, source, !backwards, axis)
       } else {
@@ -189,10 +227,16 @@ function render(node, w, h, x, y,    out, i, descendant, available, total, amoun
   root = normalize(root)
   measure(root)
   body = render(root, root_width, root_height, 0, 0)
+  print next_hint
   print body
   print order
 }' <<<"$original_layout")"
-[[ -n "$transformation" ]] || exit 0
+next_hint="${transformation%%$'\n'*}"
+if [[ "$transformation" != *$'\n'* ]]; then
+  if [[ "$next_hint" != "$original_hint" ]]; then tmux set-option -pu -t "$pane" @reshape_origin; fi
+  exit 0
+fi
+transformation="${transformation#*$'\n'}"
 body="${transformation%%$'\n'*}"
 desired_order="${transformation#*$'\n'}"
 checksum=0
@@ -234,3 +278,10 @@ tmux select-layout -t "$window" "$new_layout"
 tmux select-pane -t "$pane"
 tmux select-layout -E -t "$pane"
 tmux select-layout -E -t "$pane"
+if [[ "$next_hint" != "$original_hint" ]]; then
+  if [[ -n "$next_hint" ]]; then
+    tmux set-option -p -t "$pane" @reshape_origin "$next_hint"
+  else
+    tmux set-option -pu -t "$pane" @reshape_origin
+  fi
+fi

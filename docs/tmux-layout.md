@@ -53,9 +53,25 @@ For example, with pane 4 active, two Shift+Up presses stay between panes 1 and 3
 
 Two Shift+Down presses reverse this example. Left/Right use the transposed rule.
 
-Movement follows the current split structure without saved movement history.
-Opposite-direction presses follow the same entry-first rules; longer sequences
-can pass through different intermediate layouts rather than retracing exactly.
+An expansion remembers one origin hint on the moved pane: a neighbouring pane
+from its former region and the reverse direction. The next successful reshape
+can use this hint to choose the branch to enter, rather than the default
+bottom/right branch. For example, with pane 4 active:
+
+```text
+143            444              143
+123 → Up →     123 → Down →      123
+```
+
+Left/Right follow the transposed rule. Focus changes and resizing do not affect
+a valid hint. A boundary no-op preserves it; another successful entry or local
+pairing clears it, and another expansion replaces it. If the origin is killed,
+moves to another window, or is no longer reachable from the adjacent region’s
+facing edge, movement falls back to the normal structural rule.
+
+Hints do not save layouts or form an undo stack. Opposite-direction presses
+still follow the entry-first rules; longer sequences can pass through different
+intermediate layouts rather than retracing exactly.
 Diagrams show pane regions, while proportions follow tmux's sizing rules.
 Equivalent nested containers with the same orientation are treated as one group.
 
