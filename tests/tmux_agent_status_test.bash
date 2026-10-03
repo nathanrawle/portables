@@ -157,13 +157,17 @@ test_tmux_status_formats_show_agent_state_and_priority() {
     "expected inactive-format tmux flags alongside the window icon"
 
   set_tmux_agent_status "$second" codex thinking
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    select-pane -t "$first" -T 'status fixture'
+  "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" \
+    select-pane -t "$second" -T 'status fixture'
   pane_tabs="$(
     "$TMUX_AGENT_STATUS_BIN" -L "$TMUX_AGENT_STATUS_SOCKET" display-message \
       -p -t agent-status:agents '#{E:status-format[1]}'
   )"
-  assert_tmux_status_contains "$pane_tabs" '󰹇 "sleep 120"' \
+  assert_tmux_status_contains "$pane_tabs" '󰹇 status fixture' \
     "expected the active pane icon before its title"
-  assert_tmux_status_contains "$pane_tabs" '󰔟 "sleep 120"' \
+  assert_tmux_status_contains "$pane_tabs" '󰔟 status fixture' \
     "expected the inactive pane icon before its title"
 }
 
