@@ -133,6 +133,25 @@ _taw_font_has_glyph() {
   [[ -n "$(fc-list ":charset=$1" 2>/dev/null)" ]]
 }
 
+_taw_main_window_name() {
+  local _taw_star='★'
+
+  case "${TAW_ICONS:-auto}" in
+    auto)
+      if command -v fc-list >/dev/null 2>&1 && _taw_font_has_glyph f005; then
+        _taw_star=''
+      fi
+      ;;
+    nerd) _taw_star='' ;;
+    unicode) ;;
+    *)
+      _taw_die "TAW_ICONS must be auto, nerd, or unicode"
+      return 1
+      ;;
+  esac
+  print -r -- "$_taw_star main"
+}
+
 _taw_resolve_agent_icon_style() {
   local _taw_requested_style="${TAW_ICONS:-auto}"
 
@@ -2312,9 +2331,8 @@ _taw_create_tmux_window() {
   local _taw_created_session_id _taw_created_session_name _taw_session_status
   local _taw_agent_pane _taw_shell_pane _taw_last_shell_pane _taw_shell_cmd _taw_existing_window
   local _taw_shell_anchor_pane
-  local _taw_existing_session_id _taw_existing_window_id _taw_tree
+  local _taw_existing_session_id _taw_existing_window_id
   local -a _taw_initial_cmd_args
-  local -a _taw_trees=(🌲 🌳 🌴 🪾 🎄 🎋)
 
   if [[ "$_taw_editor_enabled" == true ]]; then
     _taw_initial_cmd_args=( "$_taw_editor_cmd" )
@@ -2372,8 +2390,7 @@ _taw_create_tmux_window() {
       _taw_die "could not resolve tmux session: $_taw_session_name"
       return 1
     else
-      _taw_tree="${_taw_trees[$(( RANDOM % $#_taw_trees + 1 ))]}"
-      _taw_tmux_window_name="${_taw_tree}main"
+      _taw_tmux_window_name="$(_taw_main_window_name)" || return 1
       _taw_created="$(tmux new-session -d -P \
         -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}' \
         -s "$_taw_session_name" -n "$_taw_tmux_window_name" -c "$_taw_window_dir" \
