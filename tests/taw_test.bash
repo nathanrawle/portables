@@ -169,6 +169,9 @@ fi
 count=$((count + 1))
 printf '%s\n' "$count" >"$count_file"
 call_number=$((count - 1))
+if [[ "$call_number" = 1 && -n "${TAW_FAKE_FZF_AFTER_READ_SCRIPT:-}" ]]; then
+  bash "$TAW_FAKE_FZF_AFTER_READ_SCRIPT"
+fi
 
 key=""
 if [[ -n "${TAW_FAKE_FZF_KEYS:-}" ]]; then
@@ -218,6 +221,10 @@ fi
 
 if [[ -n "${TAW_FAKE_FZF_NO_MATCH_QUERY:-}" ]]; then
   output_query="${TAW_FAKE_FZF_NO_MATCH_QUERY}"
+  if (( expects_key )) && [[ "$key" = ctrl-d ]]; then
+    printf '%s\n%s\n' "$output_query" "$key"
+    exit 1
+  fi
   if (( supports_create )); then
     if (( print_query )); then
       printf '%s\n' "$output_query"
@@ -235,6 +242,11 @@ if (( expects_key || prints_key )); then
   printf '%s\n' "$key"
 fi
 if [[ "$key" = tab ]]; then
+  exit 0
+fi
+
+if [[ "$call_number" = 1 && -n "${TAW_FAKE_FZF_SELECTION:-}" ]]; then
+  emit_line "$TAW_FAKE_FZF_SELECTION"
   exit 0
 fi
 
@@ -4593,6 +4605,323 @@ test_branch_mode_creates_unassigned_bare_worktree() {
   assert_file_contains "$log" $'-c\t'"$(cd "$worktree" && pwd -P)"$'\tvim'
 }
 
+exercise_picker_worktree_removal() {
+  local kind="$1" mode="$2" version="$3"
+  local repo worktree fake_bin no_fzf_path log args_log rows_log picker_tmp
+  local -a picker_args=()
+
+  if [[ "$kind" = bare ]]; then
+    repo="$(make_bare_wrapper "$TEST_TMPDIR/bare")"
+    git --git-dir "$repo/.git" worktree add -q "$repo/.worktrees/develop" develop
+  else
+    repo="$TEST_TMPDIR/repo"
+    make_git_repo "$repo"
+    git -C "$repo" worktree add -q "$repo/.worktrees/develop" develop
+  fi
+  worktree="$repo/.worktrees/develop"
+  if [[ "$kind" = unicode ]]; then
+    git -C "$repo" worktree move "$worktree" "$TEST_TMPDIR/worktree café space"
+    worktree="$TEST_TMPDIR/worktree café space"
+  fi
+  [[ "$mode" != explicit ]] || picker_args=(--mode=branch)
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  rows_log="$TEST_TMPDIR/fzf-rows.log"
+  picker_tmp="$TEST_TMPDIR/picker-tmp"
+  mkdir -p "$picker_tmp"
+
+  TMPDIR="$picker_tmp" EDITOR=vim TAW_FAKE_FZF_VERSION="$version" \
+    TAW_FAKE_FZF_CLOSE_EARLY="${TAW_FAKE_FZF_CLOSE_EARLY:-0}" \
+    TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' TAW_FAKE_FZF_OUTPUT_QUERIES=develop \
+    TAW_FAKE_FZF_MATCH=develop TAW_FZF_ARGS_LOG="$args_log" TAW_FZF_INPUT_LOG="$rows_log" \
+    TAW_FAKE_TMUX_ALL_PANES=$'%7\t'"$(cd "$repo" && pwd -P)" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" "${picker_args[@]}"
+
+  assert_not_exists "$worktree"
+  if [[ "$kind" = bare ]]; then
+    git --git-dir "$repo/.git" show-ref --verify --quiet refs/heads/develop
+  else
+    git -C "$repo" show-ref --verify --quiet refs/heads/develop
+  fi
+  assert_file_contains "$args_log" 'Removed worktree:'
+  assert_file_not_contains "$args_log" $'--query=develop\t'
+  assert_file_contains "$rows_log" $'  develop\tbranch\tdevelop\tdevelop\t'
+  assert_no_tmux_work_window "$log"
+  assert_file_not_contains "$log" 'kill-window'
+  assert_file_not_contains "$log" 'kill-pane'
+  assert_eq '' "$(find "$picker_tmp" -mindepth 1 -print)" "picker cache should be cleaned"
+  if [[ "$version" = 0.52.1 ]]; then
+    assert_file_contains "$args_log" '--expect='
+    assert_file_contains "$args_log" 'ctrl-d'
+    assert_file_not_contains "$args_log" 'ctrl-d:transform:'
+  else
+    assert_file_contains "$args_log" 'ctrl-d:transform:'
+  fi
+}
+
+test_picker_worktree_removal_explicit_clears_query() {
+  exercise_picker_worktree_removal normal explicit 0.74.2
+}
+
+test_picker_worktree_removal_automatic_unicode() {
+  exercise_picker_worktree_removal unicode automatic 0.74.2
+}
+
+test_picker_worktree_removal_bare() {
+  exercise_picker_worktree_removal bare explicit 0.74.2
+}
+
+test_picker_worktree_removal_legacy() {
+  exercise_picker_worktree_removal normal automatic 0.52.1
+}
+
+test_picker_worktree_removal_legacy_explicit() {
+  exercise_picker_worktree_removal normal explicit 0.52.1
+}
+
+test_picker_worktree_removal_early_accept() {
+  TAW_FAKE_FZF_CLOSE_EARLY=1 exercise_picker_worktree_removal normal explicit 0.74.2
+}
+
+test_picker_worktree_removal_transform_is_inert() {
+  local repo fake_bin no_fzf_path log args_log bind transform output expanded kind path
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  EDITOR=vim TAW_FAKE_FZF_KEYS=cancel TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+  bind="$(tr '\t' '\n' <"$args_log" | grep '^--bind=ctrl-d:transform:' | head -n 1)"
+  transform="${bind#--bind=ctrl-d:transform:}"
+  for kind in "''" "'message'" "'branch-message'" "'branch'"; do
+    expanded="${transform//\{2\}/$kind}"
+    expanded="${expanded//\{5\}/\'\'}"
+    output="$(zsh -f -c "$expanded" || true)"
+    assert_eq '' "$output" "Ctrl-D should ignore missing worktree paths"
+  done
+  expanded="${transform//\{2\}/\'branch\'}"
+  path="'/tmp/worktree space'"
+  expanded="${expanded//\{5\}/$path}"
+  output="$(zsh -f -c "$expanded")"
+  assert_eq 'print(ctrl-d)+accept' "$output"
+}
+
+exercise_picker_worktree_removal_refusal() {
+  local scenario="$1" repo worktree invoke_dir fake_bin no_fzf_path log args_log
+  local panes selection= hook= expected='Removal refused:'
+
+  repo="$TEST_TMPDIR/repo"
+  worktree="$repo/.worktrees/develop"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add -q "$worktree" develop
+  invoke_dir="$repo"
+  panes=$'%7\t'"$(cd "$repo" && pwd -P)"
+  case "$scenario" in
+    dirty) printf 'changed\n' >>"$worktree/README.md"; expected='Removal failed:' ;;
+    untracked) printf 'keep\n' >"$worktree/untracked.txt"; expected='Removal failed:' ;;
+    locked) git -C "$repo" worktree lock "$worktree"; expected='Removal failed:' ;;
+    pane) panes=$'%8\t'"$(cd "$worktree" && pwd -P)" ;;
+    descendant)
+      mkdir -p "$worktree/nested"
+      panes=$'%8\t'"$(cd "$worktree/nested" && pwd -P)"
+      ;;
+    inspection) panes= ;;
+    malformed) panes=$'%8\t/path\textra' ;;
+    primary)
+      invoke_dir="$worktree"
+      panes=$'%7\t'"$TEST_TMPDIR"
+      selection=$'main\tbranch\tmain\tmain\t'"$(cd "$repo" && pwd -P)"
+      expected='Removal failed:'
+      ;;
+    invoking)
+      invoke_dir="$worktree"
+      selection=$'develop\tbranch\tdevelop\tdevelop\t'"$(cd "$worktree" && pwd -P)"
+      ;;
+    stale)
+      hook="$TEST_TMPDIR/change-assignment.sh"
+      printf 'git -C "%s" checkout -qb reassigned\n' "$worktree" >"$hook"
+      ;;
+  esac
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+
+  EDITOR=vim TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' TAW_FAKE_FZF_OUTPUT_QUERIES=keep-query \
+    TAW_FAKE_FZF_MATCH=develop TAW_FAKE_FZF_SELECTION="$selection" \
+    TAW_FAKE_FZF_AFTER_READ_SCRIPT="$hook" TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$invoke_dir" --mode=branch
+
+  assert_exists "$worktree/README.md"
+  assert_exists "$repo/README.md"
+  assert_file_contains "$args_log" "$expected"
+  assert_file_contains "$args_log" $'--query=keep-query\t'
+  assert_no_tmux_work_window "$log"
+  case "$scenario" in
+    dirty) assert_file_contains "$worktree/README.md" changed ;;
+    untracked) assert_file_contains "$worktree/untracked.txt" keep ;;
+    locked) git -C "$repo" worktree list --porcelain | grep -q '^locked' ;;
+    stale) assert_eq reassigned "$(git -C "$worktree" branch --show-current)" ;;
+  esac
+}
+
+test_picker_worktree_removal_refuses_dirty() {
+  exercise_picker_worktree_removal_refusal dirty
+}
+test_picker_worktree_removal_refuses_untracked() {
+  exercise_picker_worktree_removal_refusal untracked
+}
+test_picker_worktree_removal_refuses_locked() {
+  exercise_picker_worktree_removal_refusal locked
+}
+test_picker_worktree_removal_refuses_pane() {
+  exercise_picker_worktree_removal_refusal pane
+}
+test_picker_worktree_removal_refuses_descendant() {
+  exercise_picker_worktree_removal_refusal descendant
+}
+test_picker_worktree_removal_refuses_inspection_failure() {
+  exercise_picker_worktree_removal_refusal inspection
+}
+test_picker_worktree_removal_refuses_malformed_panes() {
+  exercise_picker_worktree_removal_refusal malformed
+}
+test_picker_worktree_removal_refuses_primary() {
+  exercise_picker_worktree_removal_refusal primary
+}
+test_picker_worktree_removal_refuses_invoking() {
+  exercise_picker_worktree_removal_refusal invoking
+}
+test_picker_worktree_removal_refuses_stale() {
+  exercise_picker_worktree_removal_refusal stale
+}
+
+test_picker_worktree_removal_allows_sibling_path() {
+  local repo worktree sibling fake_bin no_fzf_path log
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  worktree="$repo/.worktrees/develop"
+  sibling="$worktree-other"
+  git -C "$repo" worktree add -q "$worktree" develop
+  mkdir -p "$sibling"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  EDITOR=vim TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' TAW_FAKE_FZF_MATCH=develop \
+    TAW_FAKE_TMUX_ALL_PANES=$'%7\t'"$(cd "$sibling" && pwd -P)" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+  assert_not_exists "$worktree"
+  assert_exists "$sibling"
+  assert_no_tmux_work_window "$log"
+}
+
+exercise_legacy_removal_without_selection() {
+  local mode="$1" repo fake_bin no_fzf_path log args_log count_file
+  local -a picker_args=()
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  [[ "$mode" != explicit ]] || picker_args=(--mode=branch)
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  count_file="$TEST_TMPDIR/fzf-count"
+  : >"$log"
+  EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' \
+    TAW_FAKE_FZF_NO_MATCH_QUERY=no-matching-branch TAW_FAKE_FZF_COUNT_FILE="$count_file" \
+    TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" "${picker_args[@]}"
+  assert_eq 3 "$(cat "$count_file")" "expected the picker to reopen before cancellation"
+  assert_file_contains "$args_log" $'--query=no-matching-branch\t'
+  assert_file_not_contains "$log" $'list-panes\t'
+  assert_no_tmux_work_window "$log"
+  git -C "$repo" show-ref --verify --quiet refs/heads/develop
+}
+
+test_legacy_removal_without_selection_explicit() {
+  exercise_legacy_removal_without_selection explicit
+}
+
+test_legacy_removal_without_selection_automatic() {
+  exercise_legacy_removal_without_selection automatic
+}
+
+test_picker_worktree_removal_unassigned_is_inert() {
+  local repo fake_bin no_fzf_path log args_log
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  : >"$log"
+  EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' \
+    TAW_FAKE_FZF_MATCH=develop TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" --mode=branch
+  git -C "$repo" show-ref --verify --quiet refs/heads/develop
+  assert_file_not_contains "$log" $'list-panes\t'
+  assert_file_not_contains "$args_log" 'Removed worktree:'
+  assert_no_tmux_work_window "$log"
+}
+
+test_picker_worktree_removal_remote_and_message_are_inert() {
+  local repo fake_bin no_fzf_path log args_log target
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/upstream.git"
+  git -C "$repo" update-ref refs/remotes/origin/remote-only refs/heads/main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  for target in remote-only message; do
+    log="$TEST_TMPDIR/tmux-$target.log"
+    args_log="$TEST_TMPDIR/fzf-$target.log"
+    : >"$log"
+    if [[ "$target" = message ]]; then
+      git -C "$repo" branch -D develop >/dev/null
+      git -C "$repo" update-ref -d refs/remotes/origin/remote-only
+    fi
+    EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' \
+      TAW_FAKE_FZF_MATCH="$target" TAW_FZF_ARGS_LOG="$args_log" \
+      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$repo" --mode=branch
+    assert_file_not_contains "$log" $'list-panes\t'
+    assert_file_not_contains "$args_log" 'Removed worktree:'
+    assert_no_tmux_work_window "$log"
+  done
+}
+
+test_picker_worktree_removal_session_has_no_shortcut() {
+  local repo fake_bin no_fzf_path log args_log
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  EDITOR=vim TAW_FAKE_FZF_KEYS=cancel TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=session
+  assert_file_not_contains "$args_log" 'ctrl-d'
+  assert_file_not_contains "$args_log" 'C-D:'
+  assert_no_tmux_work_window "$log"
+}
+
 test_picker_selects_fzf_bindings_by_version() {
   local repo fake_bin no_fzf_path version version_name log args_log
 
@@ -5876,3 +6205,50 @@ test_case "taw: explicit picker keeps empty modes cycleable" \
   test_explicit_picker_keeps_empty_modes_cycleable
 test_case "taw: invalid picker modes and combinations are rejected" \
   test_invalid_picker_modes_and_combinations_are_rejected
+
+test_case "taw: picker worktree removal explicit clears query" \
+  test_picker_worktree_removal_explicit_clears_query
+test_case "taw: picker worktree removal automatic preserves Unicode paths" \
+  test_picker_worktree_removal_automatic_unicode
+test_case "taw: picker worktree removal supports bare repositories" \
+  test_picker_worktree_removal_bare
+test_case "taw: picker worktree removal supports legacy fzf" \
+  test_picker_worktree_removal_legacy
+test_case "taw: picker worktree removal refuses dirty files" \
+  test_picker_worktree_removal_refuses_dirty
+test_case "taw: picker worktree removal refuses untracked files" \
+  test_picker_worktree_removal_refuses_untracked
+test_case "taw: picker worktree removal refuses locked worktrees" \
+  test_picker_worktree_removal_refuses_locked
+test_case "taw: picker worktree removal refuses pane at target" \
+  test_picker_worktree_removal_refuses_pane
+test_case "taw: picker worktree removal refuses descendant pane" \
+  test_picker_worktree_removal_refuses_descendant
+test_case "taw: picker worktree removal refuses inspection failure" \
+  test_picker_worktree_removal_refuses_inspection_failure
+test_case "taw: picker worktree removal refuses malformed pane data" \
+  test_picker_worktree_removal_refuses_malformed_panes
+test_case "taw: picker worktree removal refuses primary worktree" \
+  test_picker_worktree_removal_refuses_primary
+test_case "taw: picker worktree removal refuses invoking worktree" \
+  test_picker_worktree_removal_refuses_invoking
+test_case "taw: picker worktree removal refuses stale assignment" \
+  test_picker_worktree_removal_refuses_stale
+test_case "taw: picker worktree removal allows sibling pane path" \
+  test_picker_worktree_removal_allows_sibling_path
+test_case "taw: picker worktree removal ignores unassigned branch" \
+  test_picker_worktree_removal_unassigned_is_inert
+test_case "taw: picker worktree removal supports explicit legacy fzf" \
+  test_picker_worktree_removal_legacy_explicit
+test_case "taw: picker worktree removal refreshes after early acceptance" \
+  test_picker_worktree_removal_early_accept
+test_case "taw: picker worktree removal transform ignores absent targets" \
+  test_picker_worktree_removal_transform_is_inert
+test_case "taw: picker worktree removal ignores remote and message rows" \
+  test_picker_worktree_removal_remote_and_message_are_inert
+test_case "taw: picker worktree removal is unavailable in session mode" \
+  test_picker_worktree_removal_session_has_no_shortcut
+test_case "taw: legacy removal without selection keeps explicit picker open" \
+  test_legacy_removal_without_selection_explicit
+test_case "taw: legacy removal without selection keeps automatic picker open" \
+  test_legacy_removal_without_selection_automatic

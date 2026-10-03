@@ -116,6 +116,19 @@ an unassigned branch creates its canonical `.worktrees/<branch>` worktree
 without changing the primary checkout. Detached worktrees are not listed
 separately.
 
+Ctrl-D immediately removes the selected assigned worktree using
+`git worktree remove`, without confirmation or force. The branch is retained.
+Git refuses dirty, locked, primary, or otherwise non-removable worktrees.
+Removal is also refused if any pane on the current tmux server has its working
+directory inside the selected worktree, or if pane inspection fails. No tmux
+windows or processes are closed.
+
+Both automatic and explicit branch pickers refresh after a removal attempt.
+Successful removal clears the query and displays the retained branch as
+unassigned; refusal or failure preserves the query. The picker header displays
+the result. Ctrl-D does nothing for unassigned branches or informational rows
+and is unavailable in session mode.
+
 Explicit picker invocations:
 
 - reject `-p`, `-b`, and positionals
@@ -147,7 +160,8 @@ Session picker result handling:
 - `bare` projects open their default worktree directly
 
 Each mode is generated once into a per-invocation snapshot and reused while
-cycling. With fzf 0.53 or newer, the active snapshot streams into fzf and
+cycling, except that branch mode is regenerated after a worktree removal attempt.
+With fzf 0.53 or newer, the active snapshot streams into fzf and
 informational rows remain in place when an acceptance key is pressed. Older or
 unrecognized fzf versions wait for the active snapshot, use compatible
 `--expect` bindings, and may briefly redraw an informational row. Inactive modes

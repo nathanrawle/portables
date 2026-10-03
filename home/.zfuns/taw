@@ -20,7 +20,7 @@ local _taw_selected_tmux_session_name _taw_selected_tmux_session_target
 local _taw_default_branch_result _taw_default_base_ref
 local _taw_branch_target_name _taw_branch_target_ref
 local _taw_picker_kind _taw_picker_branch _taw_picker_ref _taw_picker_path
-local _taw_picker_cache_dir
+local _taw_picker_cache_dir _taw_picker_notice
 local _taw_agent_icon_style
 
 _taw_shell_cmds=()
@@ -48,6 +48,7 @@ _taw_peer=false
 _taw_force=false
 _taw_current_session_id=
 _taw_picker_cache_dir=
+_taw_picker_notice=
 _taw_agent_icon_style=
 
 _taw_die() {
@@ -871,7 +872,7 @@ _taw_start_picker_producer() {
     _taw_explicit_picker_rows "$_taw_mode" >"$_taw_rows" 2>"$_taw_errors"
     _taw_producer_status=$?
     [[ ! -f "$_taw_picker_cache_dir/cancelled" ]] || return 0
-    print -r -- "$_taw_producer_status" >"$_taw_status_tmp" 2>/dev/null || return 0
+    print -r -- "$_taw_producer_status" 2>/dev/null >"$_taw_status_tmp" || return 0
     command mv -f -- "$_taw_status_tmp" "$_taw_status" 2>/dev/null || return 0
   ) &
   _taw_picker_producer_pids[$_taw_mode]=$!
@@ -982,11 +983,79 @@ _taw_cleanup_picker_cache() {
   _taw_picker_cache_dir=
 }
 
+_taw_refresh_branch_picker_cache() {
+  local _taw_pid="${_taw_picker_producer_pids[branch]-}"
+
+  if [[ -n "$_taw_pid" ]]; then
+    kill "$_taw_pid" 2>/dev/null || true
+    wait "$_taw_pid" 2>/dev/null || true
+  fi
+  command rm -f -- "$_taw_picker_cache_dir/branch.status" \
+    "$_taw_picker_cache_dir/branch.status.tmp" || return 1
+  _taw_start_picker_producer branch
+}
+
+_taw_remove_picker_worktree() {
+  local _taw_branch="$1" _taw_path="$2" _taw_registered _taw_current
+  local _taw_panes _taw_line _taw_pane_path _taw_error
+  local -a _taw_fields
+
+  _taw_picker_notice="Removal refused: invalid worktree selection"
+  _taw_require_picker_safe "removal selection" "$_taw_branch" "$_taw_path" || return 1
+  [[ -n "$_taw_branch" && "$_taw_path" == /* ]] || return 1
+  _taw_path="${_taw_path:A}"
+  _taw_current="${_taw_selected_worktree_dir:-$_taw_project_dir}"
+  if [[ "$_taw_path" == "${_taw_current:A}" ]]; then
+    _taw_picker_notice="Removal refused: invoking worktree"
+    return 1
+  fi
+  _taw_registered="$(_taw_existing_worktree_for_branch "$_taw_branch")" || {
+    _taw_picker_notice="Removal refused: worktree assignment changed"
+    return 1
+  }
+  if [[ "${_taw_registered:A}" != "$_taw_path" ]]; then
+    _taw_picker_notice="Removal refused: worktree assignment changed"
+    return 1
+  fi
+
+  _taw_panes="$(tmux list-panes -a -F $'#{pane_id}\t#{pane_current_path}' 2>/dev/null)" || {
+    _taw_picker_notice="Removal refused: could not inspect tmux panes"
+    return 1
+  }
+  [[ -n "$_taw_panes" ]] || {
+    _taw_picker_notice="Removal refused: empty tmux pane snapshot"
+    return 1
+  }
+  for _taw_line in "${(@f)_taw_panes}"; do
+    _taw_fields=( "${(@ps:\t:)_taw_line}" )
+    if (( ${#_taw_fields[@]} != 2 )) \
+      || [[ "${_taw_fields[1]}" != %<-> || "${_taw_fields[2]}" != /* ]] \
+      || ! _taw_picker_safe "${_taw_fields[@]}"; then
+      _taw_picker_notice="Removal refused: invalid tmux pane snapshot"
+      return 1
+    fi
+    _taw_pane_path="${_taw_fields[2]:A}"
+    if [[ "$_taw_pane_path" == "$_taw_path" || "$_taw_pane_path" == "$_taw_path"/* ]]; then
+      _taw_picker_notice="Removal refused: pane ${_taw_fields[1]} is using $_taw_path"
+      return 1
+    fi
+  done
+
+  if _taw_error="$(_taw_git worktree remove -- "$_taw_path" 2>&1)"; then
+    _taw_picker_notice="Removed worktree: $_taw_path"
+    return 0
+  fi
+  _taw_error="${_taw_error//$'\n'/ }"
+  _taw_error="${_taw_error//[[:cntrl:]]/}"
+  _taw_picker_notice="Removal failed: ${_taw_error:-git worktree remove failed}"
+  return 1
+}
+
 _taw_resolve_explicit_picker() {
   local _taw_output _taw_status _taw_producer_status _taw_query= _taw_key _taw_choice
   local _taw_stream_status _taw_errors _taw_fzf_exit_marker _taw_fzf_status
   local _taw_modern_fzf=false
-  local _taw_enter_bind
+  local _taw_enter_bind _taw_header
   local _taw_status_line _taw_status_marker=$'\x1e__taw_picker_status__'
   local -a _taw_output_lines _taw_fields _taw_pipeline_status _taw_fzf_args
 
@@ -1010,11 +1079,14 @@ _taw_resolve_explicit_picker() {
       if [[ "$_taw_modern_fzf" != true ]]; then
         _taw_wait_picker_producer "$_taw_picker_mode" || return 1
       fi
+      _taw_header='Enter: default | C-S: shell | C-A: agent | Opt-Z: editor+shell | Opt-A: editor+agent | Opt-Enter: all | Tab: mode'
+      [[ "$_taw_picker_mode" != branch ]] || _taw_header+=' | C-D: remove worktree'
+      [[ -z "$_taw_picker_notice" ]] || _taw_header+=$'\n'"$_taw_picker_notice"
       _taw_fzf_args=(
         --delimiter=$'\t'
         --with-nth=1
         "--prompt=$_taw_picker_mode> "
-        '--header=Enter: default | C-S: shell | C-A: agent | Opt-Z: editor+shell | Opt-A: editor+agent | Opt-Enter: all | Tab: mode'
+        "--header=$_taw_header"
         --print-query
         "--query=$_taw_query"
       )
@@ -1037,8 +1109,15 @@ _taw_resolve_explicit_picker() {
           '--bind=alt-enter:transform:[[ -n {2} && {2} != message ]] && printf "print(alt-enter)+accept"'
           '--bind=load:transform:[ "$FZF_TOTAL_COUNT" -eq 0 ] && printf abort'
         )
+        if [[ "$_taw_picker_mode" == branch ]]; then
+          _taw_fzf_args+=('--bind=ctrl-d:transform:[[ {2} == branch && -n {5} ]] && printf "print(ctrl-d)+accept"')
+        fi
       else
-        _taw_fzf_args+=(--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter)
+        if [[ "$_taw_picker_mode" == branch ]]; then
+          _taw_fzf_args+=(--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter,ctrl-d)
+        else
+          _taw_fzf_args+=(--expect=tab,ctrl-s,ctrl-a,alt-z,alt-a,alt-enter)
+        fi
       fi
       command rm -f -- "$_taw_fzf_exit_marker" || return 1
       _taw_output="$(_taw_stream_picker_cache "$_taw_picker_mode" | \
@@ -1125,6 +1204,10 @@ _taw_resolve_explicit_picker() {
         return 0
       fi
 
+      if [[ "$_taw_key" == ctrl-d && "$_taw_picker_mode" == branch \
+        && -z "${_taw_output_lines[3]-}" ]]; then
+        continue
+      fi
       (( ${#_taw_output_lines[@]} >= 3 )) || return 1
       _taw_choice="${_taw_output_lines[3]}"
       [[ -n "$_taw_choice" ]] || return 1
@@ -1132,6 +1215,19 @@ _taw_resolve_explicit_picker() {
       if (( ${#_taw_fields[@]} == 5 )) \
         && [[ "${_taw_fields[2]}" == message || "${_taw_fields[2]}" == branch-message ]]; then
         _taw_picker_layout=
+        continue
+      fi
+
+      if [[ "$_taw_key" == ctrl-d ]]; then
+        [[ "$_taw_picker_mode" == branch ]] || return 1
+        (( ${#_taw_fields[@]} == 5 )) || return 1
+        _taw_ensure_picker_project_context || return 1
+        if [[ "${_taw_fields[2]}" == branch && -n "${_taw_fields[5]}" ]]; then
+          if _taw_remove_picker_worktree "${_taw_fields[3]}" "${_taw_fields[5]}"; then
+            _taw_query=
+          fi
+          _taw_refresh_branch_picker_cache || return 1
+        fi
         continue
       fi
 
@@ -1706,45 +1802,54 @@ _taw_prepare_picker_created_branch() {
 }
 
 _taw_select_branch_target_with_fzf() {
-  local _taw_rows _taw_choice _taw_status _taw_query _taw_modern_fzf=false
-  local _taw_enter_bind
-  local -a _taw_fields
+  local _taw_rows _taw_choice _taw_status _taw_query= _taw_modern_fzf=false
+  local _taw_enter_bind _taw_key _taw_header
+  local -a _taw_fields _taw_output_lines
 
   command -v fzf >/dev/null 2>&1 || return 2
-  _taw_rows="$(_taw_picker_branch_rows)" || return 1
   _taw_fzf_supports_picker_transforms && _taw_modern_fzf=true
-  if [[ -z "$_taw_rows" && "$_taw_modern_fzf" != true ]]; then
-    return 2
-  fi
-  [[ -n "$_taw_rows" ]] || _taw_rows=$'Picker has no alternate branches\tbranch-message\t\t\t'
-  if [[ "$_taw_modern_fzf" == true ]]; then
-    # The query placeholder lets fzf run this action without a selected row.
-    _taw_enter_bind='query={q}; if [[ -n {2} && {2} != message && {2} != branch-message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 || {2} == branch-message ]] && [[ -n "$query" ]]; then printf "print(create)+accept"; fi'
-    _taw_choice="$(print -r -- "$_taw_rows" | fzf \
-      --ansi --delimiter=$'\t' --with-nth=1 --prompt='branch> ' --print-query \
-      "--bind=enter:transform:$_taw_enter_bind")" || _taw_status=$?
-  else
-    _taw_choice="$(print -r -- "$_taw_rows" | fzf --ansi --delimiter=$'\t' --with-nth=1 --prompt='branch> ')" || _taw_status=$?
-  fi
-  _taw_status=${_taw_status:-0}
-  case "$_taw_status" in
-    0) ;;
-    130) return 130 ;;
-    2) return 2 ;;
-    1)
-      [[ "$_taw_modern_fzf" != true || "$_taw_choice" == *$'\ncreate'* ]] || return 1
-      ;;
-    *) return 1 ;;
-  esac
-  [[ -n "$_taw_choice" ]] || return 1
-
-  if [[ "$_taw_modern_fzf" == true ]]; then
-    local -a _taw_output_lines
+  while true; do
+    _taw_status=0
+    _taw_rows="$(_taw_picker_branch_rows)" || return 1
+    if [[ -z "$_taw_rows" && "$_taw_modern_fzf" != true ]]; then
+      return 2
+    fi
+    [[ -n "$_taw_rows" ]] || _taw_rows=$'Picker has no alternate branches\tbranch-message\t\t\t'
+    _taw_header='Enter: open | C-D: remove worktree'
+    [[ -z "$_taw_picker_notice" ]] || _taw_header+=$'\n'"$_taw_picker_notice"
+    if [[ "$_taw_modern_fzf" == true ]]; then
+      # The query placeholder lets fzf run this action without a selected row.
+      _taw_enter_bind='query={q}; if [[ -n {2} && {2} != message && {2} != branch-message ]]; then printf "print()+accept"; elif [[ "$FZF_MATCH_COUNT" -eq 0 || {2} == branch-message ]] && [[ -n "$query" ]]; then printf "print(create)+accept"; fi'
+      _taw_choice="$(print -r -- "$_taw_rows" | fzf \
+        --ansi --delimiter=$'\t' --with-nth=1 --prompt='branch> ' --print-query \
+        "--query=$_taw_query" "--header=$_taw_header" \
+        '--bind=ctrl-d:transform:[[ {2} == branch && -n {5} ]] && printf "print(ctrl-d)+accept"' \
+        "--bind=enter:transform:$_taw_enter_bind")" || _taw_status=$?
+    else
+      _taw_choice="$(print -r -- "$_taw_rows" | fzf --ansi --delimiter=$'\t' --with-nth=1 --prompt='branch> ' \
+        --print-query --expect=ctrl-d "--query=$_taw_query" "--header=$_taw_header")" || _taw_status=$?
+    fi
+    _taw_status=${_taw_status:-0}
+    case "$_taw_status" in
+      0) ;;
+      130) return 130 ;;
+      2) return 2 ;;
+      1)
+        if [[ "$_taw_modern_fzf" == true ]]; then
+          [[ "$_taw_choice" == *$'\ncreate'* ]] || return 1
+        else
+          [[ "$_taw_choice" == *$'\nctrl-d' ]] || return 1
+        fi
+        ;;
+      *) return 1 ;;
+    esac
+    [[ -n "$_taw_choice" ]] || return 1
 
     _taw_output_lines=( "${(@f)_taw_choice}" )
     (( ${#_taw_output_lines[@]} >= 2 )) || return 1
     _taw_query="${_taw_output_lines[1]}"
-    if [[ "${_taw_output_lines[2]}" == create ]]; then
+    _taw_key="${_taw_output_lines[2]}"
+    if [[ "$_taw_key" == create && "$_taw_modern_fzf" == true ]]; then
       [[ -n "$_taw_query" ]] || return 1
       _taw_require_picker_safe "picker query" "$_taw_query" || return 1
       if [[ "$_taw_query" == refs/remotes/* ]]; then
@@ -1769,17 +1874,30 @@ _taw_select_branch_target_with_fzf() {
       _taw_picker_path=
       return 0
     fi
+    if [[ "$_taw_key" == ctrl-d && -z "${_taw_output_lines[3]-}" ]]; then
+      continue
+    fi
     (( ${#_taw_output_lines[@]} >= 3 )) || return 1
     _taw_choice="${_taw_output_lines[3]}"
-  fi
 
-  _taw_fields=( "${(@ps:\t:)_taw_choice}" )
-  (( ${#_taw_fields[@]} == 5 )) || return 1
-  _taw_require_picker_safe "picker selection" "${_taw_fields[@]}" || return 1
-  _taw_picker_kind="${_taw_fields[2]}"
-  _taw_picker_branch="${_taw_fields[3]}"
-  _taw_picker_ref="${_taw_fields[4]}"
-  _taw_picker_path="${_taw_fields[5]}"
+    _taw_fields=( "${(@ps:\t:)_taw_choice}" )
+    (( ${#_taw_fields[@]} == 5 )) || return 1
+    if [[ "$_taw_key" == ctrl-d ]]; then
+      if [[ "${_taw_fields[2]}" == branch && -n "${_taw_fields[5]}" ]]; then
+        if _taw_remove_picker_worktree "${_taw_fields[3]}" "${_taw_fields[5]}"; then
+          _taw_query=
+        fi
+      fi
+      continue
+    fi
+    [[ -z "$_taw_key" ]] || return 1
+    _taw_require_picker_safe "picker selection" "${_taw_fields[@]}" || return 1
+    _taw_picker_kind="${_taw_fields[2]}"
+    _taw_picker_branch="${_taw_fields[3]}"
+    _taw_picker_ref="${_taw_fields[4]}"
+    _taw_picker_path="${_taw_fields[5]}"
+    return 0
+  done
 }
 
 _taw_existing_worktree_for_branch() {
