@@ -21,8 +21,8 @@ run_layout_binding() {
   layout_tmux select-window -t "$pane"
   layout_tmux select-pane -t "$pane"
   # Execute the loaded binding body with the same pane context as a key press.
-  layout_tmux list-keys -T prefix "$key" | \
-    sed -E 's/^bind-key[[:space:]]+-T[[:space:]]+prefix[[:space:]]+[^[:space:]]+[[:space:]]+//' \
+  layout_tmux list-keys -T root "$key" | \
+    sed -E 's/^bind-key[[:space:]]+-T[[:space:]]+root[[:space:]]+[^[:space:]]+[[:space:]]+//' \
     >"$TEST_TMPDIR/binding.conf"
   layout_tmux source-file -t "$pane" "$TEST_TMPDIR/binding.conf"
 }
@@ -84,7 +84,7 @@ test_layout_reversible_transition_sequence() {
   states=('124|134' '122|134' '122|143' '142|143' '12|43' '412|413')
   for axis in horizontal vertical; do
     create_transition_layout "$axis" "sequence-$axis"
-    case "$axis" in horizontal) forward=S-left; backward=S-right ;; *) forward=S-up; backward=S-down ;; esac
+    case "$axis" in horizontal) forward=C-S-left; backward=C-S-right ;; *) forward=C-S-up; backward=C-S-down ;; esac
     before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
     assert_transition_layout "${states[0]}" "$axis"
     for index in 1 2 3 4 5; do
@@ -117,7 +117,7 @@ test_layout_single_pane_is_unchanged() {
   pane="$(layout_tmux display-message -p -t layout:1 '#{pane_id}')"
   before="$(layout_tmux display-message -p -t "$pane" '#{window_layout}:#{pane_pid}')"
   for direction in left right up down; do
-    run_layout_binding "S-$direction" "$pane"
+    run_layout_binding "C-S-$direction" "$pane"
     assert_eq "$before" "$(layout_tmux display-message -p -t "$pane" '#{window_layout}:#{pane_pid}')"
   done
 }
@@ -131,7 +131,7 @@ test_layout_zoom_and_marked_pane() {
   layout_tmux select-pane -m -t "$marked"
   create_transition_layout horizontal zoomed
   layout_tmux resize-pane -Z -t "$FOUR"
-  run_layout_binding S-left "$FOUR"
+  run_layout_binding C-S-left "$FOUR"
   assert_transition_layout '122|134' horizontal
   assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_active}')"
   assert_eq 0 "$(layout_tmux display-message -p -t "$FOUR" '#{window_zoomed_flag}')"
@@ -195,9 +195,9 @@ test_layout_equivalent_nested_containers() {
   printf -v fixture '%04x,%s' "$checksum" "$body"
   layout_tmux select-layout -t "$FOUR" "$fixture"
   assert_transition_layout '124|134' horizontal
-  run_layout_binding S-left "$FOUR"
+  run_layout_binding C-S-left "$FOUR"
   assert_transition_layout '122|134' horizontal
-  run_layout_binding S-right "$FOUR"
+  run_layout_binding C-S-right "$FOUR"
   assert_transition_layout '124|134' horizontal
 }
 
@@ -209,9 +209,9 @@ test_layout_three_pane_promotion_reverses() {
   FOUR="$(layout_tmux split-window -dv -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
   THREE=unused
   assert_transition_layout '12|14' horizontal
-  run_layout_binding S-left "$FOUR"
+  run_layout_binding C-S-left "$FOUR"
   assert_transition_layout '142' horizontal
-  run_layout_binding S-right "$FOUR"
+  run_layout_binding C-S-right "$FOUR"
   assert_transition_layout '12|14' horizontal
 }
 
