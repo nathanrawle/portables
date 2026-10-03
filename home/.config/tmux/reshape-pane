@@ -172,15 +172,8 @@ function render(node, w, h, x, y,    out, i, descendant, available, total, amoun
         detach(source)
         beside(target, source, !backwards, axis)
       } else {
-        container = parent[owner]
-        while (container && kind[container] != perpendicular) container = parent[container]
-        if (!container) {
-          detach(source)
-          wrap(target, perpendicular, target, source)
-        } else {
-          slot = position(source)
-          child[owner, neighbour] = source; child[owner, slot] = target
-        }
+        detach(source)
+        wrap(target, perpendicular, target, source)
       }
     }
   }

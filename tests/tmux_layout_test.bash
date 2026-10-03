@@ -76,15 +76,16 @@ assert_transition_layout() {
   assert_eq "$expected" "$actual" 'unexpected transition layout'
 }
 
-test_layout_reversible_transition_sequence() {
+test_layout_entry_first_transition_sequences() {
   local axis forward backward index before layout
-  local -a states
+  local -a states reverse_states
   command -v tmux >/dev/null 2>&1 || return 0
   setup_layout_server
-  states=('124|134' '122|134' '122|143' '142|143' '12|43' '412|413')
+  reverse_states=('12|43' '142|143' '122|143' '12|13|14' '124|134')
+  states=('124|134' '122|134' '12|13|14' '142|143' '12|43' '412|413')
   for axis in horizontal vertical; do
     create_transition_layout "$axis" "sequence-$axis"
-    case "$axis" in horizontal) forward=C-S-left; backward=C-S-right ;; *) forward=C-S-up; backward=C-S-down ;; esac
+    case "$axis" in horizontal) forward=S-left; backward=S-right ;; *) forward=S-up; backward=S-down ;; esac
     before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
     assert_transition_layout "${states[0]}" "$axis"
     for index in 1 2 3 4 5; do
@@ -100,9 +101,9 @@ test_layout_reversible_transition_sequence() {
     run_layout_binding "$forward" "$FOUR"
     assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{window_zoomed_flag}')" 'expected a zoomed boundary no-op'
     layout_tmux resize-pane -Z -t "$FOUR"
-    for index in 4 3 2 1 0; do
+    for index in 0 1 2 3 4; do
       run_layout_binding "$backward" "$FOUR"
-      assert_transition_layout "${states[$index]}" "$axis"
+      assert_transition_layout "${reverse_states[$index]}" "$axis"
     done
     layout="$(layout_tmux display-message -p -t "$FOUR" '#{window_layout}')"
     run_layout_binding "$backward" "$FOUR"
@@ -117,7 +118,7 @@ test_layout_single_pane_is_unchanged() {
   pane="$(layout_tmux display-message -p -t layout:1 '#{pane_id}')"
   before="$(layout_tmux display-message -p -t "$pane" '#{window_layout}:#{pane_pid}')"
   for direction in left right up down; do
-    run_layout_binding "C-S-$direction" "$pane"
+    run_layout_binding "S-$direction" "$pane"
     assert_eq "$before" "$(layout_tmux display-message -p -t "$pane" '#{window_layout}:#{pane_pid}')"
   done
 }
@@ -131,7 +132,7 @@ test_layout_zoom_and_marked_pane() {
   layout_tmux select-pane -m -t "$marked"
   create_transition_layout horizontal zoomed
   layout_tmux resize-pane -Z -t "$FOUR"
-  run_layout_binding C-S-left "$FOUR"
+  run_layout_binding S-left "$FOUR"
   assert_transition_layout '122|134' horizontal
   assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_active}')"
   assert_eq 0 "$(layout_tmux display-message -p -t "$FOUR" '#{window_zoomed_flag}')"
@@ -195,9 +196,9 @@ test_layout_equivalent_nested_containers() {
   printf -v fixture '%04x,%s' "$checksum" "$body"
   layout_tmux select-layout -t "$FOUR" "$fixture"
   assert_transition_layout '124|134' horizontal
-  run_layout_binding C-S-left "$FOUR"
+  run_layout_binding S-left "$FOUR"
   assert_transition_layout '122|134' horizontal
-  run_layout_binding C-S-right "$FOUR"
+  run_layout_binding S-right "$FOUR"
   assert_transition_layout '124|134' horizontal
 }
 
@@ -209,9 +210,9 @@ test_layout_three_pane_promotion_reverses() {
   FOUR="$(layout_tmux split-window -dv -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
   THREE=unused
   assert_transition_layout '12|14' horizontal
-  run_layout_binding C-S-left "$FOUR"
+  run_layout_binding S-left "$FOUR"
   assert_transition_layout '142' horizontal
-  run_layout_binding C-S-right "$FOUR"
+  run_layout_binding S-right "$FOUR"
   assert_transition_layout '12|14' horizontal
 }
 
@@ -244,10 +245,38 @@ WRAPPER
   assert_eq "$order" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}')"
 }
 
-test_case 'tmux layout: reversible horizontal and vertical split transitions' test_layout_reversible_transition_sequence
+test_layout_middle_sibling_enters_then_expands() {
+  local axis across within forward backward state before
+  local -a states
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  states=('123|144' '13|12|14' '123|144' '12|13|14')
+  for axis in horizontal vertical; do
+    case "$axis" in
+      horizontal) across=-h; within=-v; forward=S-up; backward=S-down ;;
+      vertical) across=-v; within=-h; forward=S-left; backward=S-right ;;
+    esac
+    ONE="$(layout_tmux new-window -d -P -F '#{pane_id}' -n "middle-$axis" 'sleep 120')"
+    TWO="$(layout_tmux split-window -d "$across" -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+    THREE="$(layout_tmux split-window -d "$within" -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
+    FOUR="$(layout_tmux split-window -d "$within" -P -F '#{pane_id}' -t "$THREE" 'sleep 120')"
+    before="$(layout_tmux list-panes -t "$THREE" -F '#{pane_id}:#{pane_pid}' | sort)"
+    assert_transition_layout '12|13|14' "$axis"
+    for state in 0 1 2 3; do
+      if [[ "$state" -lt 2 ]]; then run_layout_binding "$forward" "$THREE"
+      else run_layout_binding "$backward" "$THREE"; fi
+      assert_transition_layout "${states[$state]}" "$axis"
+      assert_eq 1 "$(layout_tmux display-message -p -t "$THREE" '#{pane_active}')"
+      assert_eq "$before" "$(layout_tmux list-panes -t "$THREE" -F '#{pane_id}:#{pane_pid}' | sort)"
+    done
+  done
+}
+
+test_case 'tmux layout: entry-first horizontal and vertical split transitions' test_layout_entry_first_transition_sequences
 test_case 'tmux layout: single pane is unchanged' test_layout_single_pane_is_unchanged
 test_case 'tmux layout: zoom and marked pane stay correctly scoped' test_layout_zoom_and_marked_pane
 test_case 'tmux layout: failed application restores pane order, geometry and zoom' test_layout_failure_restores_order_geometry_and_zoom
 test_case 'tmux layout: equivalent nested containers have the same transitions' test_layout_equivalent_nested_containers
 test_case 'tmux layout: three-pane promotion reverses without saved history' test_layout_three_pane_promotion_reverses
 test_case 'tmux layout: invalid layout input leaves panes untouched' test_layout_invalid_input_does_not_mutate_panes
+test_case 'tmux layout: a middle sibling enters first and expands on the next press' test_layout_middle_sibling_enters_then_expands
