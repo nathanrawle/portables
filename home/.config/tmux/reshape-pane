@@ -154,7 +154,16 @@ function render(node, w, h, x, y,    out, i, descendant, available, total, amoun
   root = normalize(root)
   owner = parent[source]
   if (!owner) exit
-  if (kind[owner] != axis) lift(owner)
+  if (kind[owner] != axis) {
+    # Pairing locally avoids lifting across unrelated sibling regions.
+    if (count[owner] > 2) {
+      slot = position(source)
+      neighbour = slot > 1 ? slot - 1 : slot + 1
+      target = child[owner, neighbour]
+      detach(source)
+      beside(target, source, backwards, axis)
+    } else lift(owner)
+  }
   else {
     slot = position(source); neighbour = slot + (backwards ? -1 : 1)
     if (neighbour < 1 || neighbour > count[owner]) {

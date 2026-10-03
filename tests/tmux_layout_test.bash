@@ -81,14 +81,14 @@ test_layout_entry_first_transition_sequences() {
   local -a states reverse_states
   command -v tmux >/dev/null 2>&1 || return 0
   setup_layout_server
-  reverse_states=('12|43' '142|143' '122|143' '12|13|14' '124|134')
-  states=('124|134' '122|134' '12|13|14' '142|143' '12|43' '412|413')
+  reverse_states=('12|43' '142|143' '122|143' '12|13|14' '122|134' '124|134')
+  states=('124|134' '122|134' '12|13|14' '122|143' '142|143' '12|43' '412|413')
   for axis in horizontal vertical; do
     create_transition_layout "$axis" "sequence-$axis"
     case "$axis" in horizontal) forward=S-left; backward=S-right ;; *) forward=S-up; backward=S-down ;; esac
     before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
     assert_transition_layout "${states[0]}" "$axis"
-    for index in 1 2 3 4 5; do
+    for index in 1 2 3 4 5 6; do
       run_layout_binding "$forward" "$FOUR"
       assert_transition_layout "${states[$index]}" "$axis"
       assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
@@ -101,7 +101,7 @@ test_layout_entry_first_transition_sequences() {
     run_layout_binding "$forward" "$FOUR"
     assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{window_zoomed_flag}')" 'expected a zoomed boundary no-op'
     layout_tmux resize-pane -Z -t "$FOUR"
-    for index in 0 1 2 3 4; do
+    for index in 0 1 2 3 4 5; do
       run_layout_binding "$backward" "$FOUR"
       assert_transition_layout "${reverse_states[$index]}" "$axis"
     done
@@ -272,6 +272,60 @@ test_layout_middle_sibling_enters_then_expands() {
   done
 }
 
+test_layout_larger_groups_pair_locally() {
+  local axis across within forward backward step before outer pane
+  local -a states
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  states=('1243' '143|123' '1243' '123|143')
+  for axis in horizontal vertical; do
+    case "$axis" in
+      horizontal) across=-h; within=-v; forward=S-up; backward=S-down ;;
+      vertical) across=-v; within=-h; forward=S-left; backward=S-right ;;
+    esac
+    ONE="$(layout_tmux new-window -d -P -F '#{pane_id}' -n "local-$axis" 'sleep 120')"
+    TWO="$(layout_tmux split-window -d "$across" -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+    FOUR="$(layout_tmux split-window -d "$within" -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
+    THREE="$(layout_tmux split-window -d "$across" -f -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+    layout_tmux select-layout -E -t "$THREE"
+    layout_tmux select-layout -E -t "$THREE"
+    before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+    assert_transition_layout '123|143' "$axis"
+    for step in 0 1 2 3; do
+      if [[ "$step" -lt 2 ]]; then run_layout_binding "$forward" "$FOUR"
+      else run_layout_binding "$backward" "$FOUR"; fi
+      assert_transition_layout "${states[$step]}" "$axis"
+      assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_active}')"
+      assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+      for pane in "$ONE" "$THREE"; do
+        if [[ "$axis" == horizontal ]]; then
+          outer="$(layout_tmux display-message -p -t "$pane" '#{==:#{pane_height},#{window_height}}')"
+        else
+          outer="$(layout_tmux display-message -p -t "$pane" '#{==:#{pane_width},#{window_width}}')"
+        fi
+        assert_eq 1 "$outer" 'expected outer panes to retain their full span'
+      done
+    done
+    run_layout_binding "$forward" "$FOUR"
+    run_layout_binding "$forward" "$ONE"
+    assert_transition_layout '143|243' "$axis"
+  done
+}
+
+test_layout_local_pairing_with_neighbouring_group() {
+  local before
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  create_transition_layout horizontal local-group
+  before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+  assert_transition_layout '124|134' horizontal
+  run_layout_binding S-up "$FOUR"
+  assert_transition_layout '14|12|13' horizontal
+  assert_eq 1 "$(layout_tmux display-message -p -t "$ONE" '#{==:#{pane_height},#{window_height}}')"
+  assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_active}')"
+  assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+}
+
 test_case 'tmux layout: entry-first horizontal and vertical split transitions' test_layout_entry_first_transition_sequences
 test_case 'tmux layout: single pane is unchanged' test_layout_single_pane_is_unchanged
 test_case 'tmux layout: zoom and marked pane stay correctly scoped' test_layout_zoom_and_marked_pane
@@ -280,3 +334,5 @@ test_case 'tmux layout: equivalent nested containers have the same transitions' 
 test_case 'tmux layout: three-pane promotion reverses without saved history' test_layout_three_pane_promotion_reverses
 test_case 'tmux layout: invalid layout input leaves panes untouched' test_layout_invalid_input_does_not_mutate_panes
 test_case 'tmux layout: a middle sibling enters first and expands on the next press' test_layout_middle_sibling_enters_then_expands
+test_case 'tmux layout: larger groups pair locally without moving outer panes' test_layout_larger_groups_pair_locally
+test_case 'tmux layout: local pairing can target a neighbouring group' test_layout_local_pairing_with_neighbouring_group

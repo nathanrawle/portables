@@ -22,7 +22,8 @@ with rows and columns exchanged.
 Each press makes one structural transition:
 
 - Enter an adjacent pane or group before crossing it.
-- Expand out of the containing region when there is no further sibling in that direction.
+- Pair locally when moving perpendicular to a group of three or more siblings.
+- Expand out of smaller containing regions when there is no further sibling in that direction.
 
 When approaching an individual sibling, horizontal movement joins below it,
 while vertical movement joins to its right. When entering a group, horizontal
@@ -32,10 +33,25 @@ branch, inserting the active pane on the side it came from.
 For example, with pane 4 active, successive Shift+Left presses now produce:
 
 ```text
-124 → 122 → 12 → 142 → 12 → 412
-134   134   13   143   43   413
+124 → 122 → 12 → 122 → 142 → 12 → 412
+134   134   13   143   143   43   413
             14
 ```
+
+Perpendicular movement in a group of three or more siblings pairs with the
+previous sibling (above or left), falling back to the next sibling when the
+active pane is first. The pair forms on the requested side, leaving other
+sibling regions outside it. A neighbouring sibling may itself be a group.
+Two-child groups retain their existing outward expansion behaviour.
+
+For example, with pane 4 active, two Shift+Up presses stay between panes 1 and 3:
+
+```text
+123            1243            143
+143 → Up →             → Up → 123
+```
+
+Two Shift+Down presses reverse this example. Left/Right use the transposed rule.
 
 Movement follows the current split structure without saved movement history.
 Opposite-direction presses follow the same entry-first rules; longer sequences
