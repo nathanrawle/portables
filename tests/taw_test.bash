@@ -221,6 +221,10 @@ fi
 
 if [[ -n "${TAW_FAKE_FZF_NO_MATCH_QUERY:-}" ]]; then
   output_query="${TAW_FAKE_FZF_NO_MATCH_QUERY}"
+  if (( expects_key )) && [[ "$key" = ctrl-d ]]; then
+    printf '%s\n%s\n' "$output_query" "$key"
+    exit 1
+  fi
   if (( supports_create )); then
     if (( print_query )); then
       printf '%s\n' "$output_query"
@@ -4823,6 +4827,38 @@ test_picker_worktree_removal_allows_sibling_path() {
   assert_no_tmux_work_window "$log"
 }
 
+exercise_legacy_removal_without_selection() {
+  local mode="$1" repo fake_bin no_fzf_path log args_log count_file
+  local -a picker_args=()
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  [[ "$mode" != explicit ]] || picker_args=(--mode=branch)
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  count_file="$TEST_TMPDIR/fzf-count"
+  : >"$log"
+  EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' \
+    TAW_FAKE_FZF_NO_MATCH_QUERY=no-matching-branch TAW_FAKE_FZF_COUNT_FILE="$count_file" \
+    TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" "${picker_args[@]}"
+  assert_eq 3 "$(cat "$count_file")" "expected the picker to reopen before cancellation"
+  assert_file_contains "$args_log" $'--query=no-matching-branch\t'
+  assert_file_not_contains "$log" $'list-panes\t'
+  assert_no_tmux_work_window "$log"
+  git -C "$repo" show-ref --verify --quiet refs/heads/develop
+}
+
+test_legacy_removal_without_selection_explicit() {
+  exercise_legacy_removal_without_selection explicit
+}
+
+test_legacy_removal_without_selection_automatic() {
+  exercise_legacy_removal_without_selection automatic
+}
+
 test_picker_worktree_removal_unassigned_is_inert() {
   local repo fake_bin no_fzf_path log args_log
   repo="$TEST_TMPDIR/repo"
@@ -6212,3 +6248,7 @@ test_case "taw: picker worktree removal ignores remote and message rows" \
   test_picker_worktree_removal_remote_and_message_are_inert
 test_case "taw: picker worktree removal is unavailable in session mode" \
   test_picker_worktree_removal_session_has_no_shortcut
+test_case "taw: legacy removal without selection keeps explicit picker open" \
+  test_legacy_removal_without_selection_explicit
+test_case "taw: legacy removal without selection keeps automatic picker open" \
+  test_legacy_removal_without_selection_automatic

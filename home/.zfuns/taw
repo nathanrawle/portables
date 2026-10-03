@@ -1204,6 +1204,10 @@ _taw_resolve_explicit_picker() {
         return 0
       fi
 
+      if [[ "$_taw_key" == ctrl-d && "$_taw_picker_mode" == branch \
+        && -z "${_taw_output_lines[3]-}" ]]; then
+        continue
+      fi
       (( ${#_taw_output_lines[@]} >= 3 )) || return 1
       _taw_choice="${_taw_output_lines[3]}"
       [[ -n "$_taw_choice" ]] || return 1
@@ -1831,7 +1835,11 @@ _taw_select_branch_target_with_fzf() {
       130) return 130 ;;
       2) return 2 ;;
       1)
-        [[ "$_taw_modern_fzf" != true || "$_taw_choice" == *$'\ncreate'* ]] || return 1
+        if [[ "$_taw_modern_fzf" == true ]]; then
+          [[ "$_taw_choice" == *$'\ncreate'* ]] || return 1
+        else
+          [[ "$_taw_choice" == *$'\nctrl-d' ]] || return 1
+        fi
         ;;
       *) return 1 ;;
     esac
@@ -1865,6 +1873,9 @@ _taw_select_branch_target_with_fzf() {
       _taw_picker_ref=
       _taw_picker_path=
       return 0
+    fi
+    if [[ "$_taw_key" == ctrl-d && -z "${_taw_output_lines[3]-}" ]]; then
+      continue
     fi
     (( ${#_taw_output_lines[@]} >= 3 )) || return 1
     _taw_choice="${_taw_output_lines[3]}"
