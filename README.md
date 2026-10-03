@@ -210,3 +210,4 @@ and is reserved for the pull-request publication gates documented in
 
 For the worktree functions, see [taw](docs/taw.md) and
 [taw-convert](docs/taw-convert.md). Contributor conventions are in [AGENTS.md](AGENTS.md).
+For pane reshaping shortcuts, see [tmux layouts](docs/tmux-layout.md).
