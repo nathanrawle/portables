@@ -5,67 +5,230 @@ set -euo pipefail
 pane="$1"
 direction="$2"
 case "$direction" in
-  left) axis=h; opposite=right; neighbours=(up-of down-of) ;;
-  right) axis=h; opposite=left; neighbours=(up-of down-of) ;;
-  up) axis=v; opposite=bottom; neighbours=(left-of right-of) ;;
-  down) axis=v; opposite=top; neighbours=(left-of right-of) ;;
+  left|right|up|down) ;;
   *) printf 'Unknown pane direction: %s\n' "$direction" >&2; exit 2 ;;
 esac
 
-read -r window count zoomed < <(
-  tmux display-message -p -t "$pane" '#{window_id} #{window_panes} #{window_zoomed_flag}'
+read -r window zoomed < <(
+  tmux display-message -p -t "$pane" '#{window_id} #{window_zoomed_flag}'
 )
-[[ "$count" -gt 1 ]] || exit 0
-[[ "$zoomed" -eq 0 ]] || tmux resize-pane -Z -t "$pane"
-tmux select-pane -t "$pane"
+original_layout="$(tmux display-message -p -t "$pane" '#{window_layout}')"
+original_order="$(tmux list-panes -t "$window" -F '#{pane_id}')"
 
-case "$direction" in
-  up) edge_name=top; neighbour_name=up-of ;;
-  down) edge_name=bottom; neighbour_name=down-of ;;
-  *) edge_name="$direction"; neighbour_name="$direction-of" ;;
-esac
-read -r at_edge at_opposite width height window_width window_height < <(
-  tmux display-message -p -t "$pane" \
-    "#{pane_at_$edge_name} #{pane_at_$opposite} #{pane_width} #{pane_height} #{window_width} #{window_height}"
-)
-if [[ "$at_edge" -eq 1 ]]; then
-  [[ "$zoomed" -eq 0 ]] || tmux resize-pane -Z -t "$pane"
-  exit 0
-fi
+transformation="$(awk -v active="${pane#%}" -v direction="$direction" '
+function invalid() { print "Invalid pane layout" > "/dev/stderr"; exit 1 }
+function number(    value) {
+  if (!match(substr(text, pos), /^[0-9]+/)) invalid()
+  value = substr(text, pos, RLENGTH) + 0
+  pos += RLENGTH
+  return value
+}
+function expect(char) {
+  if (substr(text, pos++, 1) != char) invalid()
+}
+function parse(owner,    node, char, closing) {
+  node = ++nodes
+  parent[node] = owner
+  width[node] = number(); expect("x"); height[node] = number()
+  expect(","); number(); expect(","); number()
+  char = substr(text, pos, 1)
+  if (char == "{" || char == "[") {
+    kind[node] = char; pos++
+    closing = char == "{" ? "}" : "]"
+    do {
+      child[node, ++count[node]] = parse(node)
+      char = substr(text, pos++, 1)
+    } while (char == ",")
+    if (char != closing || count[node] < 2) invalid()
+  } else {
+    expect(","); id[node] = number()
+    if (id[node] == active) source = node
+  }
+  return node
+}
+function position(node,    owner, i) {
+  owner = parent[node]
+  for (i = 1; i <= count[owner]; i++) if (child[owner, i] == node) return i
+  invalid()
+}
+function replace(node, replacement,    owner, slot) {
+  owner = parent[node]
+  if (owner) { slot = position(node); child[owner, slot] = replacement }
+  else root = replacement
+  parent[replacement] = owner
+}
+function detach(node,    owner, slot, i) {
+  owner = parent[node]; slot = position(node)
+  for (i = slot; i < count[owner]; i++) child[owner, i] = child[owner, i + 1]
+  count[owner]--
+  parent[node] = 0
+}
+function insert(owner, slot, node,    i) {
+  for (i = count[owner]; i >= slot; i--) child[owner, i + 1] = child[owner, i]
+  child[owner, slot] = node; count[owner]++; parent[node] = owner
+}
+function wrap(target, orientation, first, second,    node) {
+  node = ++nodes; kind[node] = orientation
+  width[node] = width[target]; height[node] = height[target]
+  replace(target, node)
+  count[node] = 2; child[node, 1] = first; child[node, 2] = second
+  parent[first] = node; parent[second] = node
+}
+function beside(target, node, before, orientation,    owner, slot) {
+  owner = parent[target]
+  if (owner && kind[owner] == orientation) {
+    slot = position(target) + (before ? 0 : 1)
+    insert(owner, slot, node)
+  } else if (before) wrap(target, orientation, node, target)
+  else wrap(target, orientation, target, node)
+}
+function lift(container) {
+  detach(source)
+  beside(container, source, backwards, axis)
+}
+function normalize(node,    i, j, descendant, size, replacement) {
+  if (!kind[node]) return node
+  size = count[node]; count[node] = 0
+  for (i = 1; i <= size; i++) saved[node, i] = child[node, i]
+  for (i = 1; i <= size; i++) {
+    descendant = normalize(saved[node, i])
+    if (kind[descendant] == kind[node]) {
+      for (j = 1; j <= count[descendant]; j++) insert(node, count[node] + 1, child[descendant, j])
+    } else insert(node, count[node] + 1, descendant)
+  }
+  if (count[node] == 1) {
+    replacement = child[node, 1]; parent[replacement] = parent[node]
+    return replacement
+  }
+  if (count[node] == 0) invalid()
+  return node
+}
+function measure(node,    i, descendant, w, h) {
+  if (!kind[node]) return
+  w = 0; h = 0
+  for (i = 1; i <= count[node]; i++) {
+    descendant = child[node, i]; measure(descendant)
+    if (kind[node] == "{") {
+      w += width[descendant] + (i > 1)
+      if (height[descendant] > h) h = height[descendant]
+    } else {
+      h += height[descendant] + (i > 1)
+      if (width[descendant] > w) w = width[descendant]
+    }
+  }
+  width[node] = w; height[node] = h
+}
+function render(node, w, h, x, y,    out, i, descendant, available, total, amount, used, weight) {
+  if (w < 2 || h < 2) invalid()
+  out = w "x" h "," x "," y
+  if (!kind[node]) {
+    order = order (order == "" ? "" : "\n") "%" id[node]
+    return out "," id[node]
+  }
+  available = (kind[node] == "{" ? w : h) - count[node] + 1
+  total = 0
+  for (i = 1; i <= count[node]; i++) {
+    descendant = child[node, i]
+    total += (kind[node] == "{" ? width[descendant] : height[descendant])
+  }
+  used = 0; out = out kind[node]
+  for (i = 1; i <= count[node]; i++) {
+    descendant = child[node, i]
+    weight = kind[node] == "{" ? width[descendant] : height[descendant]
+    amount = i == count[node] ? available - used : int(available * weight / total)
+    if (i > 1) out = out ","
+    if (kind[node] == "{") out = out render(descendant, amount, h, x + used + i - 1, y)
+    else out = out render(descendant, w, amount, x, y + used + i - 1)
+    used += amount
+  }
+  return out (kind[node] == "{" ? "}" : "]")
+}
+{
+  text = substr($0, 6); pos = 1
+  root = parse(0)
+  if (pos != length(text) + 1 || !source) invalid()
+  root_width = width[root]; root_height = height[root]
+  axis = direction == "left" || direction == "right" ? "{" : "["
+  perpendicular = axis == "{" ? "[" : "{"
+  backwards = direction == "left" || direction == "up"
+  root = normalize(root)
+  owner = parent[source]
+  if (!owner) exit
+  if (kind[owner] != axis) lift(owner)
+  else {
+    slot = position(source); neighbour = slot + (backwards ? -1 : 1)
+    if (neighbour < 1 || neighbour > count[owner]) {
+      container = parent[owner]
+      while (container && kind[container] != perpendicular) container = parent[container]
+      if (!container) exit
+      lift(container)
+    } else {
+      target = child[owner, neighbour]
+      if (kind[target]) {
+        while (kind[target]) {
+          slot = kind[target] == perpendicular || backwards ? count[target] : 1
+          target = child[target, slot]
+        }
+        detach(source)
+        beside(target, source, !backwards, axis)
+      } else {
+        container = parent[owner]
+        while (container && kind[container] != perpendicular) container = parent[container]
+        if (!container) {
+          detach(source)
+          wrap(target, perpendicular, target, source)
+        } else {
+          slot = position(source)
+          child[owner, neighbour] = source; child[owner, slot] = target
+        }
+      }
+    }
+  }
+  root = normalize(root)
+  measure(root)
+  body = render(root, root_width, root_height, 0, 0)
+  print body
+  print order
+}' <<<"$original_layout")"
+[[ -n "$transformation" ]] || exit 0
+body="${transformation%%$'\n'*}"
+desired_order="${transformation#*$'\n'}"
+checksum=0
+for ((i = 0; i < ${#body}; i++)); do
+  printf -v code '%d' "'${body:i:1}"
+  checksum=$(( ((checksum >> 1) + ((checksum & 1) << 15) + code) & 65535 ))
+done
+printf -v new_layout '%04x,%s' "$checksum" "$body"
 
-before=
-case "$direction" in left|up) before=b ;; esac
-peer=
-# Restrict promotion to corner panes so interior moves stay beside their neighbour.
-if [[ "$at_opposite" -eq 1 ]] && \
-  { [[ "$axis" == h && "$height" -lt "$window_height" ]] ||
-    [[ "$axis" == v && "$width" -lt "$window_width" ]]; }; then
-  for neighbour in "${neighbours[@]}"; do
-    peer="$(tmux display-message -p -t "$window.{$neighbour}" '#{pane_id}' 2>/dev/null || true)"
-    [[ -z "$peer" || "$peer" == "$pane" ]] || break
-    peer=
-  done
-fi
+reorder_panes() {
+  local desired="$1" expected actual index=0
+  while IFS= read -r expected; do
+    index=$((index + 1))
+    actual="$(tmux list-panes -t "$window" -F '#{pane_id}' | sed -n "${index}p")" || return 1
+    [[ -n "$actual" ]] || return 1
+    if [[ "$actual" != "$expected" ]]; then
+      tmux swap-pane -d -s "$expected" -t "$actual" || return 1
+    fi
+  done <<<"$desired"
+}
 
-if [[ -n "$peer" ]]; then
-  edge=
-  case "$direction" in right|down) edge=b ;; esac
-  # Promoting the peer first handles corner grids built with either split order.
-  tmux move-pane "-${axis}f${edge}" -s "$peer" -t "$pane"
-  tmux move-pane "-${axis}${before}" -s "$pane" -t "$peer"
-else
-  target="$(tmux display-message -p -t "$window.{$neighbour_name}" '#{pane_id}')"
-  read -r target_width target_height < <(
-    tmux display-message -p -t "$target" '#{pane_width} #{pane_height}'
-  )
-  if [[ "$axis" == h && "$height" -eq "$window_height" && "$target_height" -eq "$window_height" ]] ||
-    [[ "$axis" == v && "$width" -eq "$window_width" && "$target_width" -eq "$window_width" ]]; then
-    tmux swap-pane -s "$pane" -t "$target"
-  else
-    tmux move-pane "-${axis}${before}" -s "$pane" -t "$target"
+restore_layout() {
+  local status=$?
+  trap - EXIT
+  if [[ "$status" -ne 0 ]]; then
+    if ! reorder_panes "$original_order" || ! tmux select-layout -t "$window" "$original_layout"; then
+      printf 'reshape-pane: could not restore the original layout\n' >&2
+    fi
+    tmux select-pane -t "$pane" || true
+    if [[ "$zoomed" -eq 1 ]]; then tmux resize-pane -Z -t "$pane" || true; fi
   fi
-fi
-
+  exit "$status"
+}
+trap restore_layout EXIT
+[[ "$zoomed" -eq 0 ]] || tmux resize-pane -Z -t "$pane"
+# Saved tmux layouts assign panes by list order, rather than their embedded IDs.
+reorder_panes "$desired_order"
+tmux select-layout -t "$window" "$new_layout"
 tmux select-pane -t "$pane"
 tmux select-layout -E -t "$pane"
 tmux select-layout -E -t "$pane"

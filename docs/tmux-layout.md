@@ -1,49 +1,46 @@
 # Reshaping tmux panes
 
 The prefix is Ctrl+backslash. Press it, release it, then press Shift+arrow to
-move the active pane one adjacent column or row in that direction:
+move the active pane through the window's split structure:
 
-| Key after prefix | Result |
+| Key after prefix | Direction |
 | --- | --- |
-| Shift+Left/Right | Move one column left/right |
-| Shift+Up/Down | Move one row up/down |
+| Shift+Left/Right | Move through columns |
+| Shift+Up/Down | Move through rows |
 
-For example, select D in either layout and press prefix, then Shift+Left:
+With pane 4 active, repeated Shift+Left produces this sequence:
 
 ```text
-Three panes                 Four panes
-┌─────┬─────┐               ┌─────┬─────┐
-│     │  B  │               │  A  │  B  │
-│  A  ├─────┤               ├─────┼─────┤
-│     │  D  │               │  C  │  D  │
-└─────┴─────┘               └─────┴─────┘
-        ↓                           ↓
-┌─────┬─────┬─────┐         ┌─────┬─────┬─────┐
-│     │     │     │         │  A  │     │     │
-│  A  │  D  │  B  │         ├─────┤  D  │  B  │
-│     │     │     │         │  C  │     │     │
-└─────┴─────┴─────┘         └─────┴─────┴─────┘
+124 → 122 → 122 → 142 → 12 → 412
+134   134   143   143   43   413
 ```
 
-Each invocation moves only toward the adjacent pane. At the window boundary,
-pressing outward does nothing: movement never wraps to the opposite edge.
-Repeated presses move through adjacent slots one at a time.
+Repeated Shift+Right traverses those layouts in reverse. These diagrams show
+which regions each pane occupies; widths and heights follow tmux's sizing
+rules. Up/Down use the same transitions with rows and columns exchanged.
 
-For a corner pane moving inward, the helper can promote its perpendicular
-neighbour at the existing edge before inserting the active pane beside it.
-This produces the full-height middle column illustrated above. Elsewhere,
-movement swaps adjacent full-span panes or inserts the active pane beside an
-individual neighbour. Moving toward stacked panes may therefore change the
-active pane's height; columns of stacked panes are not moved as a group.
+Each press makes one structural transition:
 
-Pane IDs and running programs survive. The vacated spaces collapse, retaining
-the remaining split structure. The moved pane stays focused; a zoomed window
-becomes unzoomed so the new layout is visible. A single-pane window stays
-unchanged.
+- Enter a neighbouring region on the side the active pane came from.
+- Cross an adjacent sibling within that region.
+- Expand out of the region when there is no further sibling in that direction.
 
-Each successful move finishes with `select-layout -E` twice on the moved pane. In the
-examples above, this makes the three columns equal in width, allowing for
-cell rounding. It does not recursively equalise every nested group.
+Horizontal entry uses the neighbouring region's bottom branch; vertical entry
+uses its right branch. Entering a single full-height pane creates a lower
+split, while entering a single full-width pane creates a right split.
+Movement follows the current split structure, without saved movement history.
+Equivalent nested containers with the same orientation are treated as one group.
+
+Touching a window edge does not prevent expansion. Movement stops when the
+pane is already outside every relevant split group at that edge. Further
+presses leave the layout and zoom state unchanged. Single-pane windows also
+stay unchanged.
+
+Pane IDs and running programs survive. The moved pane stays focused; successful
+movement reveals a zoomed window's new layout. Each successful move finishes
+with `select-layout -E` twice on the moved pane, like two presses of prefix+E.
+This equalises nearby groups, rather than every group recursively. A failed
+layout application restores the original pane order, layout, focus and zoom.
 
 Ctrl+Shift+Left/Right still swaps panes between existing slots. For manual
 resizing, prefix then Ctrl+arrow adjusts by one cell, or Alt+arrow by five.
