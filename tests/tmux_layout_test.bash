@@ -20,10 +20,10 @@ run_layout_binding() {
   local key="$1" pane="$2"
   layout_tmux select-window -t "$pane"
   layout_tmux select-pane -t "$pane"
-  # Execute the loaded binding body with the same pane context as a key press.
+  # list-keys escapes outer command separators that source-file needs to execute directly.
   layout_tmux list-keys -T root | \
     awk -v key="$key" 'tolower($4) == tolower(key)' | \
-    sed -E 's/^bind-key[[:space:]]+-T[[:space:]]+root[[:space:]]+[^[:space:]]+[[:space:]]+//' \
+    sed -E 's/^bind-key[[:space:]]+-T[[:space:]]+root[[:space:]]+[^[:space:]]+[[:space:]]+//; s/\\;/;/g' \
     >"$TEST_TMPDIR/binding.conf"
   [[ -s "$TEST_TMPDIR/binding.conf" ]] || fail "missing loaded binding: $key"
   layout_tmux source-file -t "$pane" "$TEST_TMPDIR/binding.conf"
@@ -653,6 +653,107 @@ test_layout_insufficient_space_preserves_state() {
   assert_eq 'Invalid pane layout' "$(cat "$TEST_TMPDIR/diagnostics")"
   assert_eq "$before" "$(layout_window_state)" 'insufficient space should preserve pane state'
 }
+
+pane_sizing_dimension() {
+  layout_tmux display-message -p -t "$1" "#{pane_$2}"
+}
+
+create_sizing_stack() {
+  ONE="$(layout_tmux new-window -d -P -F '#{pane_id}' -n sizing 'sleep 120')"
+  TWO="$(layout_tmux split-window -dh -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+  THREE="$(layout_tmux split-window -dv -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
+}
+
+test_layout_sizing_width_cycle() {
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  create_sizing_stack
+  local width percent expected
+  for width in 180 181; do
+    layout_tmux resize-window -t "$ONE" -x "$width"
+    layout_tmux resize-pane -t "$ONE" -x 20
+    for percent in 25 33 50 66 75 25; do
+      run_layout_binding C-, "$ONE"
+      expected=$((width * percent / 100))
+      assert_eq "$expected" "$(pane_sizing_dimension "$ONE" width)" "width preset $percent at $width columns"
+    done
+    layout_tmux resize-pane -t "$ONE" -x "$((width * 40 / 100))"
+    run_layout_binding C-, "$ONE"
+    assert_eq "$((width / 2))" "$(pane_sizing_dimension "$ONE" width)" 'arbitrary width should advance to 50%'
+  done
+}
+
+test_layout_sizing_height_toggle() {
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  create_sizing_stack
+  local height outer top bottom saved
+  height="$(layout_tmux display-message -p -t "$TWO" '#{window_height}')"
+  outer="$(layout_tmux display-message -p -t "$ONE" '#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}')"
+  run_layout_binding C-. "$TWO"
+  assert_eq "$((height * 95 / 100))" "$(pane_sizing_dimension "$TWO" height)" 'height should expand to 95%'
+  saved="$(layout_tmux display-message -p -t "$TWO" '#{@pane_height_expanded}')"
+  assert_eq "$((height * 95 / 100)):$height" "$saved" 'remember achieved dimensions'
+  assert_eq '' "$(layout_tmux display-message -p -t "$THREE" '#{@pane_height_expanded}')" 'state must stay pane local'
+  run_layout_binding C-. "$TWO"
+  top="$(pane_sizing_dimension "$TWO" height)"
+  bottom="$(pane_sizing_dimension "$THREE" height)"
+  [[ $((top - bottom)) -ge -1 && $((top - bottom)) -le 1 ]] || fail 'stack heights should be equal within one row'
+  assert_eq '' "$(layout_tmux display-message -p -t "$TWO" '#{@pane_height_expanded}')" 'equalizing clears state'
+  assert_eq "$outer" "$(layout_tmux display-message -p -t "$ONE" '#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}')" 'neighboring column must stay unchanged'
+  layout_tmux resize-pane -t "$TWO" -y 95%
+  run_layout_binding C-. "$TWO"
+  assert_eq "$top" "$(pane_sizing_dimension "$TWO" height)" 'an existing 95% pane should equalize'
+  run_layout_binding C-. "$TWO"
+  layout_tmux resize-pane -t "$TWO" -y 20
+  run_layout_binding C-. "$TWO"
+  assert_eq "$((height * 95 / 100))" "$(pane_sizing_dimension "$TWO" height)" 'manual resizing should invalidate expansion state'
+  saved="$(layout_tmux display-message -p -t "$TWO" '#{@pane_height_expanded}')"
+  run_layout_binding C-. "$THREE"
+  assert_eq "$saved" "$(layout_tmux display-message -p -t "$TWO" '#{@pane_height_expanded}')" 'expanding another pane must not overwrite saved state'
+  assert_eq "$((height * 95 / 100)):$height" "$(layout_tmux display-message -p -t "$THREE" '#{@pane_height_expanded}')" 'another pane tracks its own expansion'
+}
+
+test_layout_sizing_capped_height() {
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  create_sizing_stack
+  local height actual top bottom
+  layout_tmux resize-window -t "$TWO" -y 12
+  height="$(layout_tmux display-message -p -t "$TWO" '#{window_height}')"
+  run_layout_binding C-. "$TWO"
+  actual="$(pane_sizing_dimension "$TWO" height)"
+  [[ "$actual" -lt $((height * 95 / 100)) ]] || fail 'fixture should cap expansion below 95%'
+  assert_eq "$actual:$height" "$(layout_tmux display-message -p -t "$TWO" '#{@pane_height_expanded}')" 'remember capped height'
+  run_layout_binding C-. "$TWO"
+  top="$(pane_sizing_dimension "$TWO" height)"
+  bottom="$(pane_sizing_dimension "$THREE" height)"
+  [[ $((top - bottom)) -ge -1 && $((top - bottom)) -le 1 ]] || fail 'capped expansion should toggle back to equal heights'
+}
+
+test_layout_sizing_zoom_and_single_pane() {
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  local before key
+  ONE="$(layout_tmux display-message -p '#{pane_id}')"
+  before="$(layout_tmux display-message -p -t "$ONE" '#{window_layout}')"
+  for key in C-, C-. C-.; do
+    run_layout_binding "$key" "$ONE"
+    assert_eq "$before" "$(layout_tmux display-message -p -t "$ONE" '#{window_layout}')" 'single pane geometry stays unchanged'
+  done
+  create_sizing_stack
+  layout_tmux resize-pane -t "$ONE" -x 20
+  for key in C-, C-.; do
+    layout_tmux resize-pane -Z -t "$TWO"
+    run_layout_binding "$key" "$TWO"
+    assert_eq 0 "$(layout_tmux display-message -p -t "$TWO" '#{window_zoomed_flag}')" 'sizing should unzoom'
+  done
+}
+
+test_case 'tmux layout: sizing width cycles through rounded presets' test_layout_sizing_width_cycle
+test_case 'tmux layout: sizing height toggles locally and invalidates stale state' test_layout_sizing_height_toggle
+test_case 'tmux layout: sizing capped height still toggles back' test_layout_sizing_capped_height
+test_case 'tmux layout: sizing unzooms and preserves single panes' test_layout_sizing_zoom_and_single_pane
 
 test_case 'tmux layout: entry-first horizontal and vertical split transitions' test_layout_entry_first_transition_sequences
 test_case 'tmux layout: single pane is unchanged' test_layout_single_pane_is_unchanged
