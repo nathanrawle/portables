@@ -113,3 +113,7 @@ bash ./symlinks --force .config/tmux/tmux.conf .config/tmux/reshape-pane
 Then reload with prefix followed by `r`. `relink` instead uses the checkout
 identified by `$PORTABLES`. Once the helper is linked to this checkout, edits
 to it take effect on the next keypress.
+
+Reshapes from multiple clients are serialized per window with tmux `wait-for`
+locks. The lock covers state capture, movement, origin updates and failure
+rollback; reshapes in different windows remain independent.

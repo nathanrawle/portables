@@ -9,6 +9,16 @@ case "$direction" in
   *) printf 'Unknown pane direction: %s\n' "$direction" >&2; exit 2 ;;
 esac
 
+window="$(tmux display-message -p -t "$pane" '#{window_id}')"
+lock="reshape-pane-$window"
+tmux wait-for -L "$lock"
+release_lock() { tmux wait-for -U "$lock"; }
+trap release_lock EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# Other clients must finish before we snapshot state used for application and rollback.
+[[ "$(tmux display-message -p -t "$pane" '#{window_id}')" == "$window" ]] || exit 1
+
 read -r window zoomed original_hint < <(
   tmux display-message -p -t "$pane" '#{window_id} #{window_zoomed_flag} #{@reshape_origin}'
 )
@@ -305,6 +315,7 @@ restore_layout() {
     tmux select-pane -t "$pane" || true
     if [[ "$zoomed" -eq 1 ]]; then tmux resize-pane -Z -t "$pane" || true; fi
   fi
+  release_lock || true
   exit "$status"
 }
 trap restore_layout EXIT

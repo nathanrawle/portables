@@ -654,6 +654,51 @@ test_layout_insufficient_space_preserves_state() {
   assert_eq "$before" "$(layout_window_state)" 'insufficient space should preserve pane state'
 }
 
+test_layout_concurrent_moves_are_serialized() {
+  local window socket real_tmux first second other i
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  create_transition_layout horizontal concurrent
+  window="$(layout_tmux display-message -p -t "$FOUR" '#{window_id}')"
+  socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
+  real_tmux="$(command -v tmux)"
+  mkdir -p "$TEST_TMPDIR/bin"
+  cat >"$TEST_TMPDIR/bin/tmux" <<'WRAPPER'
+#!/usr/bin/env bash
+if [[ "$1" == wait-for && "$2" == -L ]]; then
+  touch "$MARKER.attempt"
+fi
+if [[ "$1" == display-message && "$*" == *'#{window_layout}'* ]]; then
+  touch "$MARKER.snapshot"
+fi
+exec "$REAL_TMUX" "$@"
+WRAPPER
+  chmod +x "$TEST_TMPDIR/bin/tmux"
+  layout_tmux wait-for -L "reshape-pane-$window"
+  TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
+    MARKER="$TEST_TMPDIR/first" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left &
+  first=$!
+  TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
+    MARKER="$TEST_TMPDIR/second" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left &
+  second=$!
+  for ((i = 0; i < 200; i++)); do
+    [[ -f "$TEST_TMPDIR/first.attempt" && -f "$TEST_TMPDIR/second.attempt" ]] && break
+    sleep 0.02
+  done
+  [[ -f "$TEST_TMPDIR/first.attempt" && -f "$TEST_TMPDIR/second.attempt" ]] \
+    || fail 'helpers did not attempt to acquire the window lock'
+  [[ ! -f "$TEST_TMPDIR/first.snapshot" && ! -f "$TEST_TMPDIR/second.snapshot" ]] \
+    || fail 'a blocked helper captured a stale layout'
+  other="$(layout_tmux display-message -p -t layout:1 '#{pane_id}')"
+  TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$other" left
+  layout_tmux wait-for -U "reshape-pane-$window"
+  wait "$first"
+  wait "$second"
+  assert_transition_layout '12|13|14' horizontal
+  TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" right
+  assert_transition_layout '122|134' horizontal
+}
+
 test_case 'tmux layout: entry-first horizontal and vertical split transitions' test_layout_entry_first_transition_sequences
 test_case 'tmux layout: single pane is unchanged' test_layout_single_pane_is_unchanged
 test_case 'tmux layout: zoom and marked pane stay correctly scoped' test_layout_zoom_and_marked_pane
@@ -674,3 +719,5 @@ test_case 'tmux layout: real JSON windows preserve state with and without zoom' 
 test_case 'tmux layout: minimum panes can be reshaped in all directions' test_layout_minimum_panes_can_be_reshaped
 test_case 'tmux layout: insufficient space preserves state' test_layout_insufficient_space_preserves_state
 test_case 'tmux layout: nested branch minimum is reserved' test_layout_nested_branch_minimum_is_reserved
+
+test_case 'tmux layout: concurrent clients serialize snapshots and moves per window' test_layout_concurrent_moves_are_serialized
