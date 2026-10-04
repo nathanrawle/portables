@@ -423,8 +423,8 @@ test_layout_origin_is_bounded_and_pane_scoped() {
   assert_eq '' "$(origin_hint "$independent")" 'a no-op should discard an invalid origin'
 }
 
-floating_window_state() {
-  layout_tmux display-message -p -t "$FOUR" '#{window_layout}:#{window_zoomed_flag}'
+layout_window_state() {
+  layout_tmux display-message -p -t "$FOUR" '#{window_width}:#{window_height}:#{window_layout}:#{window_zoomed_flag}'
   layout_tmux list-panes -t "$FOUR" \
     -F '#{pane_id}:#{pane_pid}:#{pane_active}:#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}:#{@reshape_origin}'
 }
@@ -437,7 +437,7 @@ test_layout_floating_suffix_is_rejected_without_mutation() {
   layout_tmux select-pane -t "$FOUR"
   layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
   layout_tmux resize-pane -Z -t "$FOUR"
-  before="$(floating_window_state)"
+  before="$(layout_window_state)"
   socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
   real_tmux="$(command -v tmux)"
   mkdir -p "$TEST_TMPDIR/bin"
@@ -458,7 +458,7 @@ WRAPPER
   assert_eq 2 "$status"
   assert_eq 'reshape-pane: windows containing floating panes are not supported' \
     "$(cat "$TEST_TMPDIR/diagnostics")"
-  assert_eq "$before" "$(floating_window_state)" 'unsupported layout should preserve all pane state'
+  assert_eq "$before" "$(layout_window_state)" 'unsupported layout should preserve all pane state'
 }
 
 test_layout_real_floating_window_is_preserved() {
@@ -466,6 +466,7 @@ test_layout_real_floating_window_is_preserved() {
   command -v tmux >/dev/null 2>&1 || return 0
   setup_layout_server
   if ! layout_tmux list-commands | rg '^new-pane ' >/dev/null; then return 0; fi
+  if [[ "$(layout_tmux display-message -p -t layout:1 '#{window_layout}')" == '{'* ]]; then return 0; fi
   create_transition_layout horizontal real-floating
   floating="$(layout_tmux new-pane -d -t "$FOUR" -P -F '#{pane_id}' 'sleep 120')"
   assert_eq 1 "$(layout_tmux display-message -p -t "$floating" '#{pane_floating_flag}')"
@@ -479,14 +480,14 @@ test_layout_real_floating_window_is_preserved() {
       direction=left
       layout_tmux resize-pane -Z -t "$pane"
     else direction=up; fi
-    before="$(floating_window_state)"
+    before="$(layout_window_state)"
     status=0
     TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$pane" "$direction" \
       >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
     assert_eq 2 "$status"
     assert_eq 'reshape-pane: windows containing floating panes are not supported' \
       "$(cat "$TEST_TMPDIR/diagnostics")"
-    assert_eq "$before" "$(floating_window_state)" 'floating windows should remain unchanged'
+    assert_eq "$before" "$(layout_window_state)" 'floating windows should remain unchanged'
     if [[ "$pane" == "$FOUR" ]]; then layout_tmux resize-pane -Z -t "$pane"; fi
   done
   layout_tmux kill-pane -t "$floating"
@@ -494,6 +495,59 @@ test_layout_real_floating_window_is_preserved() {
   layout_tmux select-pane -t "$FOUR"
   TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left
   assert_transition_layout '122|134' horizontal
+}
+
+test_layout_json_format_is_rejected_without_mutation() {
+  local before socket real_tmux status
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  create_transition_layout horizontal json-format
+  layout_tmux select-pane -t "$FOUR"
+  layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
+  layout_tmux resize-pane -Z -t "$FOUR"
+  before="$(layout_window_state)"
+  socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
+  real_tmux="$(command -v tmux)"
+  mkdir -p "$TEST_TMPDIR/bin"
+  cat >"$TEST_TMPDIR/bin/tmux" <<'WRAPPER'
+#!/usr/bin/env bash
+if [[ "$1" == display-message && "$*" == *'#{window_layout}'* ]]; then
+  printf '%s\n' '{"V":2,"L":{"t":"p","w":180,"h":60,"x":0,"y":0,"I":"%0"}}'
+  exit 0
+fi
+exec "$REAL_TMUX" "$@"
+WRAPPER
+  chmod +x "$TEST_TMPDIR/bin/tmux"
+  status=0
+  TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
+    "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left \
+    >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
+  assert_eq 2 "$status"
+  assert_eq 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts' \
+    "$(cat "$TEST_TMPDIR/diagnostics")"
+  assert_eq "$before" "$(layout_window_state)" 'JSON rejection should preserve all pane state'
+}
+
+test_layout_real_json_window_is_preserved() {
+  local socket before status zoomed
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  if [[ "$(layout_tmux display-message -p -t layout:1 '#{window_layout}')" != '{'* ]]; then return 0; fi
+  create_transition_layout horizontal real-json
+  layout_tmux select-pane -t "$FOUR"
+  layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
+  socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
+  for zoomed in 0 1; do
+    if [[ "$zoomed" == 1 ]]; then layout_tmux resize-pane -Z -t "$FOUR"; fi
+    before="$(layout_window_state)"
+    status=0
+    TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left \
+      >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
+    assert_eq 2 "$status"
+    assert_eq 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts' \
+      "$(cat "$TEST_TMPDIR/diagnostics")"
+    assert_eq "$before" "$(layout_window_state)" 'real JSON windows should remain unchanged'
+  done
 }
 
 test_case 'tmux layout: entry-first horizontal and vertical split transitions' test_layout_entry_first_transition_sequences
@@ -511,3 +565,5 @@ test_case 'tmux layout: stale origins fall back to structural selection' test_la
 test_case 'tmux layout: origin hints are bounded and pane scoped' test_layout_origin_is_bounded_and_pane_scoped
 test_case 'tmux layout: floating suffix reports the tiled-window limitation without mutation' test_layout_floating_suffix_is_rejected_without_mutation
 test_case 'tmux layout: real floating windows preserve state until the floating pane is removed' test_layout_real_floating_window_is_preserved
+test_case 'tmux layout: JSON layouts report the unsupported format without mutation' test_layout_json_format_is_rejected_without_mutation
+test_case 'tmux layout: real JSON windows preserve state with and without zoom' test_layout_real_json_window_is_preserved

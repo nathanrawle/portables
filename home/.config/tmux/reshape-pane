@@ -13,6 +13,10 @@ read -r window zoomed original_hint < <(
   tmux display-message -p -t "$pane" '#{window_id} #{window_zoomed_flag} #{@reshape_origin}'
 )
 original_layout="$(tmux display-message -p -t "$pane" '#{window_layout}')"
+if [[ "$original_layout" == '{'* ]]; then
+  printf 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts\n' >&2
+  exit 2
+fi
 if [[ "$original_layout" == *'<'* ]]; then
   printf 'reshape-pane: windows containing floating panes are not supported\n' >&2
   exit 2

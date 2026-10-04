@@ -80,7 +80,14 @@ pane is already outside every relevant split group at that edge. Further
 presses leave the layout and zoom state unchanged. Single-pane windows also
 stay unchanged.
 
-Reshaping supports windows containing only tiled panes. If a window contains
+Reshaping supports tiled windows using the legacy checksummed layout format,
+validated with tmux 3.6b and 3.7c. JSON layouts emitted by tmux 3.8 release
+candidates are unsupported: the helper exits with status 2 and reports
+`reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts`.
+Rejection preserves pane order, running processes, layout, focus, zoom and origin
+hints. JSON support requires separate work, including reliable failure rollback.
+
+If a window contains
 any floating pane, the helper exits with status 2 and reports
 `reshape-pane: windows containing floating panes are not supported`, even when
 the active pane is tiled. The window, focus, zoom and origin hints stay unchanged.
