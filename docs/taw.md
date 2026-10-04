@@ -284,9 +284,8 @@ Layout on a new window:
 - without an agent and with shells: the first shell goes to the right of the editor, later shells split to the right
 
 A new tmux session keeps its project-derived session name and names its first
-window `⌂ main` with a Unicode home icon, regardless of `TAW_ICONS` or installed
-fonts. Windows added to an existing session keep their branch- or
-directory-derived names.
+window `🏡`, regardless of `TAW_ICONS` or installed fonts. Windows added to an
+existing session keep their branch- or directory-derived names.
 
 ## Peer Mode
 
