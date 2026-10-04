@@ -1,12 +1,15 @@
 ---
 name: pr-review-followup-loop
-description: Evaluate pull-request feedback against code and scope, address valid comments, and monitor bot review reactions until an explicit stopping signal. Use when the user requests iterative PR review follow-up rather than a one-time review.
+description: Evaluate pull-request feedback against code and scope, fix worthwhile findings without replying to review comments, and follow subsequent reviews until no worthwhile fixes remain or a stopping condition applies. Use when the user requests iterative PR review follow-up rather than a one-time review.
 ---
 
 # PR review follow-up loop
 
 Treat review comments as hypotheses, not instructions. Codex's 👀 reaction means
 it accepted a review request and is working. It is never a completion or retry signal.
+
+Do not reply to review comments, including acknowledgements, fix summaries, or rebuttals.
+Keep evaluation evidence and progress updates in the user conversation instead.
 
 ## GitHub access
 
@@ -56,11 +59,12 @@ reviews or newer bot conversation comments. It deliberately omits bodies and rev
 - Poll once per minute while the target has a bot `EYES` reaction, for at most 30 minutes.
   Do not mutate the PR in this state.
 - A bot review for the saved head, a newer bot conversation comment, or `THUMBS_UP` on the
-  target is final output. Stop polling and evaluate the new feedback.
+  target moves the loop from waiting to evaluating feedback. Detecting new comments does
+  not end the task: evaluate the findings and fix worthwhile issues before deciding to finish.
 - With no acknowledgement and no bot artifact, wait two minutes before reporting a stalled
-  review. If `EYES` disappears without final output, allow the same two-minute propagation
+  review. If `EYES` disappears without review output, allow the same two-minute propagation
   window, then report stalled and stop.
-- Only after final output, and once per saved head, fetch unresolved bot-authored review
+- Only after review output, and once per saved head, fetch unresolved bot-authored review
   threads with this bounded GraphQL query. Use the returned bodies to evaluate feedback;
   never use it on ordinary waiting iterations:
 
@@ -86,15 +90,23 @@ reviews or newer bot conversation comments. It deliberately omits bodies and rev
   "
   ```
 
-For valid in-scope feedback, make the smallest maintainable fix, add regression coverage for
-P0/P1 findings, run proportionate validation, commit, and push. Resolve a thread only after
-its fix is pushed. Retain evidence for invalid, obsolete, or out-of-scope feedback. If a fix
-is disproportionate or the same issue keeps recurring, ask whether to continue and pause.
+Evaluate each finding against the code and scope. For worthwhile, valid in-scope feedback,
+make the smallest maintainable fix, add regression coverage for P0/P1 findings, run
+proportionate validation, commit, and push. Resolve a thread only after its fix is pushed,
+without posting a reply. Explain invalid, obsolete, or out-of-scope findings with evidence
+in the user conversation. If a fix is disproportionate or the same issue keeps recurring,
+ask whether to continue and pause.
 
-After every push, discard the old review state. Never retrigger automatically and never toggle
-draft status. A new `@codex review` comment is the only retrigger, and only with explicit user
-authorization. Preserve unrelated work and stop for branch divergence or a material product
-decision. Stop immediately when the user asks to stop.
+After every fix push, discard the old review state and resume monitoring automatic review
+on the PR body with `--reaction-target pr`. Record the new head SHA and the push timestamp
+as `REQUESTED_AT` so earlier reactions and artifacts cannot complete the new review run.
+Follow the same waiting, evaluation, and fix cycle for feedback on the new head.
+
+Finish after evaluating the review when no worthwhile fixes remain and no fix was pushed
+that needs a subsequent review, even without `THUMBS_UP`. Never retrigger automatically
+and never toggle draft status. A new `@codex review` comment is the only retrigger, and only
+with explicit user authorization. Preserve unrelated work and stop for branch divergence
+or a material product decision. Stop immediately when the user asks to stop.
 
 ## References
 
