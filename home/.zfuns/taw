@@ -2371,7 +2371,7 @@ _taw_create_tmux_window() {
       _taw_die "could not resolve tmux session: $_taw_session_name"
       return 1
     else
-      _taw_tmux_window_name='🏡'
+      _taw_tmux_window_name="🏡 $_taw_session_name"
       _taw_created="$(tmux new-session -d -P \
         -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}' \
         -s "$_taw_session_name" -n "$_taw_tmux_window_name" -c "$_taw_window_dir" \
@@ -2384,6 +2384,7 @@ _taw_create_tmux_window() {
         return 1
       }
       _taw_session_name="$_taw_created_session_name"
+      _taw_tmux_window_name="🏡 $_taw_session_name"
       _taw_session_target="$_taw_created_session_id"
     fi
   fi
