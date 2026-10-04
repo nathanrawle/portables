@@ -3,12 +3,13 @@
 # load named directories into hash table
 [[ -e ~/.named-dirs.zsh ]] && . ~/.named-dirs.zsh
 
-# path shortening
-abrvdir=${(D)${~1}}
+# Quoting prevents contracted aliases from expanding back into absolute paths.
+abrvdir="${(D)${~1}}"
 dirarry=("${(@s:/:)${abrvdir}}")
 
 trees=(🌲 🌳 🌴 🪾 🎄 🎋)
-integer tree_hash=0 char_code worktree_index=0 i
+integer tree_hash=0 char_code worktree_index=0 anchor_index=0 tail_index=0 i
+display=()
 
 for (( i = 1; i <= $#dirarry; i++ )); do
   if [[ ${dirarry[i]} == .worktrees ]]; then
@@ -25,22 +26,42 @@ if (( worktree_index )); then
   done
   tree=${trees[$(( tree_hash % $#trees + 1 ))]}
 
-  for (( i = 1; i <= $#dirarry; i++ )); do
-    [[ ${dirarry[i]} == .worktrees ]] && dirarry[i]=$tree
-  done
+  anchor_index=$(( worktree_index - 1 ))
+  (( anchor_index < 1 )) && anchor_index=1
+  display=("$tree")
+  (( worktree_index > 1 )) && display=("${dirarry[anchor_index]}" "$tree")
+  tail_index=$(( worktree_index + 1 ))
+elif repo_root=$(git -C "${~1}" rev-parse --show-toplevel 2>/dev/null); then
+  input_path=${${~1}:A}
+  repo_root=${repo_root:A}
+  repo_suffix=${input_path#"$repo_root"}
+  suffix_parts=()
+  [[ -n $repo_suffix ]] && suffix_parts=("${(@s:/:)${repo_suffix#/}}")
+  anchor_index=$(( $#dirarry - $#suffix_parts ))
+  # An alias inside the repository can hide its root and part of its suffix.
+  (( anchor_index < 1 )) && anchor_index=1
+  display=("${dirarry[anchor_index]}")
+  tail_index=$(( anchor_index + 1 ))
+fi
+
+if (( anchor_index )); then
+  if (( $#dirarry - tail_index + 1 > 2 )); then
+    display+=(…)
+    tail_index=$(( $#dirarry - 1 ))
+  fi
+  if (( tail_index <= $#dirarry )); then
+    display+=("${(@)dirarry[tail_index,-1]}")
+  fi
+  print -r -- "${(j:/:)display}"
+  exit
 fi
 
 if (( $#dirarry <= 3 )); then
-  print "${(j:/:)dirarry}"
+  print -r -- "${(j:/:)dirarry}"
   exit
 fi
 
-if (( worktree_index > 1 && worktree_index < $#dirarry - 1 )); then
-  print "${dirarry[1]}/$tree/${(j:/:)dirarry[-2,-1]}"
-  exit
-fi
-
-print "${dirarry[1]}/…/${(j:/:)dirarry[-2,-1]}"
+print -r -- "${dirarry[1]}/…/${(j:/:)dirarry[-2,-1]}"
 exit
 
 # bash-friendly snippet if I ever decide to implement a fallback
