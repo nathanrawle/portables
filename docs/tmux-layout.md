@@ -114,6 +114,8 @@ Then reload with prefix followed by `r`. `relink` instead uses the checkout
 identified by `$PORTABLES`. Once the helper is linked to this checkout, edits
 to it take effect on the next keypress.
 
-Reshapes from multiple clients are serialized per window with tmux `wait-for`
-locks. The lock covers state capture, movement, origin updates and failure
-rollback; reshapes in different windows remain independent.
+Reshapes from multiple clients are serialized per window with descriptor
+locks using native `lockf` on macOS or `flock` on Linux. The lock covers state capture, movement, origin updates and failure
+rollback; reshapes in different windows remain independent. The OS releases the
+lock when its owner exits, including after SIGKILL. Lock files remain beside the
+tmux socket and must not be removed while the server is running.

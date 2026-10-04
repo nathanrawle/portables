@@ -665,7 +665,7 @@ test_layout_concurrent_moves_are_serialized() {
   mkdir -p "$TEST_TMPDIR/bin"
   cat >"$TEST_TMPDIR/bin/tmux" <<'WRAPPER'
 #!/usr/bin/env bash
-if [[ "$1" == wait-for && "$2" == -L ]]; then
+if [[ "$1" == display-message && "$*" == *'#{window_id}'* ]]; then
   touch "$MARKER.attempt"
 fi
 if [[ "$1" == display-message && "$*" == *'#{window_layout}'* ]]; then
@@ -674,12 +674,13 @@ fi
 exec "$REAL_TMUX" "$@"
 WRAPPER
   chmod +x "$TEST_TMPDIR/bin/tmux"
-  layout_tmux wait-for -L "reshape-pane-$window"
-  TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
-    MARKER="$TEST_TMPDIR/first" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left &
+  exec 8>>"$socket.reshape-$window"
+  if command -v flock >/dev/null 2>&1; then flock 8; else lockf 8; fi
+  (exec 8>&-; TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
+    MARKER="$TEST_TMPDIR/first" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left) &
   first=$!
-  TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
-    MARKER="$TEST_TMPDIR/second" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left &
+  (exec 8>&-; TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
+    MARKER="$TEST_TMPDIR/second" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left) &
   second=$!
   for ((i = 0; i < 200; i++)); do
     [[ -f "$TEST_TMPDIR/first.attempt" && -f "$TEST_TMPDIR/second.attempt" ]] && break
@@ -691,7 +692,7 @@ WRAPPER
     || fail 'a blocked helper captured a stale layout'
   other="$(layout_tmux display-message -p -t layout:1 '#{pane_id}')"
   TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$other" left
-  layout_tmux wait-for -U "reshape-pane-$window"
+  exec 8>&-
   wait "$first"
   wait "$second"
   assert_transition_layout '12|13|14' horizontal
@@ -721,3 +722,48 @@ test_case 'tmux layout: insufficient space preserves state' test_layout_insuffic
 test_case 'tmux layout: nested branch minimum is reserved' test_layout_nested_branch_minimum_is_reserved
 
 test_case 'tmux layout: concurrent clients serialize snapshots and moves per window' test_layout_concurrent_moves_are_serialized
+
+test_layout_killed_owner_releases_lock() {
+  local socket real_tmux owner next i
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  create_transition_layout horizontal killed-owner
+  socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
+  real_tmux="$(command -v tmux)"
+  mkdir -p "$TEST_TMPDIR/bin"
+  cat >"$TEST_TMPDIR/bin/tmux" <<'WRAPPER'
+#!/usr/bin/env bash
+if [[ "$1" == display-message && "$*" == *'#{window_layout}'* ]]; then
+  touch "$GATE.ready"
+  while [[ ! -f "$GATE.release" ]]; do sleep 0.02; done
+fi
+exec "$REAL_TMUX" "$@"
+WRAPPER
+  chmod +x "$TEST_TMPDIR/bin/tmux"
+  TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
+    GATE="$TEST_TMPDIR/gate" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left &
+  owner=$!
+  for ((i = 0; i < 200; i++)); do
+    [[ -f "$TEST_TMPDIR/gate.ready" ]] && break
+    sleep 0.02
+  done
+  [[ -f "$TEST_TMPDIR/gate.ready" ]] || fail 'owner did not acquire its lock'
+  kill -KILL "$owner"
+  wait "$owner" 2>/dev/null || true
+  (TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left && \
+    touch "$TEST_TMPDIR/next.done") &
+  next=$!
+  for ((i = 0; i < 200; i++)); do
+    [[ -f "$TEST_TMPDIR/next.done" ]] && break
+    sleep 0.02
+  done
+  touch "$TEST_TMPDIR/gate.release"
+  if [[ ! -f "$TEST_TMPDIR/next.done" ]]; then
+    kill "$next" 2>/dev/null || true
+    fail 'a killed owner left the window locked'
+  fi
+  wait "$next"
+  assert_transition_layout '122|134' horizontal
+}
+
+test_case 'tmux layout: SIGKILL releases the window lock' test_layout_killed_owner_releases_lock
