@@ -11,7 +11,7 @@ done
 HERE="$(cd -- "$(dirname -- "$SCRIPT")" && pwd -P)" || exit 1
 . "$HERE/lib/maintenance.bash" || exit 1
 LOG_NAME="${LOG_NAME:+$LOG_NAME.}symlinks"
-LINK_CONFLICT_MODE=${LINK_CONFLICT_MODE:-skip}
+LINK_CONFLICT_MODE=${LINK_CONFLICT_MODE:-force}
 APPLY_IGNORE_RULES=1
 paths=()
 SOURCES=()
@@ -24,7 +24,7 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --force) LINK_CONFLICT_MODE=force ;;
+    --no-clobber) LINK_CONFLICT_MODE=skip ;;
     --no-ignore) APPLY_IGNORE_RULES=0 ;;
     --help) usage; exit 0 ;;
     --) shift; paths+=( "$@" ); break ;;
