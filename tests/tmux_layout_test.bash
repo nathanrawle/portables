@@ -567,6 +567,93 @@ test_layout_real_json_window_is_preserved() {
   done
 }
 
+test_layout_minimum_panes_can_be_reshaped() {
+  local axis side along across width height direction before expected
+  local -a placement
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  TWO=unused
+  for axis in horizontal vertical; do
+    if [[ "$axis" == horizontal ]]; then along=-v; across=-h; width=100; height=20
+    else along=-h; across=-v; width=20; height=100; fi
+    for side in before after; do
+      placement=()
+      if [[ "$side" == after ]]; then placement=(-b); fi
+      FOUR="$(layout_tmux new-window -d -P -F '#{pane_id}' -n "minimum-$axis-$side" 'sleep 120')"
+      layout_tmux resize-window -t "$FOUR" -x "$width" -y "$height"
+      ONE="$(layout_tmux split-window -d "$along" "${placement[@]}" -l 17 -P -F '#{pane_id}' -t "$FOUR" 'sleep 120')"
+      THREE="$(layout_tmux split-window -d "$across" -l 97 -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+      case "$axis:$side" in
+        horizontal:before) direction=S-down ;;
+        horizontal:after) direction=S-up ;;
+        vertical:before) direction=S-right ;;
+        vertical:after) direction=S-left ;;
+      esac
+      if [[ "$side" == before ]]; then assert_transition_layout '44|13' "$axis"; expected='14|13'
+      else assert_transition_layout '13|44' "$axis"; expected='13|14'; fi
+      before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+      run_layout_binding "$direction" "$FOUR"
+      assert_transition_layout "$expected" "$axis"
+      assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+      assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_active}')"
+      layout_tmux list-panes -t "$FOUR" -F '#{pane_width} #{pane_height}' | \
+        awk '$1 < 2 || $2 < 2 { exit 1 }'
+    done
+  done
+  ONE="$(layout_tmux new-window -d -P -F '#{pane_id}' -n zero-excess 'sleep 120')"
+  layout_tmux resize-window -t "$ONE" -x 8 -y 5
+  TWO="$(layout_tmux split-window -dh -l 5 -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+  FOUR="$(layout_tmux split-window -dh -l 2 -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
+  THREE=unused
+  run_layout_binding S-left "$FOUR"
+  assert_transition_layout '12|14' horizontal
+  assert_eq 2 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_height}')"
+}
+
+test_layout_nested_branch_minimum_is_reserved() {
+  local lower before
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  FOUR="$(layout_tmux new-window -d -P -F '#{pane_id}' -n nested-minimum 'sleep 120')"
+  layout_tmux resize-window -t "$FOUR" -x 100 -y 20
+  ONE="$(layout_tmux split-window -dv -l 17 -P -F '#{pane_id}' -t "$FOUR" 'sleep 120')"
+  THREE="$(layout_tmux split-window -dh -l 94 -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+  lower="$(layout_tmux split-window -dv -l 14 -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+  TWO="$(layout_tmux split-window -dh -l 2 -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+  before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+  run_layout_binding S-down "$FOUR"
+  assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+  assert_eq "$(layout_tmux display-message -p -t "$THREE" '#{pane_left}')" \
+    "$(layout_tmux display-message -p -t "$FOUR" '#{pane_left}')"
+  [[ "$(layout_tmux display-message -p -t "$FOUR" '#{pane_top}')" -lt \
+    "$(layout_tmux display-message -p -t "$THREE" '#{pane_top}')" ]] \
+    || fail 'expected the active pane to join above the right-hand pane'
+  [[ "$(layout_tmux display-message -p -t "$lower" '#{pane_width}')" -ge 5 ]] \
+    || fail 'expected the left branch to retain room for both two-cell children'
+  layout_tmux list-panes -t "$FOUR" -F '#{pane_width} #{pane_height}' | \
+    awk '$1 < 2 || $2 < 2 { exit 1 }'
+}
+
+test_layout_insufficient_space_preserves_state() {
+  local before socket status
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_layout_server
+  FOUR="$(layout_tmux new-window -d -P -F '#{pane_id}' -n insufficient 'sleep 120')"
+  layout_tmux resize-window -t "$FOUR" -x 2 -y 8
+  ONE="$(layout_tmux split-window -dv -l 5 -P -F '#{pane_id}' -t "$FOUR" 'sleep 120')"
+  THREE="$(layout_tmux split-window -dv -l 2 -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
+  layout_tmux select-pane -t "$ONE"
+  layout_tmux set-option -p -t "$ONE" @reshape_origin "right $FOUR"
+  before="$(layout_window_state)"
+  socket="$(layout_tmux display-message -p -t "$ONE" '#{socket_path}')"
+  status=0
+  TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$ONE" left \
+    >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
+  assert_eq 1 "$status" 'a genuinely oversized split should fail before mutation'
+  assert_eq 'Invalid pane layout' "$(cat "$TEST_TMPDIR/diagnostics")"
+  assert_eq "$before" "$(layout_window_state)" 'insufficient space should preserve pane state'
+}
+
 test_case 'tmux layout: entry-first horizontal and vertical split transitions' test_layout_entry_first_transition_sequences
 test_case 'tmux layout: single pane is unchanged' test_layout_single_pane_is_unchanged
 test_case 'tmux layout: zoom and marked pane stay correctly scoped' test_layout_zoom_and_marked_pane
@@ -584,3 +671,6 @@ test_case 'tmux layout: floating suffix reports the tiled-window limitation with
 test_case 'tmux layout: real floating windows preserve state until the floating pane is removed' test_layout_real_floating_window_is_preserved
 test_case 'tmux layout: JSON layouts report the unsupported format without mutation' test_layout_json_format_is_rejected_without_mutation
 test_case 'tmux layout: real JSON windows preserve state with and without zoom' test_layout_real_json_window_is_preserved
+test_case 'tmux layout: minimum panes can be reshaped in all directions' test_layout_minimum_panes_can_be_reshaped
+test_case 'tmux layout: insufficient space preserves state' test_layout_insufficient_space_preserves_state
+test_case 'tmux layout: nested branch minimum is reserved' test_layout_nested_branch_minimum_is_reserved

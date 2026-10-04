@@ -161,39 +161,53 @@ function normalize(node,    i, j, descendant, size, replacement) {
   if (count[node] == 0) invalid()
   return node
 }
-function measure(node,    i, descendant, w, h) {
-  if (!kind[node]) return
-  w = 0; h = 0
+function measure(node,    i, descendant, w, h, mw, mh) {
+  if (!kind[node]) { minimum_width[node] = 2; minimum_height[node] = 2; return }
+  w = 0; h = 0; mw = 0; mh = 0
   for (i = 1; i <= count[node]; i++) {
     descendant = child[node, i]; measure(descendant)
     if (kind[node] == "{") {
       w += width[descendant] + (i > 1)
+      mw += minimum_width[descendant] + (i > 1)
       if (height[descendant] > h) h = height[descendant]
+      if (minimum_height[descendant] > mh) mh = minimum_height[descendant]
     } else {
       h += height[descendant] + (i > 1)
+      mh += minimum_height[descendant] + (i > 1)
       if (width[descendant] > w) w = width[descendant]
+      if (minimum_width[descendant] > mw) mw = minimum_width[descendant]
     }
   }
   width[node] = w; height[node] = h
+  minimum_width[node] = mw; minimum_height[node] = mh
 }
-function render(node, w, h, x, y,    out, i, descendant, available, total, amount, used, weight) {
-  if (w < 2 || h < 2) invalid()
+function render(node, w, h, x, y,    out, i, descendant, available, total, amount, used, weight, required, minimum) {
+  if (w < minimum_width[node] || h < minimum_height[node]) invalid()
   out = w "x" h "," x "," y
   if (!kind[node]) {
     order = order (order == "" ? "" : "\n") "%" id[node]
     return out "," id[node]
   }
   available = (kind[node] == "{" ? w : h) - count[node] + 1
-  total = 0
+  total = 0; required = 0
   for (i = 1; i <= count[node]; i++) {
     descendant = child[node, i]
-    total += (kind[node] == "{" ? width[descendant] : height[descendant])
+    minimum = kind[node] == "{" ? minimum_width[descendant] : minimum_height[descendant]
+    required += minimum
+    weight = (kind[node] == "{" ? width[descendant] : height[descendant]) - minimum
+    if (weight > 0) total += weight
   }
   used = 0; out = out kind[node]
   for (i = 1; i <= count[node]; i++) {
     descendant = child[node, i]
-    weight = kind[node] == "{" ? width[descendant] : height[descendant]
-    amount = i == count[node] ? available - used : int(available * weight / total)
+    minimum = kind[node] == "{" ? minimum_width[descendant] : minimum_height[descendant]
+    weight = (kind[node] == "{" ? width[descendant] : height[descendant]) - minimum
+    if (weight < 0) weight = 0
+    # Reserving branch minima prevents rounding from rejecting layouts that fit.
+    amount = minimum
+    if (total) amount += int((available - required) * weight / total)
+    else amount += int((available - required) / count[node])
+    if (i == count[node]) amount = available - used
     if (i > 1) out = out ","
     if (kind[node] == "{") out = out render(descendant, amount, h, x + used + i - 1, y)
     else out = out render(descendant, w, amount, x, y + used + i - 1)
