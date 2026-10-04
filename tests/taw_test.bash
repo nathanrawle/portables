@@ -544,11 +544,11 @@ test_real_tmux_existing_window_preserves_active_pane() {
 
   matching_pane="$(
     "$real_tmux" -L "$socket" -f /dev/null new-session -d -P \
-      -F '#{pane_id}' -s repo -n repo -c "$repo_real" zsh
+      -F '#{pane_id}' -s repo -n repo -c "$repo_real" zsh -f
   )"
   active_pane="$(
     "$real_tmux" -L "$socket" -f /dev/null split-window -d -P \
-      -F '#{pane_id}' -t repo: -c "$other" zsh
+      -F '#{pane_id}' -t repo: -c "$other" zsh -f
   )"
   "$real_tmux" -L "$socket" select-pane -t "$active_pane"
 

@@ -1,0 +1,324 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+pane="$1"
+direction="$2"
+case "$direction" in
+  left|right|up|down) ;;
+  *) printf 'Unknown pane direction: %s\n' "$direction" >&2; exit 2 ;;
+esac
+
+read -r window zoomed original_hint < <(
+  tmux display-message -p -t "$pane" '#{window_id} #{window_zoomed_flag} #{@reshape_origin}'
+)
+original_layout="$(tmux display-message -p -t "$pane" '#{window_layout}')"
+if [[ "$original_layout" == '{'* ]]; then
+  printf 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts\n' >&2
+  exit 2
+fi
+if [[ "$original_layout" == *'<'* ]]; then
+  printf 'reshape-pane: windows containing floating panes are not supported\n' >&2
+  exit 2
+fi
+original_order="$(tmux list-panes -t "$window" -F '#{pane_id}')"
+
+transformation="$(awk -v active="${pane#%}" -v direction="$direction" -v hint="$original_hint" -v zoomed="$zoomed" '
+function invalid() { print "Invalid pane layout" > "/dev/stderr"; exit 1 }
+function number(    value) {
+  if (!match(substr(text, pos), /^[0-9]+/)) invalid()
+  value = substr(text, pos, RLENGTH) + 0
+  pos += RLENGTH
+  return value
+}
+function expect(char) {
+  if (substr(text, pos++, 1) != char) invalid()
+}
+function parse(owner,    node, char, closing, i, descendant, span, across) {
+  node = ++nodes
+  parent[node] = owner
+  width[node] = number(); expect("x"); height[node] = number()
+  expect(","); number(); expect(","); number()
+  char = substr(text, pos, 1)
+  if (char == "{" || char == "[") {
+    kind[node] = char; pos++
+    closing = char == "{" ? "}" : "]"
+    do {
+      child[node, ++count[node]] = parse(node)
+      char = substr(text, pos++, 1)
+    } while (char == ",")
+    if (char != closing || count[node] < 2) invalid()
+    # Zoom hides floating flags, but saved floating cells still violate tiled dimensions.
+    if (zoomed) {
+      span = count[node] - 1
+      for (i = 1; i <= count[node]; i++) {
+        descendant = child[node, i]
+        span += kind[node] == "{" ? width[descendant] : height[descendant]
+        across = kind[node] == "{" ? height[descendant] != height[node] : width[descendant] != width[node]
+        if (across) floating = 1
+      }
+      if (span != (kind[node] == "{" ? width[node] : height[node])) floating = 1
+    }
+  } else {
+    expect(","); id[node] = number()
+    leaf[id[node]] = node
+    if (id[node] == active) source = node
+  }
+  return node
+}
+function position(node,    owner, i) {
+  owner = parent[node]
+  for (i = 1; i <= count[owner]; i++) if (child[owner, i] == node) return i
+  invalid()
+}
+function replace(node, replacement,    owner, slot) {
+  owner = parent[node]
+  if (owner) { slot = position(node); child[owner, slot] = replacement }
+  else root = replacement
+  parent[replacement] = owner
+}
+function detach(node,    owner, slot, i) {
+  owner = parent[node]; slot = position(node)
+  for (i = slot; i < count[owner]; i++) child[owner, i] = child[owner, i + 1]
+  count[owner]--
+  parent[node] = 0
+}
+function insert(owner, slot, node,    i) {
+  for (i = count[owner]; i >= slot; i--) child[owner, i + 1] = child[owner, i]
+  child[owner, slot] = node; count[owner]++; parent[node] = owner
+}
+function wrap(target, orientation, first, second,    node) {
+  node = ++nodes; kind[node] = orientation
+  width[node] = width[target]; height[node] = height[target]
+  replace(target, node)
+  count[node] = 2; child[node, 1] = first; child[node, 2] = second
+  parent[first] = node; parent[second] = node
+}
+function beside(target, node, before, orientation,    owner, slot) {
+  owner = parent[target]
+  if (owner && kind[owner] == orientation) {
+    slot = position(target) + (before ? 0 : 1)
+    insert(owner, slot, node)
+  } else if (before) wrap(target, orientation, node, target)
+  else wrap(target, orientation, target, node)
+}
+function descend(node, reverse,    slot) {
+  while (kind[node]) {
+    slot = kind[node] == perpendicular || reverse ? count[node] : 1
+    node = child[node, slot]
+  }
+  return node
+}
+function reachable(group, node, orientation, reverse,    owner, edge) {
+  while (node && node != group) {
+    owner = parent[node]
+    if (kind[owner] == orientation) {
+      edge = reverse ? count[owner] : 1
+      if (position(node) != edge) return 0
+    }
+    node = owner
+  }
+  return node == group
+}
+function valid_origin(    fields, orientation, reverse, owner, slot, group) {
+  if (split(hint, fields, " ") != 2 || fields[2] !~ /^%[0-9]+$/) return 0
+  if (fields[1] !~ /^(left|right|up|down)$/) return 0
+  origin_direction = fields[1]; origin = leaf[substr(fields[2], 2)]
+  if (!origin || origin == source) return 0
+  orientation = origin_direction == "left" || origin_direction == "right" ? "{" : "["
+  reverse = origin_direction == "left" || origin_direction == "up"
+  owner = parent[source]
+  if (kind[owner] != orientation) return 0
+  slot = position(source) + (reverse ? -1 : 1)
+  if (slot < 1 || slot > count[owner]) return 0
+  group = child[owner, slot]
+  return reachable(group, origin, orientation, reverse)
+}
+function unchanged() { print hint_valid ? hint : ""; exit }
+function lift(container,    owner, slot, anchor, reverse_direction) {
+  owner = parent[source]; slot = position(source)
+  anchor = child[owner, slot > 1 ? slot - 1 : slot + 1]
+  anchor = descend(anchor, !backwards)
+  reverse_direction = direction == "left" ? "right" : direction == "right" ? "left" : direction == "up" ? "down" : "up"
+  next_hint = reverse_direction " %" id[anchor]
+  detach(source)
+  beside(container, source, backwards, axis)
+}
+function normalize(node,    i, j, descendant, size, replacement) {
+  if (!kind[node]) return node
+  size = count[node]; count[node] = 0
+  for (i = 1; i <= size; i++) saved[node, i] = child[node, i]
+  for (i = 1; i <= size; i++) {
+    descendant = normalize(saved[node, i])
+    if (kind[descendant] == kind[node]) {
+      for (j = 1; j <= count[descendant]; j++) insert(node, count[node] + 1, child[descendant, j])
+    } else insert(node, count[node] + 1, descendant)
+  }
+  if (count[node] == 1) {
+    replacement = child[node, 1]; parent[replacement] = parent[node]
+    return replacement
+  }
+  if (count[node] == 0) invalid()
+  return node
+}
+function measure(node,    i, descendant, w, h, mw, mh) {
+  if (!kind[node]) { minimum_width[node] = 2; minimum_height[node] = 2; return }
+  w = 0; h = 0; mw = 0; mh = 0
+  for (i = 1; i <= count[node]; i++) {
+    descendant = child[node, i]; measure(descendant)
+    if (kind[node] == "{") {
+      w += width[descendant] + (i > 1)
+      mw += minimum_width[descendant] + (i > 1)
+      if (height[descendant] > h) h = height[descendant]
+      if (minimum_height[descendant] > mh) mh = minimum_height[descendant]
+    } else {
+      h += height[descendant] + (i > 1)
+      mh += minimum_height[descendant] + (i > 1)
+      if (width[descendant] > w) w = width[descendant]
+      if (minimum_width[descendant] > mw) mw = minimum_width[descendant]
+    }
+  }
+  width[node] = w; height[node] = h
+  minimum_width[node] = mw; minimum_height[node] = mh
+}
+function render(node, w, h, x, y,    out, i, descendant, available, total, amount, used, weight, required, minimum) {
+  if (w < minimum_width[node] || h < minimum_height[node]) invalid()
+  out = w "x" h "," x "," y
+  if (!kind[node]) {
+    order = order (order == "" ? "" : "\n") "%" id[node]
+    return out "," id[node]
+  }
+  available = (kind[node] == "{" ? w : h) - count[node] + 1
+  total = 0; required = 0
+  for (i = 1; i <= count[node]; i++) {
+    descendant = child[node, i]
+    minimum = kind[node] == "{" ? minimum_width[descendant] : minimum_height[descendant]
+    required += minimum
+    weight = (kind[node] == "{" ? width[descendant] : height[descendant]) - minimum
+    if (weight > 0) total += weight
+  }
+  used = 0; out = out kind[node]
+  for (i = 1; i <= count[node]; i++) {
+    descendant = child[node, i]
+    minimum = kind[node] == "{" ? minimum_width[descendant] : minimum_height[descendant]
+    weight = (kind[node] == "{" ? width[descendant] : height[descendant]) - minimum
+    if (weight < 0) weight = 0
+    # Reserving branch minima prevents rounding from rejecting layouts that fit.
+    amount = minimum
+    if (total) amount += int((available - required) * weight / total)
+    else amount += int((available - required) / count[node])
+    if (i == count[node]) amount = available - used
+    if (i > 1) out = out ","
+    if (kind[node] == "{") out = out render(descendant, amount, h, x + used + i - 1, y)
+    else out = out render(descendant, w, amount, x, y + used + i - 1)
+    used += amount
+  }
+  return out (kind[node] == "{" ? "}" : "]")
+}
+{
+  text = substr($0, 6); pos = 1
+  root = parse(0)
+  if (pos != length(text) + 1 || !source) invalid()
+  if (floating) {
+    print "reshape-pane: windows containing floating panes are not supported" > "/dev/stderr"
+    exit 2
+  }
+  root_width = width[root]; root_height = height[root]
+  axis = direction == "left" || direction == "right" ? "{" : "["
+  perpendicular = axis == "{" ? "[" : "{"
+  backwards = direction == "left" || direction == "up"
+  root = normalize(root)
+  hint_valid = valid_origin()
+  owner = parent[source]
+  if (!owner) unchanged()
+  if (kind[owner] != axis) {
+    # Pairing locally avoids lifting across unrelated sibling regions.
+    if (count[owner] > 2) {
+      slot = position(source)
+      neighbour = slot > 1 ? slot - 1 : slot + 1
+      target = child[owner, neighbour]
+      detach(source)
+      beside(target, source, backwards, axis)
+    } else lift(owner)
+  }
+  else {
+    slot = position(source); neighbour = slot + (backwards ? -1 : 1)
+    if (neighbour < 1 || neighbour > count[owner]) {
+      container = parent[owner]
+      while (container && kind[container] != perpendicular) container = parent[container]
+      if (!container) unchanged()
+      lift(container)
+    } else {
+      target = child[owner, neighbour]
+      if (kind[target]) {
+        if (hint_valid && direction == origin_direction) target = origin
+        else target = descend(target, backwards)
+        detach(source)
+        beside(target, source, !backwards, axis)
+      } else {
+        detach(source)
+        wrap(target, perpendicular, target, source)
+      }
+    }
+  }
+  root = normalize(root)
+  measure(root)
+  body = render(root, root_width, root_height, 0, 0)
+  print next_hint
+  print body
+  print order
+}' <<<"$original_layout")"
+next_hint="${transformation%%$'\n'*}"
+if [[ "$transformation" != *$'\n'* ]]; then
+  if [[ "$next_hint" != "$original_hint" ]]; then tmux set-option -pu -t "$pane" @reshape_origin; fi
+  exit 0
+fi
+transformation="${transformation#*$'\n'}"
+body="${transformation%%$'\n'*}"
+desired_order="${transformation#*$'\n'}"
+checksum=0
+for ((i = 0; i < ${#body}; i++)); do
+  printf -v code '%d' "'${body:i:1}"
+  checksum=$(( ((checksum >> 1) + ((checksum & 1) << 15) + code) & 65535 ))
+done
+printf -v new_layout '%04x,%s' "$checksum" "$body"
+
+reorder_panes() {
+  local desired="$1" expected actual index=0
+  while IFS= read -r expected; do
+    index=$((index + 1))
+    actual="$(tmux list-panes -t "$window" -F '#{pane_id}' | sed -n "${index}p")" || return 1
+    [[ -n "$actual" ]] || return 1
+    if [[ "$actual" != "$expected" ]]; then
+      tmux swap-pane -d -s "$expected" -t "$actual" || return 1
+    fi
+  done <<<"$desired"
+}
+
+restore_layout() {
+  local status=$?
+  trap - EXIT
+  if [[ "$status" -ne 0 ]]; then
+    if ! reorder_panes "$original_order" || ! tmux select-layout -t "$window" "$original_layout"; then
+      printf 'reshape-pane: could not restore the original layout\n' >&2
+    fi
+    tmux select-pane -t "$pane" || true
+    if [[ "$zoomed" -eq 1 ]]; then tmux resize-pane -Z -t "$pane" || true; fi
+  fi
+  exit "$status"
+}
+trap restore_layout EXIT
+[[ "$zoomed" -eq 0 ]] || tmux resize-pane -Z -t "$pane"
+# Saved tmux layouts assign panes by list order, rather than their embedded IDs.
+reorder_panes "$desired_order"
+tmux select-layout -t "$window" "$new_layout"
+tmux select-pane -t "$pane"
+tmux select-layout -E -t "$pane"
+tmux select-layout -E -t "$pane"
+if [[ "$next_hint" != "$original_hint" ]]; then
+  if [[ -n "$next_hint" ]]; then
+    tmux set-option -p -t "$pane" @reshape_origin "$next_hint"
+  else
+    tmux set-option -pu -t "$pane" @reshape_origin
+  fi
+fi
