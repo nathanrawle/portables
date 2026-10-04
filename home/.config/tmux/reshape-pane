@@ -13,9 +13,13 @@ read -r window zoomed original_hint < <(
   tmux display-message -p -t "$pane" '#{window_id} #{window_zoomed_flag} #{@reshape_origin}'
 )
 original_layout="$(tmux display-message -p -t "$pane" '#{window_layout}')"
+if [[ "$original_layout" == *'<'* ]]; then
+  printf 'reshape-pane: windows containing floating panes are not supported\n' >&2
+  exit 2
+fi
 original_order="$(tmux list-panes -t "$window" -F '#{pane_id}')"
 
-transformation="$(awk -v active="${pane#%}" -v direction="$direction" -v hint="$original_hint" '
+transformation="$(awk -v active="${pane#%}" -v direction="$direction" -v hint="$original_hint" -v zoomed="$zoomed" '
 function invalid() { print "Invalid pane layout" > "/dev/stderr"; exit 1 }
 function number(    value) {
   if (!match(substr(text, pos), /^[0-9]+/)) invalid()
@@ -26,7 +30,7 @@ function number(    value) {
 function expect(char) {
   if (substr(text, pos++, 1) != char) invalid()
 }
-function parse(owner,    node, char, closing) {
+function parse(owner,    node, char, closing, i, descendant, span, across) {
   node = ++nodes
   parent[node] = owner
   width[node] = number(); expect("x"); height[node] = number()
@@ -40,6 +44,17 @@ function parse(owner,    node, char, closing) {
       char = substr(text, pos++, 1)
     } while (char == ",")
     if (char != closing || count[node] < 2) invalid()
+    # Zoom hides floating flags, but saved floating cells still violate tiled dimensions.
+    if (zoomed) {
+      span = count[node] - 1
+      for (i = 1; i <= count[node]; i++) {
+        descendant = child[node, i]
+        span += kind[node] == "{" ? width[descendant] : height[descendant]
+        across = kind[node] == "{" ? height[descendant] != height[node] : width[descendant] != width[node]
+        if (across) floating = 1
+      }
+      if (span != (kind[node] == "{" ? width[node] : height[node])) floating = 1
+    }
   } else {
     expect(","); id[node] = number()
     leaf[id[node]] = node
@@ -186,6 +201,10 @@ function render(node, w, h, x, y,    out, i, descendant, available, total, amoun
   text = substr($0, 6); pos = 1
   root = parse(0)
   if (pos != length(text) + 1 || !source) invalid()
+  if (floating) {
+    print "reshape-pane: windows containing floating panes are not supported" > "/dev/stderr"
+    exit 2
+  }
   root_width = width[root]; root_height = height[root]
   axis = direction == "left" || direction == "right" ? "{" : "["
   perpendicular = axis == "{" ? "[" : "{"

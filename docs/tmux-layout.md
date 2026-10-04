@@ -80,6 +80,12 @@ pane is already outside every relevant split group at that edge. Further
 presses leave the layout and zoom state unchanged. Single-pane windows also
 stay unchanged.
 
+Reshaping supports windows containing only tiled panes. If a window contains
+any floating pane, the helper exits with status 2 and reports
+`reshape-pane: windows containing floating panes are not supported`, even when
+the active pane is tiled. The window, focus, zoom and origin hints stay unchanged.
+Remove or move the floating panes out of the window before reshaping it.
+
 Pane IDs and running programs survive. The moved pane stays focused; successful
 movement reveals a zoomed window's new layout. Each successful move finishes
 with `select-layout -E` twice on the moved pane, like two presses of prefix+E.
