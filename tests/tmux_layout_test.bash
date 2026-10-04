@@ -497,6 +497,17 @@ test_layout_real_floating_window_is_preserved() {
   assert_transition_layout '122|134' horizontal
 }
 
+assert_layout_binding_diagnostic() {
+  local key="$1" pane="$2" output
+  run_layout_binding "$key" "$pane" >"$TEST_TMPDIR/binding-diagnostics" 2>&1 || true
+  output="$(cat "$TEST_TMPDIR/binding-diagnostics")"
+  if [[ "$output" != *'tmux JSON layouts are not supported'* ]]; then
+    output="$(layout_tmux capture-pane -pMJ -t "$pane")"
+  fi
+  [[ "$output" == *'tmux JSON layouts are not supported'* ]] \
+    || fail "expected the loaded binding to show the JSON diagnostic: $output"
+}
+
 test_layout_json_format_is_rejected_without_mutation() {
   local before socket real_tmux status
   command -v tmux >/dev/null 2>&1 || return 0
@@ -526,6 +537,10 @@ WRAPPER
   assert_eq 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts' \
     "$(cat "$TEST_TMPDIR/diagnostics")"
   assert_eq "$before" "$(layout_window_state)" 'JSON rejection should preserve all pane state'
+  layout_tmux set-environment -t layout PATH "$TEST_TMPDIR/bin:$PATH"
+  layout_tmux set-environment -t layout REAL_TMUX "$real_tmux"
+  assert_layout_binding_diagnostic S-left "$FOUR"
+  assert_eq "$before" "$(layout_window_state)" 'the loaded rejection binding should preserve state'
 }
 
 test_layout_real_json_window_is_preserved() {
@@ -547,6 +562,8 @@ test_layout_real_json_window_is_preserved() {
     assert_eq 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts' \
       "$(cat "$TEST_TMPDIR/diagnostics")"
     assert_eq "$before" "$(layout_window_state)" 'real JSON windows should remain unchanged'
+    assert_layout_binding_diagnostic S-left "$FOUR"
+    assert_eq "$before" "$(layout_window_state)" 'real JSON rejection through the binding should preserve state'
   done
 }
 
