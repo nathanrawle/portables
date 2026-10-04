@@ -169,6 +169,9 @@ fi
 count=$((count + 1))
 printf '%s\n' "$count" >"$count_file"
 call_number=$((count - 1))
+if [[ "$call_number" = 1 && -n "${TAW_FAKE_FZF_AFTER_READ_SCRIPT:-}" ]]; then
+  bash "$TAW_FAKE_FZF_AFTER_READ_SCRIPT"
+fi
 
 key=""
 if [[ -n "${TAW_FAKE_FZF_KEYS:-}" ]]; then
@@ -218,6 +221,10 @@ fi
 
 if [[ -n "${TAW_FAKE_FZF_NO_MATCH_QUERY:-}" ]]; then
   output_query="${TAW_FAKE_FZF_NO_MATCH_QUERY}"
+  if (( expects_key )) && [[ "$key" = ctrl-d ]]; then
+    printf '%s\n%s\n' "$output_query" "$key"
+    exit 1
+  fi
   if (( supports_create )); then
     if (( print_query )); then
       printf '%s\n' "$output_query"
@@ -235,6 +242,11 @@ if (( expects_key || prints_key )); then
   printf '%s\n' "$key"
 fi
 if [[ "$key" = tab ]]; then
+  exit 0
+fi
+
+if [[ "$call_number" = 1 && -n "${TAW_FAKE_FZF_SELECTION:-}" ]]; then
+  emit_line "$TAW_FAKE_FZF_SELECTION"
   exit 0
 fi
 
@@ -371,10 +383,9 @@ run_taw() {
   (
     cd "$cwd" || exit 1
     TAW_FUNC_DIR="$REPO_ROOT/home/.zfuns" \
-      TAW_TEST_RANDOM_SEED="${TAW_TEST_RANDOM_SEED:-42}" \
       PATH="$taw_path" \
       TMUX="${TAW_TEST_TMUX:-}" \
-      zsh -fc 'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; RANDOM=$TAW_TEST_RANDOM_SEED; taw "$@"' taw "$@"
+      zsh -fc 'fpath=("$TAW_FUNC_DIR" $fpath); autoload -U taw; taw "$@"' taw "$@"
   )
 }
 
@@ -392,10 +403,10 @@ test_layout_with_overrides_and_shell_panes() {
     run_taw "$repo" -p "$repo" -agent "claude --resume" -ed "nvim ." -sh -sh "npm test"
 
   assert_file_contains "$log" $'list-sessions\t-F\t#{session_id}\t#{session_name}\t#{session_path}'
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$repo_real"$'\tnvim .'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$repo_real"$'\tnvim .'
   assert_file_contains "$log" $'set-window-option\t-t\t@1\tautomatic-rename\toff'
   assert_file_contains "$log" $'set-window-option\t-t\t@1\tallow-rename\toff'
-  assert_file_contains "$log" $'rename-window\t-t\t@1\t🌲main'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\t🏡 repo'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$repo_real"$'\tclaude --resume'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$repo_real"
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%3\t-c\t'"$repo_real"$'\tnpm test'
@@ -406,26 +417,19 @@ test_layout_with_overrides_and_shell_panes() {
   assert_file_contains "$log" $'attach-session\t-t\t$1'
 }
 
-test_new_session_window_tree_varies_by_seed() {
-  local repo repo_real fake_bin no_fzf_path first_log second_log
+test_new_session_window_uses_home_and_session_name() {
+  local repo fake_bin no_fzf_path log
 
   repo="$TEST_TMPDIR/repo"
   make_git_repo "$repo"
-  repo_real="$(cd "$repo" && pwd -P)"
   fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
   no_fzf_path="$(make_path_without_fzf "$fake_bin")"
-  first_log="$TEST_TMPDIR/tmux-first.log"
-  second_log="$TEST_TMPDIR/tmux-second.log"
+  log="$TEST_TMPDIR/tmux.log"
 
-  EDITOR=vim TAW_TEST_RANDOM_SEED=42 TAW_FAKE_TMUX_BIN="$fake_bin" \
-    TAW_TMUX_LOG="$first_log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" -p "$repo"
-  EDITOR=vim TAW_TEST_RANDOM_SEED=43 TAW_FAKE_TMUX_BIN="$fake_bin" \
-    TAW_TMUX_LOG="$second_log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" -p "$repo"
-
-  assert_file_contains "$first_log" $'-s\trepo\t-n\t🌲main\t-c\t'"$repo_real"
-  assert_file_contains "$first_log" $'rename-window\t-t\t@1\t🌲main'
-  assert_file_contains "$second_log" $'-s\trepo\t-n\t🎋main\t-c\t'"$repo_real"
-  assert_file_contains "$second_log" $'rename-window\t-t\t@1\t🎋main'
+  TAW_ICONS=nerd TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
+    TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" -p "$repo"
+  assert_file_contains "$log" $'-s\trepo\t-n\t🏡 repo\t-c\t'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\t🏡 repo'
 }
 
 test_real_tmux_prefix_session_does_not_count_as_exact_match() {
@@ -454,7 +458,7 @@ test_real_tmux_prefix_session_does_not_count_as_exact_match() {
     run_taw "$repo" -p "$repo"
 
   session_id="$(real_tmux_session_id "$real_tmux" "$socket" foo)"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tfoo\t-n\t🌲main\t-c\t'"$repo_real"
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tfoo\t-n\t🏡 foo\t-c\t'"$repo_real"
   assert_file_contains "$log" $'attach-session\t-t\t'"$session_id"
 }
 
@@ -482,6 +486,8 @@ test_real_tmux_uses_created_session_id_after_name_normalization() {
     run_taw "$repo" -p "$repo"
 
   session_id="$(real_tmux_session_id "$real_tmux" "$socket" foo_bar)"
+  assert_eq "🏡 foo_bar" "$("$real_tmux" -L "$socket" display-message -p -t "$session_id:" '#{window_name}')" \
+    "expected first window name to match the normalized session name"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tfoo.bar'
   assert_file_contains "$log" $'attach-session\t-t\t'"$session_id"
   assert_file_not_contains "$log" $'attach-session\t-t\tfoo.bar'
@@ -688,8 +694,8 @@ test_named_branch_checks_out_normal_repo() {
   assert_eq "develop" "$branch" "expected named branch worktree"
   assert_eq "main" "$(git -C "$repo" branch --show-current)" \
     "expected the primary worktree branch to remain unchanged"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$worktree_real"$'\tvim -u NONE'
-  assert_file_contains "$log" $'rename-window\t-t\t@1\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$worktree_real"$'\tvim -u NONE'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\t🏡 repo'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex --no-daemon'
   assert_file_not_contains "$log" $'send-keys\t'
 }
@@ -716,7 +722,7 @@ test_normal_repo_no_explicit_branch_uses_picker_and_tracks_remote_branch() {
   assert_eq "origin/feature/foo" "$upstream_ref" "expected remote branch tracking"
   assert_eq "main" "$(git -C "$repo" branch --show-current)" \
     "expected the primary worktree branch to remain unchanged"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$worktree_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$worktree_real"$'\tvim'
   assert_file_not_contains "$log" $'send-keys\t'
 }
 
@@ -794,7 +800,7 @@ test_normal_repo_no_explicit_branch_without_fzf_opens_repo_unchanged() {
 
   branch="$(git -C "$repo" branch --show-current)"
   assert_eq "main" "$branch" "expected repo to remain on current branch"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$repo_real"$'\tvim'
   assert_file_not_contains "$log" $'checkout\t'
 }
 
@@ -814,7 +820,7 @@ test_normal_linked_worktree_resolves_primary_project() {
     TAW_RUN_PATH="$no_fzf_path" run_taw "$TEST_TMPDIR" -p "$worktree"
 
   assert_file_contains "$log" \
-    $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$worktree_real"$'\tvim'
+    $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$worktree_real"$'\tvim'
 }
 
 test_normal_repo_picker_cancel_returns_success_without_tmux() {
@@ -866,7 +872,7 @@ test_explicit_normal_origin_topic_local_branch_wins_over_remote() {
   assert_eq "origin/topic" "$branch" "expected exact local branch to win"
   assert_eq "main" "$(git -C "$repo" branch --show-current)" \
     "expected the primary worktree branch to remain unchanged"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo'
 }
 
 test_explicit_normal_longest_remote_prefix_resolves_to_nested_remote_branch() {
@@ -981,7 +987,7 @@ test_project_arg_resolves_from_projects_home() {
   PROJECTS_HOME="$projects_home" EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" -p foo
 
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tfoo\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tfoo\t-n\t🏡 foo\t-c\t'"$repo_real"$'\tvim'
 }
 
 test_project_arg_direct_path_precedes_projects_home() {
@@ -1019,7 +1025,7 @@ test_project_arg_plain_path_opens_plain_project() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" -p "$plain"
 
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tplain\t-n\t🌲main\t-c\t'"$plain_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tplain\t-n\t🏡 plain\t-c\t'"$plain_real"$'\tvim'
   assert_file_contains "$log" $'select-pane\t-t\t%1'
   assert_file_not_contains "$log" $'checkout\t'
   assert_file_not_contains "$log" $'worktree\tadd'
@@ -1046,7 +1052,7 @@ test_plain_project_picker_target_opens_plain_directory() {
     run_taw "$TEST_TMPDIR/elsewhere" --pick-project
 
   assert_file_contains "$fzf_log" "$plain"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tplain\t-n\t🌲main\t-c\t'"$plain_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tplain\t-n\t🏡 plain\t-c\t'"$plain_real"$'\tvim'
   assert_file_not_contains "$log" $'worktree\tadd'
 }
 
@@ -1085,7 +1091,7 @@ test_outside_promotion_uses_single_positional_as_project_arg() {
   EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere" "$repo"
 
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$repo_real"$'\tvim'
 }
 
 test_outside_promotion_uses_project_and_operand_positionals() {
@@ -1103,7 +1109,7 @@ test_outside_promotion_uses_project_and_operand_positionals() {
   branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/feature-x" && pwd -P)"
   assert_eq "feature-x" "$branch" "expected promoted positional project to keep remaining operand"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1167,7 +1173,7 @@ test_project_arg_github_url_clones_and_opens_project() {
   worktree_real="$(cd "$dest" && pwd -P)"
   assert_eq "main" "$branch" "expected -p URL to clone and open a normal repository"
   assert_exists "$dest/.git"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tcloned\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tcloned\t-n\t🏡 cloned'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1349,7 +1355,7 @@ test_prompt_input_unresolved_creates_repo_project() {
 
   assert_exists "$repo_real/.git"
   repo_real="$(cd "$repo_real" && pwd -P)"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tprompted-missing\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tprompted-missing\t-n\t🏡 prompted-missing\t-c\t'"$repo_real"$'\tvim'
 }
 
 test_outside_positional_unresolved_creates_repo_project() {
@@ -1366,7 +1372,7 @@ test_outside_positional_unresolved_creates_repo_project() {
 
   assert_exists "$repo_real/.git"
   repo_real="$(cd "$repo_real" && pwd -P)"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tmissing\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tmissing\t-n\t🏡 missing\t-c\t'"$repo_real"$'\tvim'
 }
 
 test_unresolved_repo_branch_target_creates_worktree() {
@@ -1508,8 +1514,8 @@ test_creates_bare_worktree_from_positional_base_ref() {
   worktree_real="$(cd "$project/.worktrees/fix/broken-feature" && pwd -P)"
   assert_eq "fix/broken-feature" "$branch" "expected worktree branch named after worktree path"
   assert_eq "$expected" "$actual" "expected worktree branch to start from positional base ref"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
-  assert_file_contains "$log" $'rename-window\t-t\t@1\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"
 }
 
@@ -1526,7 +1532,7 @@ test_creates_bare_worktree_from_positional_path_branch() {
   branch="$(git -C "$project/.worktrees/fix/broken-feature" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/fix/broken-feature" && pwd -P)"
   assert_eq "fix/broken-feature" "$branch" "expected positional path to become the branch name"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1542,7 +1548,7 @@ test_bare_positional_worktree_supports_shell_equals_command() {
     run_taw "$TEST_TMPDIR" -p "$project" -sh='ADDR=:8081 go run ./cmd/web' -- provisional-venues
 
   worktree_real="$(cd "$project/.worktrees/provisional-venues" && pwd -P)"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$worktree_real"$'\tcodex --no-daemon'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$worktree_real"$'\tADDR=:8081 go run ./cmd/web'
 }
@@ -1596,7 +1602,7 @@ test_supports_bare_child_not_named_git() {
 
   branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
   assert_eq "feature-x" "$branch" "expected worktree branch from .bare repo"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
 }
 
 test_conventional_bare_clone_places_worktrees_outside_git_dir() {
@@ -1617,7 +1623,7 @@ test_conventional_bare_clone_places_worktrees_outside_git_dir() {
   assert_eq "feature-x" "$branch" "expected conventional bare clone worktree branch"
   assert_eq "$expected" "$actual" "expected worktree branch to start from positional base ref"
   assert_not_exists "$bare/feature-x"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1637,7 +1643,7 @@ test_conventional_bare_worktree_detection_keeps_project_root() {
   worktree_real="$(cd "$project/.worktrees/feature-x" && pwd -P)"
   assert_eq "feature-x" "$branch" "expected detected conventional bare project root"
   assert_not_exists "$TEST_TMPDIR/feature-x"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1655,9 +1661,9 @@ test_bare_project_without_worktree_opens_default_branch_worktree() {
   branch="$(git -C "$project/.worktrees/main" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_eq "main" "$branch" "expected bare project default branch worktree"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'set-window-option\t-t\t@1\tallow-rename\toff'
-  assert_file_contains "$log" $'rename-window\t-t\t@1\t🌲main'
+  assert_file_contains "$log" $'rename-window\t-t\t@1\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1711,7 +1717,7 @@ test_bare_project_without_default_falls_back_to_master() {
   branch="$(git -C "$project/.worktrees/master" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/master" && pwd -P)"
   assert_eq "master" "$branch" "expected bare project to fall back to master"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1733,7 +1739,7 @@ test_bare_project_origin_head_only_creates_local_default_worktree() {
   branch="$(git -C "$project/.worktrees/main" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_eq "main" "$branch" "expected origin/HEAD-only repo to create local main worktree"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1805,7 +1811,7 @@ test_bare_picker_remote_branch_creates_local_worktree() {
   actual="$(git -C "$project/.worktrees/feature/remote" rev-parse HEAD)"
   assert_eq "feature/remote" "$branch" "expected remote picker branch to create local branch"
   assert_eq "$expected" "$actual" "expected remote picker branch to start from remote ref"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1851,7 +1857,7 @@ test_bare_picker_strips_slash_remote_names() {
   assert_eq "topic" "$branch" "expected slash remote name to be stripped from branch"
   assert_eq "$expected" "$actual" "expected slash remote branch to start from full remote ref"
   assert_not_exists "$project/bar/topic"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1884,7 +1890,7 @@ test_bare_picker_without_fzf_falls_back_to_default_worktree() {
   branch="$(git -C "$project/.worktrees/main" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_eq "main" "$branch" "expected bare picker fallback to open default worktree"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1920,7 +1926,7 @@ test_bare_remote_only_branch_sets_upstream_tracking() {
   worktree_real="$(cd "$project/.worktrees/feature/foo" && pwd -P)"
   assert_eq "feature/foo" "$branch" "expected bare remote-only branch to create local branch"
   assert_eq "origin/feature/foo" "$upstream_ref" "expected bare remote-only branch tracking"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1940,7 +1946,7 @@ test_bare_zero_worktree_uses_head_branch_when_no_refs_exist() {
   branch="$(git -C "$project/.worktrees/missing" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/missing" && pwd -P)"
   assert_eq "missing" "$branch" "expected orphan worktree branch to use HEAD symbolic-ref"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -1997,7 +2003,7 @@ test_bare_project_named_branch_without_worktree_opens_branch_worktree() {
   branch="$(git -C "$project/.worktrees/develop" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/develop" && pwd -P)"
   assert_eq "develop" "$branch" "expected bare -b to open branch worktree"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -2018,7 +2024,7 @@ test_explicit_bare_worktree_subdir_with_branch_opens_project_root_worktree() {
   worktree_real="$(cd "$project/.worktrees/feature-x" && pwd -P)"
   assert_eq "feature-x" "$branch" "expected bare worktree subdir -b to target project root"
   assert_not_exists "$project/.worktrees/main/src/feature-x"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -2037,7 +2043,7 @@ test_explicit_bare_worktree_subdir_without_operands_opens_containing_worktree_ro
   branch="$(git -C "$project/.worktrees/develop" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/develop" && pwd -P)"
   assert_eq "develop" "$branch" "expected explicit bare subdir to open containing worktree"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main\t-c\t'"$worktree_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project\t-c\t'"$worktree_real"$'\tvim'
   assert_file_not_contains "$log" $'worktree\tadd'
 }
 
@@ -2055,7 +2061,7 @@ test_explicit_bare_worktree_root_without_operands_opens_containing_worktree_root
   branch="$(git -C "$project/.worktrees/develop" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/develop" && pwd -P)"
   assert_eq "develop" "$branch" "expected explicit bare worktree root to open itself"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main\t-c\t'"$worktree_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project\t-c\t'"$worktree_real"$'\tvim'
   assert_file_not_contains "$log" $'worktree\tadd'
 }
 
@@ -2076,7 +2082,7 @@ test_bare_branch_picker_opens_existing_default_branch_worktree() {
   existing_real="$(cd "$TEST_TMPDIR/main-existing" && pwd -P)"
   assert_eq "main" "$branch" "expected accepted existing worktree to stay on main"
   assert_not_exists "$project/.worktrees/main"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$existing_real"$'\tvim'
 }
 
@@ -2094,7 +2100,7 @@ test_bare_project_branch_with_slash_creates_nested_worktree() {
   branch="$(git -C "$project/.worktrees/feature/nested" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/feature/nested" && pwd -P)"
   assert_eq "feature/nested" "$branch" "expected branch with slash to create nested worktree"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -2115,7 +2121,7 @@ test_bare_project_local_slash_base_ref_stays_local() {
   worktree_real="$(cd "$project/.worktrees/fix/broken-feature" && pwd -P)"
   assert_eq "fix/broken-feature" "$branch" "expected local slash base to create the requested path branch"
   assert_eq "$expected" "$actual" "expected local slash base to be used as the start point"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -2211,7 +2217,7 @@ test_normal_repo_checks_out_branch_from_single_positional() {
   assert_eq "feature-x" "$branch" "expected single positional to open a managed worktree"
   assert_eq "main" "$(git -C "$repo" branch --show-current)" \
     "expected the primary worktree branch to remain unchanged"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$worktree_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$worktree_real"$'\tvim'
 }
 
 test_normal_repo_single_positional_tracks_remote_only_branch() {
@@ -2473,7 +2479,7 @@ test_existing_worktree_branch_switch_prompts() {
 
   branch="$(git -C "$project/.worktrees/feature-x" branch --show-current)"
   assert_eq "feature-x" "$branch" "expected existing worktree to switch after confirmation"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
 }
 
 test_existing_normal_worktree_remote_branch_preserves_fetch_refspecs() {
@@ -2573,7 +2579,7 @@ test_prompts_for_existing_repo_when_not_inside_git() {
   printf '%s\n' "$repo" | EDITOR=vim TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere"
 
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo'
 }
 
 test_debug_option_prints_state_snapshot() {
@@ -2615,7 +2621,7 @@ test_prompted_project_resolves_from_projects_home() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$TEST_TMPDIR/elsewhere"
 
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tfoo\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tfoo\t-n\t🏡 foo\t-c\t'"$repo_real"$'\tvim'
 }
 
 test_non_git_child_under_bare_wrapper_prompts_for_project() {
@@ -2636,7 +2642,7 @@ test_non_git_child_under_bare_wrapper_prompts_for_project() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$scratch"
 
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$repo_real"$'\tvim'
   assert_file_not_contains "$log" $'-s\tproject'
   assert_not_exists "$project/.worktrees/main"
 }
@@ -2657,7 +2663,7 @@ test_non_git_parent_with_bare_wrapper_child_prompts_for_project() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$parent"
 
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$repo_real"$'\tvim'
   assert_file_not_contains "$log" $'-s\tproject'
   assert_not_exists "$project/.worktrees/main"
 }
@@ -2677,7 +2683,7 @@ test_current_bare_wrapper_auto_detects_without_prompt() {
   branch="$(git -C "$project/.worktrees/main" branch --show-current)"
   worktree_real="$(cd "$project/.worktrees/main" && pwd -P)"
   assert_eq "main" "$branch" "expected current bare wrapper to auto-detect"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project'
   assert_file_contains "$log" $'-c\t'"$worktree_real"$'\tvim'
 }
 
@@ -2704,7 +2710,7 @@ test_empty_prompt_selects_project_from_tmux_sessionizer_config() {
     run_taw "$elsewhere"
 
   assert_file_contains "$fzf_log" "$repo"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$repo_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$repo_real"$'\tvim'
 }
 
 test_empty_project_prompt_mentions_fzf() {
@@ -3692,7 +3698,7 @@ test_project_picker_flag_bypasses_current_repo_detection() {
     run_taw "$current_repo" --pick-project -agent "claude --resume" -ed "nvim ." -sh "npm test"
 
   assert_file_contains "$fzf_log" "$picked_repo"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tpicked\t-n\t🌲main\t-c\t'"$picked_real"$'\tnvim .'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tpicked\t-n\t🏡 picked\t-c\t'"$picked_real"$'\tnvim .'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$picked_real"$'\tclaude --resume'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$picked_real"$'\tnpm test'
   assert_file_contains "$log" $'select-pane\t-t\t%1'
@@ -3751,7 +3757,7 @@ test_project_picker_flag_ignores_taw_agent_without_explicit_agent() {
     run_taw "$current_repo" --pick-project -sh "npm test" -sh "echo later"
 
   assert_file_contains "$fzf_log" "$repo"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🌲main\t-c\t'"$picked_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\trepo\t-n\t🏡 repo\t-c\t'"$picked_real"$'\tvim'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$picked_real"$'\tnpm test'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$picked_real"$'\techo later'
   assert_file_not_contains "$log" $'split-window\t-v\t'
@@ -3783,7 +3789,7 @@ test_project_picker_flag_opens_bare_wrapper_default_worktree_without_second_pick
 
   assert_file_contains "$fzf_log" "$project"
   project_real="$(cd "$project/.worktrees/main" && pwd -P)"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🌲main\t-c\t'"$project_real"$'\tvim'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tproject\t-n\t🏡 project\t-c\t'"$project_real"$'\tvim'
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_contains "$log" $'select-pane\t-t\t%1'
 }
@@ -3933,7 +3939,7 @@ test_project_picker_aliases_allow_agent_editor_and_shells() {
     run_taw "$current_repo" --picker -agent "claude --resume" -ed "nvim ." -sh "npm test"
 
   assert_file_contains "$fzf_log" "$picked_repo"
-  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tpicked\t-n\t🌲main\t-c\t'"$picked_real"$'\tnvim .'
+  assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tpicked\t-n\t🏡 picked\t-c\t'"$picked_real"$'\tnvim .'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$picked_real"$'\tclaude --resume'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$picked_real"$'\tnpm test'
   assert_file_contains "$log" $'select-pane\t-t\t%1'
@@ -4593,6 +4599,323 @@ test_branch_mode_creates_unassigned_bare_worktree() {
   assert_file_contains "$log" $'-c\t'"$(cd "$worktree" && pwd -P)"$'\tvim'
 }
 
+exercise_picker_worktree_removal() {
+  local kind="$1" mode="$2" version="$3"
+  local repo worktree fake_bin no_fzf_path log args_log rows_log picker_tmp
+  local -a picker_args=()
+
+  if [[ "$kind" = bare ]]; then
+    repo="$(make_bare_wrapper "$TEST_TMPDIR/bare")"
+    git --git-dir "$repo/.git" worktree add -q "$repo/.worktrees/develop" develop
+  else
+    repo="$TEST_TMPDIR/repo"
+    make_git_repo "$repo"
+    git -C "$repo" worktree add -q "$repo/.worktrees/develop" develop
+  fi
+  worktree="$repo/.worktrees/develop"
+  if [[ "$kind" = unicode ]]; then
+    git -C "$repo" worktree move "$worktree" "$TEST_TMPDIR/worktree café space"
+    worktree="$TEST_TMPDIR/worktree café space"
+  fi
+  [[ "$mode" != explicit ]] || picker_args=(--mode=branch)
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  rows_log="$TEST_TMPDIR/fzf-rows.log"
+  picker_tmp="$TEST_TMPDIR/picker-tmp"
+  mkdir -p "$picker_tmp"
+
+  TMPDIR="$picker_tmp" EDITOR=vim TAW_FAKE_FZF_VERSION="$version" \
+    TAW_FAKE_FZF_CLOSE_EARLY="${TAW_FAKE_FZF_CLOSE_EARLY:-0}" \
+    TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' TAW_FAKE_FZF_OUTPUT_QUERIES=develop \
+    TAW_FAKE_FZF_MATCH=develop TAW_FZF_ARGS_LOG="$args_log" TAW_FZF_INPUT_LOG="$rows_log" \
+    TAW_FAKE_TMUX_ALL_PANES=$'%7\t'"$(cd "$repo" && pwd -P)" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" "${picker_args[@]}"
+
+  assert_not_exists "$worktree"
+  if [[ "$kind" = bare ]]; then
+    git --git-dir "$repo/.git" show-ref --verify --quiet refs/heads/develop
+  else
+    git -C "$repo" show-ref --verify --quiet refs/heads/develop
+  fi
+  assert_file_contains "$args_log" 'Removed worktree:'
+  assert_file_not_contains "$args_log" $'--query=develop\t'
+  assert_file_contains "$rows_log" $'  develop\tbranch\tdevelop\tdevelop\t'
+  assert_no_tmux_work_window "$log"
+  assert_file_not_contains "$log" 'kill-window'
+  assert_file_not_contains "$log" 'kill-pane'
+  assert_eq '' "$(find "$picker_tmp" -mindepth 1 -print)" "picker cache should be cleaned"
+  if [[ "$version" = 0.52.1 ]]; then
+    assert_file_contains "$args_log" '--expect='
+    assert_file_contains "$args_log" 'ctrl-d'
+    assert_file_not_contains "$args_log" 'ctrl-d:transform:'
+  else
+    assert_file_contains "$args_log" 'ctrl-d:transform:'
+  fi
+}
+
+test_picker_worktree_removal_explicit_clears_query() {
+  exercise_picker_worktree_removal normal explicit 0.74.2
+}
+
+test_picker_worktree_removal_automatic_unicode() {
+  exercise_picker_worktree_removal unicode automatic 0.74.2
+}
+
+test_picker_worktree_removal_bare() {
+  exercise_picker_worktree_removal bare explicit 0.74.2
+}
+
+test_picker_worktree_removal_legacy() {
+  exercise_picker_worktree_removal normal automatic 0.52.1
+}
+
+test_picker_worktree_removal_legacy_explicit() {
+  exercise_picker_worktree_removal normal explicit 0.52.1
+}
+
+test_picker_worktree_removal_early_accept() {
+  TAW_FAKE_FZF_CLOSE_EARLY=1 exercise_picker_worktree_removal normal explicit 0.74.2
+}
+
+test_picker_worktree_removal_transform_is_inert() {
+  local repo fake_bin no_fzf_path log args_log bind transform output expanded kind path
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  EDITOR=vim TAW_FAKE_FZF_KEYS=cancel TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+  bind="$(tr '\t' '\n' <"$args_log" | grep '^--bind=ctrl-d:transform:' | head -n 1)"
+  transform="${bind#--bind=ctrl-d:transform:}"
+  for kind in "''" "'message'" "'branch-message'" "'branch'"; do
+    expanded="${transform//\{2\}/$kind}"
+    expanded="${expanded//\{5\}/\'\'}"
+    output="$(zsh -f -c "$expanded" || true)"
+    assert_eq '' "$output" "Ctrl-D should ignore missing worktree paths"
+  done
+  expanded="${transform//\{2\}/\'branch\'}"
+  path="'/tmp/worktree space'"
+  expanded="${expanded//\{5\}/$path}"
+  output="$(zsh -f -c "$expanded")"
+  assert_eq 'print(ctrl-d)+accept' "$output"
+}
+
+exercise_picker_worktree_removal_refusal() {
+  local scenario="$1" repo worktree invoke_dir fake_bin no_fzf_path log args_log
+  local panes selection= hook= expected='Removal refused:'
+
+  repo="$TEST_TMPDIR/repo"
+  worktree="$repo/.worktrees/develop"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add -q "$worktree" develop
+  invoke_dir="$repo"
+  panes=$'%7\t'"$(cd "$repo" && pwd -P)"
+  case "$scenario" in
+    dirty) printf 'changed\n' >>"$worktree/README.md"; expected='Removal failed:' ;;
+    untracked) printf 'keep\n' >"$worktree/untracked.txt"; expected='Removal failed:' ;;
+    locked) git -C "$repo" worktree lock "$worktree"; expected='Removal failed:' ;;
+    pane) panes=$'%8\t'"$(cd "$worktree" && pwd -P)" ;;
+    descendant)
+      mkdir -p "$worktree/nested"
+      panes=$'%8\t'"$(cd "$worktree/nested" && pwd -P)"
+      ;;
+    inspection) panes= ;;
+    malformed) panes=$'%8\t/path\textra' ;;
+    primary)
+      invoke_dir="$worktree"
+      panes=$'%7\t'"$TEST_TMPDIR"
+      selection=$'main\tbranch\tmain\tmain\t'"$(cd "$repo" && pwd -P)"
+      expected='Removal failed:'
+      ;;
+    invoking)
+      invoke_dir="$worktree"
+      selection=$'develop\tbranch\tdevelop\tdevelop\t'"$(cd "$worktree" && pwd -P)"
+      ;;
+    stale)
+      hook="$TEST_TMPDIR/change-assignment.sh"
+      printf 'git -C "%s" checkout -qb reassigned\n' "$worktree" >"$hook"
+      ;;
+  esac
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+
+  EDITOR=vim TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' TAW_FAKE_FZF_OUTPUT_QUERIES=keep-query \
+    TAW_FAKE_FZF_MATCH=develop TAW_FAKE_FZF_SELECTION="$selection" \
+    TAW_FAKE_FZF_AFTER_READ_SCRIPT="$hook" TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_ALL_PANES="$panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$invoke_dir" --mode=branch
+
+  assert_exists "$worktree/README.md"
+  assert_exists "$repo/README.md"
+  assert_file_contains "$args_log" "$expected"
+  assert_file_contains "$args_log" $'--query=keep-query\t'
+  assert_no_tmux_work_window "$log"
+  case "$scenario" in
+    dirty) assert_file_contains "$worktree/README.md" changed ;;
+    untracked) assert_file_contains "$worktree/untracked.txt" keep ;;
+    locked) git -C "$repo" worktree list --porcelain | grep -q '^locked' ;;
+    stale) assert_eq reassigned "$(git -C "$worktree" branch --show-current)" ;;
+  esac
+}
+
+test_picker_worktree_removal_refuses_dirty() {
+  exercise_picker_worktree_removal_refusal dirty
+}
+test_picker_worktree_removal_refuses_untracked() {
+  exercise_picker_worktree_removal_refusal untracked
+}
+test_picker_worktree_removal_refuses_locked() {
+  exercise_picker_worktree_removal_refusal locked
+}
+test_picker_worktree_removal_refuses_pane() {
+  exercise_picker_worktree_removal_refusal pane
+}
+test_picker_worktree_removal_refuses_descendant() {
+  exercise_picker_worktree_removal_refusal descendant
+}
+test_picker_worktree_removal_refuses_inspection_failure() {
+  exercise_picker_worktree_removal_refusal inspection
+}
+test_picker_worktree_removal_refuses_malformed_panes() {
+  exercise_picker_worktree_removal_refusal malformed
+}
+test_picker_worktree_removal_refuses_primary() {
+  exercise_picker_worktree_removal_refusal primary
+}
+test_picker_worktree_removal_refuses_invoking() {
+  exercise_picker_worktree_removal_refusal invoking
+}
+test_picker_worktree_removal_refuses_stale() {
+  exercise_picker_worktree_removal_refusal stale
+}
+
+test_picker_worktree_removal_allows_sibling_path() {
+  local repo worktree sibling fake_bin no_fzf_path log
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  worktree="$repo/.worktrees/develop"
+  sibling="$worktree-other"
+  git -C "$repo" worktree add -q "$worktree" develop
+  mkdir -p "$sibling"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  EDITOR=vim TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' TAW_FAKE_FZF_MATCH=develop \
+    TAW_FAKE_TMUX_ALL_PANES=$'%7\t'"$(cd "$sibling" && pwd -P)" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=branch
+  assert_not_exists "$worktree"
+  assert_exists "$sibling"
+  assert_no_tmux_work_window "$log"
+}
+
+exercise_legacy_removal_without_selection() {
+  local mode="$1" repo fake_bin no_fzf_path log args_log count_file
+  local -a picker_args=()
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  [[ "$mode" != explicit ]] || picker_args=(--mode=branch)
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  count_file="$TEST_TMPDIR/fzf-count"
+  : >"$log"
+  EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' \
+    TAW_FAKE_FZF_NO_MATCH_QUERY=no-matching-branch TAW_FAKE_FZF_COUNT_FILE="$count_file" \
+    TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" "${picker_args[@]}"
+  assert_eq 3 "$(cat "$count_file")" "expected the picker to reopen before cancellation"
+  assert_file_contains "$args_log" $'--query=no-matching-branch\t'
+  assert_file_not_contains "$log" $'list-panes\t'
+  assert_no_tmux_work_window "$log"
+  git -C "$repo" show-ref --verify --quiet refs/heads/develop
+}
+
+test_legacy_removal_without_selection_explicit() {
+  exercise_legacy_removal_without_selection explicit
+}
+
+test_legacy_removal_without_selection_automatic() {
+  exercise_legacy_removal_without_selection automatic
+}
+
+test_picker_worktree_removal_unassigned_is_inert() {
+  local repo fake_bin no_fzf_path log args_log
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  : >"$log"
+  EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' \
+    TAW_FAKE_FZF_MATCH=develop TAW_FZF_ARGS_LOG="$args_log" TAW_FAKE_TMUX_BIN="$fake_bin" \
+    TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" run_taw "$repo" --mode=branch
+  git -C "$repo" show-ref --verify --quiet refs/heads/develop
+  assert_file_not_contains "$log" $'list-panes\t'
+  assert_file_not_contains "$args_log" 'Removed worktree:'
+  assert_no_tmux_work_window "$log"
+}
+
+test_picker_worktree_removal_remote_and_message_are_inert() {
+  local repo fake_bin no_fzf_path log args_log target
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  git -C "$repo" remote add origin "$TEST_TMPDIR/upstream.git"
+  git -C "$repo" update-ref refs/remotes/origin/remote-only refs/heads/main
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  for target in remote-only message; do
+    log="$TEST_TMPDIR/tmux-$target.log"
+    args_log="$TEST_TMPDIR/fzf-$target.log"
+    : >"$log"
+    if [[ "$target" = message ]]; then
+      git -C "$repo" branch -D develop >/dev/null
+      git -C "$repo" update-ref -d refs/remotes/origin/remote-only
+    fi
+    EDITOR=vim TAW_FAKE_FZF_VERSION=0.52.1 TAW_FAKE_FZF_KEYS=$'ctrl-d\ncancel' \
+      TAW_FAKE_FZF_MATCH="$target" TAW_FZF_ARGS_LOG="$args_log" \
+      TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$repo" --mode=branch
+    assert_file_not_contains "$log" $'list-panes\t'
+    assert_file_not_contains "$args_log" 'Removed worktree:'
+    assert_no_tmux_work_window "$log"
+  done
+}
+
+test_picker_worktree_removal_session_has_no_shortcut() {
+  local repo fake_bin no_fzf_path log args_log
+  repo="$TEST_TMPDIR/repo"
+  make_git_repo "$repo"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  args_log="$TEST_TMPDIR/fzf-args.log"
+  EDITOR=vim TAW_FAKE_FZF_KEYS=cancel TAW_FZF_ARGS_LOG="$args_log" \
+    TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+    run_taw "$repo" --mode=session
+  assert_file_not_contains "$args_log" 'ctrl-d'
+  assert_file_not_contains "$args_log" 'C-D:'
+  assert_no_tmux_work_window "$log"
+}
+
 test_picker_selects_fzf_bindings_by_version() {
   local repo fake_bin no_fzf_path version version_name log args_log
 
@@ -4724,7 +5047,7 @@ test_picker_accept_keys_select_layouts() {
   XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='env-agent' TAW_FAKE_FZF_KEYS=ctrl-s \
     TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts
-  assert_file_contains "$log" $'-s\ttarget\t-n\t🌲main\t-c\t'"$target_real"
+  assert_file_contains "$log" $'-s\ttarget\t-n\t🏡 target\t-c\t'"$target_real"
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_not_contains "$log" $'\tvim'
   assert_file_not_contains "$log" $'env-agent'
@@ -4734,7 +5057,7 @@ test_picker_accept_keys_select_layouts() {
   XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='  env-agent  ' TAW_FAKE_FZF_KEYS=ctrl-a \
     TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts
-  assert_file_contains "$log" $'-s\ttarget\t-n\t🌲main\t-c\t'"$target_real"$'\tenv-agent'
+  assert_file_contains "$log" $'-s\ttarget\t-n\t🏡 target\t-c\t'"$target_real"$'\tenv-agent'
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_not_contains "$log" $'\tvim'
   assert_file_contains "$log" $'select-pane\t-t\t%1'
@@ -4743,7 +5066,7 @@ test_picker_accept_keys_select_layouts() {
   XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT=' ' TAW_FAKE_FZF_KEYS=ctrl-a \
     TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts
-  assert_file_contains "$log" $'-s\ttarget\t-n\t🌲main\t-c\t'"$target_real"$'\tcodex --no-daemon'
+  assert_file_contains "$log" $'-s\ttarget\t-n\t🏡 target\t-c\t'"$target_real"$'\tcodex --no-daemon'
   assert_file_not_contains "$log" $'split-window\t'
 
   log="$TEST_TMPDIR/tmux-editor-shell.log"
@@ -4758,7 +5081,7 @@ test_picker_accept_keys_select_layouts() {
   assert_file_contains "$args_log" 'print(ctrl-s)+accept'
   assert_file_contains "$args_log" 'Opt-Z: editor+shell'
   assert_file_not_contains "$args_log" 'Opt-S:'
-  assert_file_contains "$log" $'-s\ttarget\t-n\t🌲main\t-c\t'"$target_real"$'\tvim'
+  assert_file_contains "$log" $'-s\ttarget\t-n\t🏡 target\t-c\t'"$target_real"$'\tvim'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$target_real"$'\tnpm test'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$target_real"$'\techo later'
   assert_file_not_contains "$log" $'env-agent'
@@ -4769,7 +5092,7 @@ test_picker_accept_keys_select_layouts() {
   XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='env-agent' TAW_FAKE_FZF_KEYS=alt-a \
     TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts -agent "claude --resume"
-  assert_file_contains "$log" $'-s\ttarget\t-n\t🌲main\t-c\t'"$target_real"$'\tvim'
+  assert_file_contains "$log" $'-s\ttarget\t-n\t🏡 target\t-c\t'"$target_real"$'\tvim'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$target_real"$'\tclaude --resume'
   assert_file_not_contains "$log" $'env-agent'
   assert_file_not_contains "$log" $'split-window\t-v\t'
@@ -4779,7 +5102,7 @@ test_picker_accept_keys_select_layouts() {
   XDG_CONFIG_HOME="$xdg" EDITOR=vim TAW_AGENT='env-agent' TAW_FAKE_FZF_KEYS=alt-enter \
     TAW_FAKE_FZF_MATCH="$target" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     TAW_RUN_PATH="$no_fzf_path" run_taw "$elsewhere" -ts
-  assert_file_contains "$log" $'-s\ttarget\t-n\t🌲main\t-c\t'"$target_real"$'\tvim'
+  assert_file_contains "$log" $'-s\ttarget\t-n\t🏡 target\t-c\t'"$target_real"$'\tvim'
   assert_file_contains "$log" $'split-window\t-h\t-P\t-F\t#{pane_id}\t-t\t%1\t-c\t'"$target_real"$'\tenv-agent'
   assert_file_contains "$log" $'split-window\t-v\t-P\t-F\t#{pane_id}\t-t\t%2\t-c\t'"$target_real"
   assert_file_contains "$log" $'select-pane\t-t\t%1'
@@ -4799,7 +5122,7 @@ test_picker_layout_keys_apply_to_branch_mode() {
     TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" --mode=branch -sh branch-shell
   worktree_real="$(cd "$repo/.worktrees/develop" && pwd -P)"
-  assert_file_contains "$log" $'-s\trepo\t-n\t🌲main\t-c\t'"$worktree_real"$'\tbranch-shell'
+  assert_file_contains "$log" $'-s\trepo\t-n\t🏡 repo\t-c\t'"$worktree_real"$'\tbranch-shell'
   assert_file_not_contains "$log" $'\tvim'
   assert_file_not_contains "$log" $'split-window\t'
 }
@@ -5005,7 +5328,7 @@ test_project_scoped_modes_remain_cycleable_outside_git() {
   assert_string_contains "${fzf_args[1]}" '--query=needle'
   assert_file_not_contains "$args_log" ':transform:'
   assert_file_not_contains "$args_log" 'print('
-  assert_file_contains "$log" $'-s\ttarget\t-n\t🌲main\t-c\t'"$target_real"$'\tvim'
+  assert_file_contains "$log" $'-s\ttarget\t-n\t🏡 target\t-c\t'"$target_real"$'\tvim'
   assert_file_not_contains "$log" $'split-window\t'
   assert_file_not_contains "$log" 'ignored'
 }
@@ -5468,8 +5791,8 @@ test_removed_convert_option_is_rejected() {
 
 test_case "taw: creates tmux layout with overrides and shell panes" \
   test_layout_with_overrides_and_shell_panes
-test_case "taw: new-session window tree varies by random seed" \
-  test_new_session_window_tree_varies_by_seed
+test_case "taw: new-session window uses home emoji and session name regardless of icon style" \
+  test_new_session_window_uses_home_and_session_name
 test_case "taw: real tmux does not prefix-match session names" \
   test_real_tmux_prefix_session_does_not_count_as_exact_match
 test_case "taw: real tmux uses created session ID after name normalization" \
@@ -5876,3 +6199,50 @@ test_case "taw: explicit picker keeps empty modes cycleable" \
   test_explicit_picker_keeps_empty_modes_cycleable
 test_case "taw: invalid picker modes and combinations are rejected" \
   test_invalid_picker_modes_and_combinations_are_rejected
+
+test_case "taw: picker worktree removal explicit clears query" \
+  test_picker_worktree_removal_explicit_clears_query
+test_case "taw: picker worktree removal automatic preserves Unicode paths" \
+  test_picker_worktree_removal_automatic_unicode
+test_case "taw: picker worktree removal supports bare repositories" \
+  test_picker_worktree_removal_bare
+test_case "taw: picker worktree removal supports legacy fzf" \
+  test_picker_worktree_removal_legacy
+test_case "taw: picker worktree removal refuses dirty files" \
+  test_picker_worktree_removal_refuses_dirty
+test_case "taw: picker worktree removal refuses untracked files" \
+  test_picker_worktree_removal_refuses_untracked
+test_case "taw: picker worktree removal refuses locked worktrees" \
+  test_picker_worktree_removal_refuses_locked
+test_case "taw: picker worktree removal refuses pane at target" \
+  test_picker_worktree_removal_refuses_pane
+test_case "taw: picker worktree removal refuses descendant pane" \
+  test_picker_worktree_removal_refuses_descendant
+test_case "taw: picker worktree removal refuses inspection failure" \
+  test_picker_worktree_removal_refuses_inspection_failure
+test_case "taw: picker worktree removal refuses malformed pane data" \
+  test_picker_worktree_removal_refuses_malformed_panes
+test_case "taw: picker worktree removal refuses primary worktree" \
+  test_picker_worktree_removal_refuses_primary
+test_case "taw: picker worktree removal refuses invoking worktree" \
+  test_picker_worktree_removal_refuses_invoking
+test_case "taw: picker worktree removal refuses stale assignment" \
+  test_picker_worktree_removal_refuses_stale
+test_case "taw: picker worktree removal allows sibling pane path" \
+  test_picker_worktree_removal_allows_sibling_path
+test_case "taw: picker worktree removal ignores unassigned branch" \
+  test_picker_worktree_removal_unassigned_is_inert
+test_case "taw: picker worktree removal supports explicit legacy fzf" \
+  test_picker_worktree_removal_legacy_explicit
+test_case "taw: picker worktree removal refreshes after early acceptance" \
+  test_picker_worktree_removal_early_accept
+test_case "taw: picker worktree removal transform ignores absent targets" \
+  test_picker_worktree_removal_transform_is_inert
+test_case "taw: picker worktree removal ignores remote and message rows" \
+  test_picker_worktree_removal_remote_and_message_are_inert
+test_case "taw: picker worktree removal is unavailable in session mode" \
+  test_picker_worktree_removal_session_has_no_shortcut
+test_case "taw: legacy removal without selection keeps explicit picker open" \
+  test_legacy_removal_without_selection_explicit
+test_case "taw: legacy removal without selection keeps automatic picker open" \
+  test_legacy_removal_without_selection_automatic
