@@ -419,6 +419,11 @@ taw-agents                         # toggle
 taw-agent-dashboard open|focus|sync|close
 ```
 
+Inside tmux, Ctrl+Option+G toggles the dashboard without a prefix.
+Ghostty also maps Command+Option+Space to that tmux binding. To use the
+same shortcut from other macOS apps, assign it to a macOS Shortcut that
+runs `taw-agent-dashboard toggle`.
+
 The dashboard is built from the managed `agents` session. Each split attaches
 to a private, marked tmux view session that links one `agents` window, so
 closing the dashboard or a view never kills the source agent window. Agent

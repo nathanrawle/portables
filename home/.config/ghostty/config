@@ -14,3 +14,5 @@ macos-option-as-alt = left
 
 keybind = global:alt+`=toggle_quick_terminal
 
+# Route the dashboard shortcut through tmux when Ghostty has focus.
+keybind = super+alt+space=text:\x1b\x07
