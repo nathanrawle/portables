@@ -33,6 +33,7 @@ else
 fi
 DASHBOARD_STATE_FILE="${TAW_AGENT_DASHBOARD_STATE_FILE:-$DASHBOARD_DEFAULT_STATE_FILE}"
 DASHBOARD_OSASCRIPT="${TAW_AGENT_DASHBOARD_OSASCRIPT:-osascript}"
+DASHBOARD_LOCKF="${TAW_AGENT_DASHBOARD_LOCKF:-/usr/bin/lockf}"
 
 MANAGED_SESSION_ID=
 STATE_WINDOW_ID=
@@ -972,7 +973,16 @@ with_lock() (
   exec 9>>"$lock_file" || return 1
   case "$(uname -s)" in
     Darwin)
-      /usr/bin/lockf -s 9
+      "$DASHBOARD_LOCKF" -s 9 2>/dev/null
+      status=$?
+      if (( status == 64 )); then
+        # Older lockf lacks descriptor mode; keep the lock shared with surviving children.
+        /usr/bin/perl -MFcntl=:flock -e '
+          open(my $lock, ">&=9") or die "dashboard lock descriptor: $!\n";
+          flock($lock, LOCK_EX) or die "dashboard flock: $!\n";
+        '
+        status=$?
+      fi
       ;;
     *)
       command -v flock >/dev/null 2>&1 || {
@@ -980,9 +990,9 @@ with_lock() (
         return 1
       }
       flock -x 9
+      status=$?
       ;;
   esac
-  status=$?
   (( status == 0 )) || {
     printf 'taw-agent-dashboard: could not acquire dashboard lock\n' >&2
     return "$status"

@@ -434,8 +434,9 @@ sessions when healthy; missing terminals or views are reconciled before focus.
 Use `taw-agent-dashboard close` to close it explicitly.
 
 Dashboard operations serialize through a persistent file beside the state
-file, using macOS `lockf` or `flock` on other systems. The OS releases the
-lock when the operation and its subprocesses close their descriptors, even
+file, using macOS `lockf` (bundled Perl's `flock` on older macOS) or `flock`
+on other systems. The OS releases the lock when the operation and its
+subprocesses close their descriptors, even
 after forced termination. Keep the lock file in place; its existence does
 not mean the dashboard is locked. Waiting requests can be cancelled without
 leaving a tmux lock queue behind.

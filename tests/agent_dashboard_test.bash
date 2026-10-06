@@ -1971,7 +1971,7 @@ test_dashboard_lock_cancelled_waiter_and_surviving_child() {
   for child in $(dashboard_lock_process_tree "$waiter"); do
     command_name="$(ps -p "$child" -o comm=)"
     case "$command_name" in
-      *lockf|*flock) acquisition="$child"; break ;;
+      *lockf|*flock|*perl*) acquisition="$child"; break ;;
     esac
   done
   [[ -n "$acquisition" ]] || fail "expected a waiting lock utility"
@@ -2277,6 +2277,35 @@ test_case "agent dashboard: toggle recovers a missing window" test_dashboard_tog
 test_case "agent dashboard: workspace routing requires successful open or focus" test_dashboard_workspace_routing_requires_successful_result
 test_case "agent dashboard: toggle reports only successful outcomes" test_dashboard_toggle_reports_successful_result
 
+test_dashboard_legacy_darwin_lockf_preserves_children() {
+  local legacy="$TEST_TMPDIR/legacy-lockf" log="$TEST_TMPDIR/legacy-lockf.log"
+  [[ "$(uname -s)" = Darwin ]] || return 0
+  cat >"$legacy" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" = '-s 9' ]] || exit 1
+printf 'descriptor unsupported\n' >>"$TAW_LEGACY_LOCKF_LOG"
+exit 64
+EOF
+  chmod +x "$legacy"
+  TAW_AGENT_DASHBOARD_LOCKF="$legacy" TAW_LEGACY_LOCKF_LOG="$log" \
+    test_dashboard_lock_cancelled_waiter_and_surviving_child
+  assert_dashboard_file_contains "$log" 'descriptor unsupported'
+}
+
+test_dashboard_darwin_lockf_failure_has_no_fallback() {
+  local utility="$TEST_TMPDIR/failing-lockf" status=0
+  [[ "$(uname -s)" = Darwin ]] || return 0
+  setup_dashboard_lock_test || return 0
+  printf '#!/usr/bin/env bash\nexit 73\n' >"$utility"
+  chmod +x "$utility"
+  TAW_AGENT_DASHBOARD_LOCKF="$utility" run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus \
+    >/dev/null 2>&1 || status=$?
+  assert_eq 73 "$status"
+  [[ ! -s "$TEST_TMPDIR/osascript.log" ]] || fail 'lock failure must not run the operation'
+}
+
+test_case "agent dashboard: legacy Darwin lockf preserves surviving children" test_dashboard_legacy_darwin_lockf_preserves_children
+test_case "agent dashboard: Darwin lockf errors do not fall back" test_dashboard_darwin_lockf_failure_has_no_fallback
 test_case "agent dashboard: lock recovers after forced termination" test_dashboard_lock_recovers_after_termination
 test_case "agent dashboard: lock cancellation preserves surviving operations" test_dashboard_lock_cancelled_waiter_and_surviving_child
 test_case "agent dashboard: lock failure performs no operation" test_dashboard_lock_failure_does_not_run_operation
