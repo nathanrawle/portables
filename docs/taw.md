@@ -420,7 +420,7 @@ taw-agent-dashboard open|focus|sync|toggle|close
 ```
 
 Inside tmux, Ctrl+Option+A toggles the dashboard without a prefix.
-AeroSpace runs the controller directly with Command+Option+Space in every
+AeroSpace runs the controller directly with Command+Option+Space in its main
 binding mode. It moves the dashboard to workspace A only after a successful
 open; closing it or failing to open it leaves other windows in place.
 This global shortcut also works in Ghostty after detaching from tmux and

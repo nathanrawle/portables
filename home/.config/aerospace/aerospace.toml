@@ -140,23 +140,11 @@ alt-shift-y = ['move-node-to-workspace Y', 'workspace Y']
 alt-shift-z = ['move-node-to-workspace Z', 'workspace Z'] # excalidraw
 
 [mode.service.binding]
-cmd-alt-space = '''exec-and-forget
-if result="$("$HOME/.zfuns/taw-agent-dashboard" toggle --print-result)" && [ "$result" = opened ]; then
-    aerospace move-node-to-workspace A
-    aerospace workspace A
-fi
-'''
 esc = ['reload-config', 'mode main']
 r = ['flatten-workspace-tree', 'mode main']
 backspace = ['close-all-windows-but-current', 'mode main']
 
 [mode.distribute.binding]
-cmd-alt-space = '''exec-and-forget
-if result="$("$HOME/.zfuns/taw-agent-dashboard" toggle --print-result)" && [ "$result" = opened ]; then
-    aerospace move-node-to-workspace A
-    aerospace workspace A
-fi
-'''
 esc = 'mode main'
 1 = 'move-node-to-workspace 1'
 2 = 'move-node-to-workspace 2'
@@ -191,12 +179,6 @@ y = 'move-node-to-workspace Y'
 z = 'move-node-to-workspace Z' # excalidraw
 
 [mode.kick.binding]
-cmd-alt-space = '''exec-and-forget
-if result="$("$HOME/.zfuns/taw-agent-dashboard" toggle --print-result)" && [ "$result" = opened ]; then
-    aerospace move-node-to-workspace A
-    aerospace workspace A
-fi
-'''
 1 = ['move-node-to-workspace 1', 'mode main']
 2 = ['move-node-to-workspace 2', 'mode main']
 3 = ['move-node-to-workspace 3', 'mode main']
