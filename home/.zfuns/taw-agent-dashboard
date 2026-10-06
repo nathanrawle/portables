@@ -10,7 +10,6 @@ AGENT_SESSION_NAME=agents
 AGENT_SESSION_MARKER=@taw_agent_link_session
 DASHBOARD_SESSION_MARKER=@taw_agent_dashboard_session
 DASHBOARD_SOURCE_WINDOW_OPTION=@taw_agent_dashboard_window_id
-DASHBOARD_LOCK=taw-agent-dashboard
 DASHBOARD_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 DASHBOARD_SERVER_KEY="${TMUX:-}"
 DASHBOARD_SERVER_KEY="${DASHBOARD_SERVER_KEY%%,*}"
@@ -936,14 +935,41 @@ unlink_dashboard_window() {
   fi
 }
 
-with_lock() {
+toggle_dashboard() {
+  if load_state && dashboard_is_live; then
+    close_dashboard
+  else
+    open_dashboard
+  fi
+}
+
+with_lock() (
   local command="$1"
+  local lock_file="$DASHBOARD_STATE_FILE.lock" status
   shift
 
-  tmux wait-for -L "$DASHBOARD_LOCK" >/dev/null 2>&1 || return 1
-  trap 'tmux wait-for -U "$DASHBOARD_LOCK" >/dev/null 2>&1 || true' EXIT
+  mkdir -p "$(dirname "$lock_file")" || return 1
+  # Keep the inode stable so queued operations share the same kernel lock.
+  exec 9>>"$lock_file" || return 1
+  case "$(uname -s)" in
+    Darwin)
+      /usr/bin/lockf -s 9
+      ;;
+    *)
+      command -v flock >/dev/null 2>&1 || {
+        printf 'taw-agent-dashboard: flock is required for dashboard locking\n' >&2
+        return 1
+      }
+      flock -x 9
+      ;;
+  esac
+  status=$?
+  (( status == 0 )) || {
+    printf 'taw-agent-dashboard: could not acquire dashboard lock\n' >&2
+    return "$status"
+  }
   "$command" "$@"
-}
+)
 
 case "${1:-toggle}" in
   open)
@@ -960,11 +986,7 @@ case "${1:-toggle}" in
     ;;
   toggle)
     tmux_available || exit 0
-    if load_state && dashboard_is_live; then
-      with_lock close_dashboard
-    else
-      with_lock open_dashboard
-    fi
+    with_lock toggle_dashboard
     ;;
   close)
     tmux_available || exit 0

@@ -102,6 +102,10 @@ mode="${2:-}"
 
 case "$mode" in
   health)
+    if [[ -n "${TAW_FAKE_GHOSTTY_HEALTH_GATE:-}" ]]; then
+      : >"$TAW_FAKE_GHOSTTY_HEALTH_GATE.entered"
+      while [[ ! -e "$TAW_FAKE_GHOSTTY_HEALTH_GATE.release" ]]; do sleep 0.05; done
+    fi
     if [[ "${TAW_FAKE_GHOSTTY_RUNNING:-1}" = 0 \
       && "$script" != *'application "Ghostty" is running'* ]]; then
       printf 'launched=1\n' >>"$TAW_DASHBOARD_OSASCRIPT_LOG"
@@ -197,6 +201,7 @@ run_dashboard() {
     TAW_FAKE_GHOSTTY_BUILD_ERROR="${TAW_FAKE_GHOSTTY_BUILD_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_BUILD="${TAW_FAKE_GHOSTTY_BUILD:-}" \
     TAW_FAKE_GHOSTTY_HEALTH="${TAW_FAKE_GHOSTTY_HEALTH:-1}" \
+    TAW_FAKE_GHOSTTY_HEALTH_GATE="${TAW_FAKE_GHOSTTY_HEALTH_GATE:-}" \
     TAW_FAKE_GHOSTTY_HEALTH_ERROR="${TAW_FAKE_GHOSTTY_HEALTH_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_MISSING_TERMINAL="${TAW_FAKE_GHOSTTY_MISSING_TERMINAL:-0}" \
     TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR="${TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR:-0}" \
@@ -717,7 +722,7 @@ test_dashboard_cleans_state_persistence_failure() {
     -p -t source:work '#{pane_id}')"
   run_dashboard_status "$wrapper" "$home" "$pane" codex
 
-  if TAW_AGENT_DASHBOARD_STATE_FILE=/dev/null/taw-agent-dashboard.state \
+  if TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE=1 \
     TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-9\nterminal-11' \
     run_dashboard "$wrapper" open; then
     fail "expected dashboard creation to fail when state persistence fails"
@@ -1860,6 +1865,181 @@ test_agent_unlink_syncs_dashboard() {
   fi
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
+
+dashboard_lock_process_tree() {
+  local pid="$1" child
+  printf '%s\n' "$pid"
+  for child in $(ps -axo pid=,ppid= | awk -v parent="$pid" '$2 == parent { print $1 }'); do
+    dashboard_lock_process_tree "$child"
+  done
+}
+
+dashboard_lock_kill_tree() {
+  local pid
+  local -a pids
+  pids=()
+  while IFS= read -r pid; do pids+=( "$pid" ); done < <(dashboard_lock_process_tree "$1")
+  for pid in "${pids[@]}"; do kill -KILL "$pid" 2>/dev/null || true; done
+}
+
+dashboard_lock_wait_file() {
+  local file="$1" attempt
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    [[ -e "$file" ]] && return 0
+    sleep 0.05
+  done
+  fail "timed out waiting for $file"
+}
+
+cleanup_dashboard_lock_test() {
+  local pid
+  for pid in "${DASHBOARD_LOCK_TEST_PIDS[@]}"; do
+    dashboard_lock_kill_tree "$pid"
+    wait "$pid" 2>/dev/null || true
+  done
+  cleanup_dashboard_server
+}
+
+setup_dashboard_lock_test() {
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 1
+  DASHBOARD_SOCKET="portables-dashboard-lock-$$-$RANDOM"
+  DASHBOARD_LOCK_TEST_PIDS=()
+  trap cleanup_dashboard_lock_test EXIT
+  DASHBOARD_LOCK_WRAPPER="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/wrapper" >/dev/null
+  : >"$TEST_TMPDIR/osascript.log"
+  : >"$TEST_TMPDIR/tmux.log"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source 'sleep 300'
+  printf 'window\told-window\nterminal\told-terminal\tview\t@0\n' \
+    >"$TEST_TMPDIR/dashboard.state"
+}
+
+test_dashboard_lock_recovers_after_termination() {
+  local holder next
+  setup_dashboard_lock_test || return 0
+  TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 &
+  holder=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$holder" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/holder.entered"
+  dashboard_lock_kill_tree "$holder"
+  wait "$holder" 2>/dev/null || true
+  DASHBOARD_LOCK_TEST_PIDS=()
+  (run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus && : >"$TEST_TMPDIR/done") &
+  next=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$next" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/done"
+  wait "$next"
+  DASHBOARD_LOCK_TEST_PIDS=()
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_dashboard_lock_cancelled_waiter_and_surviving_child() {
+  local holder waiter next child holder_pid acquisition= command_name status=0
+  setup_dashboard_lock_test || return 0
+  TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 &
+  holder=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$holder" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/holder.entered"
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 &
+  waiter=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$waiter" )
+  sleep 0.1
+  for child in $(dashboard_lock_process_tree "$waiter"); do
+    command_name="$(ps -p "$child" -o comm=)"
+    case "$command_name" in
+      *lockf|*flock) acquisition="$child"; break ;;
+    esac
+  done
+  [[ -n "$acquisition" ]] || fail "expected a waiting lock utility"
+  kill -TERM "$acquisition"
+  wait "$waiter" 2>/dev/null || status=$?
+  [[ "$status" -ne 0 ]] || fail "cancelled acquisition must not report success"
+  DASHBOARD_LOCK_TEST_PIDS=( "$holder" )
+  holder_pid="$(ps -axo pid=,ppid= | awk -v parent="$holder" '$2 == parent { print $1; exit }')"
+  [[ -n "$holder_pid" ]] || fail "expected a controller process"
+  for child in $(ps -axo pid=,ppid= | awk -v parent="$holder_pid" '$2 == parent { print $1 }'); do
+    DASHBOARD_LOCK_TEST_PIDS+=( "$child" )
+  done
+  kill -KILL "$holder_pid"
+  wait "$holder" 2>/dev/null || true
+  (run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus && : >"$TEST_TMPDIR/done") &
+  next=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$next" )
+  sleep 0.1
+  assert_not_exists "$TEST_TMPDIR/done"
+  assert_eq 1 "$(awk '/^mode=health$/ { count++ } END { print count+0 }' "$TEST_TMPDIR/osascript.log")" \
+    "a waiter must not enter the protected operation"
+  : >"$TEST_TMPDIR/holder.release"
+  dashboard_lock_wait_file "$TEST_TMPDIR/done"
+  wait "$next"
+  DASHBOARD_LOCK_TEST_PIDS=()
+}
+
+test_dashboard_lock_independent_state_files() {
+  local holder next
+  setup_dashboard_lock_test || return 0
+  cp "$TEST_TMPDIR/dashboard.state" "$TEST_TMPDIR/other.state"
+  TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 &
+  holder=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$holder" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/holder.entered"
+  (TAW_AGENT_DASHBOARD_STATE_FILE="$TEST_TMPDIR/other.state" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus && : >"$TEST_TMPDIR/done") &
+  next=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$next" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/done"
+  wait "$next"
+  : >"$TEST_TMPDIR/holder.release"
+  wait "$holder"
+  DASHBOARD_LOCK_TEST_PIDS=()
+}
+
+test_dashboard_lock_failure_does_not_run_operation() {
+  local status=0
+  setup_dashboard_lock_test || return 0
+  mkdir "$TEST_TMPDIR/dashboard.state.lock"
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 || status=$?
+  [[ "$status" -ne 0 ]] || fail "expected lock acquisition failure"
+  [[ ! -s "$TEST_TMPDIR/osascript.log" ]] || fail "failed locking must not run operations"
+}
+
+test_dashboard_queued_toggles_recheck_state() {
+  local first second
+  setup_dashboard_lock_test || return 0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle >/dev/null 2>&1 &
+  first=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$first" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/holder.entered"
+  (TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle && : >"$TEST_TMPDIR/done") &
+  second=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$second" )
+  sleep 0.1
+  assert_eq 1 "$(awk '/^mode=health$/ { count++ } END { print count+0 }' "$TEST_TMPDIR/osascript.log")" \
+    "queued toggles must check state only after acquiring the lock"
+  : >"$TEST_TMPDIR/holder.release"
+  dashboard_lock_wait_file "$TEST_TMPDIR/done"
+  wait "$first"
+  wait "$second"
+  DASHBOARD_LOCK_TEST_PIDS=()
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" $'window\tnew-window'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_case "agent dashboard: lock recovers after forced termination" test_dashboard_lock_recovers_after_termination
+test_case "agent dashboard: lock cancellation preserves surviving operations" test_dashboard_lock_cancelled_waiter_and_surviving_child
+test_case "agent dashboard: lock failure performs no operation" test_dashboard_lock_failure_does_not_run_operation
+test_case "agent dashboard: locks independent state files separately" test_dashboard_lock_independent_state_files
+test_case "agent dashboard: queued toggles recheck state under lock" test_dashboard_queued_toggles_recheck_state
 
 test_case "agent dashboard: namespaces state by tmux server" \
   test_dashboard_namespaces_default_state_by_tmux_server

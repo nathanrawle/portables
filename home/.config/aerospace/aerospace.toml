@@ -19,6 +19,7 @@ outer.top = 0
 outer.right = 0
 
 [mode.main.binding]
+cmd-alt-space = 'exec-and-forget /usr/bin/shortcuts run "Toggle Agent Dashboard"'
 
 # All possible keys:
 # - Letters.        a, b, c, ..., z
@@ -134,11 +135,13 @@ alt-shift-y = ['move-node-to-workspace Y', 'workspace Y']
 alt-shift-z = ['move-node-to-workspace Z', 'workspace Z'] # excalidraw
 
 [mode.service.binding]
+cmd-alt-space = 'exec-and-forget /usr/bin/shortcuts run "Toggle Agent Dashboard"'
 esc = ['reload-config', 'mode main']
 r = ['flatten-workspace-tree', 'mode main']
 backspace = ['close-all-windows-but-current', 'mode main']
 
 [mode.distribute.binding]
+cmd-alt-space = 'exec-and-forget /usr/bin/shortcuts run "Toggle Agent Dashboard"'
 esc = 'mode main'
 1 = 'move-node-to-workspace 1'
 2 = 'move-node-to-workspace 2'
@@ -173,6 +176,7 @@ y = 'move-node-to-workspace Y'
 z = 'move-node-to-workspace Z' # excalidraw
 
 [mode.kick.binding]
+cmd-alt-space = 'exec-and-forget /usr/bin/shortcuts run "Toggle Agent Dashboard"'
 1 = ['move-node-to-workspace 1', 'mode main']
 2 = ['move-node-to-workspace 2', 'mode main']
 3 = ['move-node-to-workspace 3', 'mode main']

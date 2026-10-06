@@ -276,7 +276,7 @@ test_agent_link_session_clears_respawned_pane() {
 }
 
 test_agent_link_bindings_load() {
-  local home root_binding prefix_binding lower upper rejected
+  local home root_binding prefix_binding lower upper rejected dashboard_binding
 
   AGENT_LINK_REAL_TMUX="$(command -v tmux || true)"
   [[ -n "$AGENT_LINK_REAL_TMUX" ]] || return 0
@@ -294,6 +294,15 @@ test_agent_link_bindings_load() {
   prefix_binding="$(
     "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" list-keys -T prefix '&'
   )"
+  dashboard_binding="$(
+    "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" list-keys -T root C-M-a
+  )"
+  [[ "$dashboard_binding" = *taw-agent-dashboard*toggle* ]] \
+    || fail "expected C-M-a to toggle the dashboard"
+  if "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" list-keys -T root C-M-g \
+    >/dev/null 2>&1; then
+    fail "expected the old C-M-g dashboard binding to be removed"
+  fi
   lower="$(
     "$AGENT_LINK_REAL_TMUX" -L "$AGENT_LINK_SOCKET" display-message \
       -p '#{m/r:^[Yy],y}'

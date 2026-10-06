@@ -416,13 +416,21 @@ per supported agent window. The same controller is available as:
 
 ```bash
 taw-agents                         # toggle
-taw-agent-dashboard open|focus|sync|close
+taw-agent-dashboard open|focus|sync|toggle|close
 ```
 
-Inside tmux, Ctrl+Option+G toggles the dashboard without a prefix.
-Ghostty also maps Command+Option+Space to that tmux binding. To use the
-same shortcut from other macOS apps, assign it to a macOS Shortcut that
-runs `taw-agent-dashboard toggle`.
+Inside tmux, Ctrl+Option+A toggles the dashboard without a prefix.
+AeroSpace maps Command+Option+Space in every binding mode to the macOS
+Shortcut named `Toggle Agent Dashboard`. That Shortcut must run
+`taw-agent-dashboard toggle`; its own keyboard assignment should be empty.
+This global shortcut also works in Ghostty after detaching from tmux.
+
+Dashboard operations serialize through a persistent file beside the state
+file, using macOS `lockf` or `flock` on other systems. The OS releases the
+lock when the operation and its subprocesses close their descriptors, even
+after forced termination. Keep the lock file in place; its existence does
+not mean the dashboard is locked. Waiting requests can be cancelled without
+leaving a tmux lock queue behind.
 
 The dashboard is built from the managed `agents` session. Each split attaches
 to a private, marked tmux view session that links one `agents` window, so
