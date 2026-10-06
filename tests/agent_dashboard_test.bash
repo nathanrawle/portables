@@ -11,6 +11,12 @@ make_dashboard_tmux_wrapper() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+tmux_flags=()
+if [[ "${1:-}" = -u ]]; then
+  tmux_flags+=( -u )
+  shift
+fi
+
 {
   first=1
   for arg in "$@"; do
@@ -55,7 +61,7 @@ if [[ "${TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE:-0}" = 1 \
   : >"${TAW_DASHBOARD_KILL_FAILURE_MARKER}"
   exit 1
 fi
-exec "$TAW_DASHBOARD_REAL_TMUX" -L "$TAW_DASHBOARD_SOCKET" -f /dev/null "$@"
+exec "$TAW_DASHBOARD_REAL_TMUX" -L "$TAW_DASHBOARD_SOCKET" -f /dev/null "${tmux_flags[@]}" "$@"
 EOF
   chmod +x "$bin/tmux"
   cat >"$bin/mv" <<'EOF'
@@ -96,17 +102,28 @@ script="$(cat)"
 mode="${2:-}"
 {
   printf 'mode=%s\n' "$mode"
-  [[ "$mode" = close-terminal ]] && printf 'target=%s\n' "${3:-}"
+  case "$mode" in
+    close-terminal|close|focus) printf 'target=%s\n' "${3:-}" ;;
+  esac
   printf '%s\n' "$script"
 } >>"$TAW_DASHBOARD_OSASCRIPT_LOG"
 
 case "$mode" in
   health)
+    if [[ -n "${TAW_FAKE_GHOSTTY_HEALTH_GATE:-}" ]]; then
+      : >"$TAW_FAKE_GHOSTTY_HEALTH_GATE.entered"
+      while [[ ! -e "$TAW_FAKE_GHOSTTY_HEALTH_GATE.release" ]]; do sleep 0.05; done
+    fi
     if [[ "${TAW_FAKE_GHOSTTY_RUNNING:-1}" = 0 \
       && "$script" != *'application "Ghostty" is running'* ]]; then
       printf 'launched=1\n' >>"$TAW_DASHBOARD_OSASCRIPT_LOG"
     fi
     [[ "${TAW_FAKE_GHOSTTY_HEALTH_ERROR:-0}" = 1 ]] && exit 1
+    if [[ -n "${TAW_FAKE_GHOSTTY_MISSING_WINDOW:-}" \
+      && "${3:-}" = "$TAW_FAKE_GHOSTTY_MISSING_WINDOW" ]]; then
+      printf '0\n'
+      exit 0
+    fi
     printf '%s\n' "${TAW_FAKE_GHOSTTY_HEALTH:-1}"
     ;;
   terminals-health)
@@ -130,6 +147,11 @@ case "$mode" in
     printf '1\n'
     ;;
   close|focus)
+    if [[ "$mode" = focus ]]; then
+      [[ "${TAW_FAKE_GHOSTTY_FOCUS_ERROR:-0}" = 1 ]] && exit 1
+      printf '%s\n' "${TAW_FAKE_GHOSTTY_FOCUS_RESULT:-1}"
+      exit 0
+    fi
     if [[ "$mode" = close && ${TAW_FAKE_GHOSTTY_CLOSE_ERROR_COUNT:-0} -gt 0 ]]; then
       close_count=0
       [[ -e "$TAW_FAKE_GHOSTTY_CLOSE_ERROR_MARKER" ]] \
@@ -144,7 +166,6 @@ case "$mode" in
       : >"$TAW_FAKE_GHOSTTY_CLOSE_ERROR_MARKER"
       exit 1
     fi
-    printf 'target=%s\n' "${3:-}"
     printf '1\n'
     ;;
   *)
@@ -197,6 +218,7 @@ run_dashboard() {
     TAW_FAKE_GHOSTTY_BUILD_ERROR="${TAW_FAKE_GHOSTTY_BUILD_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_BUILD="${TAW_FAKE_GHOSTTY_BUILD:-}" \
     TAW_FAKE_GHOSTTY_HEALTH="${TAW_FAKE_GHOSTTY_HEALTH:-1}" \
+    TAW_FAKE_GHOSTTY_HEALTH_GATE="${TAW_FAKE_GHOSTTY_HEALTH_GATE:-}" \
     TAW_FAKE_GHOSTTY_HEALTH_ERROR="${TAW_FAKE_GHOSTTY_HEALTH_ERROR:-0}" \
     TAW_FAKE_GHOSTTY_MISSING_TERMINAL="${TAW_FAKE_GHOSTTY_MISSING_TERMINAL:-0}" \
     TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR="${TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR:-0}" \
@@ -586,6 +608,9 @@ test_dashboard_preserves_explicitly_closed_views() {
   run_dashboard "$wrapper" sync
   assert_eq "$build_count" "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
     "expected sync not to reopen an explicitly closed view"
+  assert_eq focused "$(run_dashboard "$wrapper" toggle --print-result)"
+  assert_eq "$build_count" "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
+    "expected toggle not to reopen an explicitly closed view"
   if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
     -t "=$session" 2>/dev/null; then
     fail "expected the explicitly closed view session to stay closed"
@@ -717,7 +742,7 @@ test_dashboard_cleans_state_persistence_failure() {
     -p -t source:work '#{pane_id}')"
   run_dashboard_status "$wrapper" "$home" "$pane" codex
 
-  if TAW_AGENT_DASHBOARD_STATE_FILE=/dev/null/taw-agent-dashboard.state \
+  if TAW_DASHBOARD_FAIL_STATE_WRITE_ONCE=1 \
     TAW_FAKE_GHOSTTY_BUILD=$'dashboard-window-9\nterminal-11' \
     run_dashboard "$wrapper" open; then
     fail "expected dashboard creation to fail when state persistence fails"
@@ -1860,6 +1885,432 @@ test_agent_unlink_syncs_dashboard() {
   fi
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
+
+dashboard_lock_process_tree() {
+  local pid="$1" child
+  printf '%s\n' "$pid"
+  for child in $(ps -axo pid=,ppid= | awk -v parent="$pid" '$2 == parent { print $1 }'); do
+    dashboard_lock_process_tree "$child"
+  done
+}
+
+dashboard_lock_kill_tree() {
+  local pid
+  local -a pids
+  pids=()
+  while IFS= read -r pid; do pids+=( "$pid" ); done < <(dashboard_lock_process_tree "$1")
+  for pid in "${pids[@]}"; do kill -KILL "$pid" 2>/dev/null || true; done
+}
+
+dashboard_lock_wait_file() {
+  local file="$1" attempt
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    [[ -e "$file" ]] && return 0
+    sleep 0.05
+  done
+  fail "timed out waiting for $file"
+}
+
+cleanup_dashboard_lock_test() {
+  local pid
+  for pid in "${DASHBOARD_LOCK_TEST_PIDS[@]}"; do
+    dashboard_lock_kill_tree "$pid"
+    wait "$pid" 2>/dev/null || true
+  done
+  cleanup_dashboard_server
+}
+
+setup_dashboard_lock_test() {
+  DASHBOARD_REAL_TMUX="$(command -v tmux || true)"
+  [[ -n "$DASHBOARD_REAL_TMUX" ]] || return 1
+  DASHBOARD_SOCKET="portables-dashboard-lock-$$-$RANDOM"
+  DASHBOARD_LOCK_TEST_PIDS=()
+  trap cleanup_dashboard_lock_test EXIT
+  DASHBOARD_LOCK_WRAPPER="$(make_dashboard_tmux_wrapper "$TEST_TMPDIR/wrapper")"
+  make_dashboard_osascript "$TEST_TMPDIR/wrapper" >/dev/null
+  : >"$TEST_TMPDIR/osascript.log"
+  : >"$TEST_TMPDIR/tmux.log"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" -f /dev/null \
+    new-session -d -s source 'sleep 300'
+  printf 'window\told-window\nterminal\told-terminal\tview\t@0\n' \
+    >"$TEST_TMPDIR/dashboard.state"
+}
+
+test_dashboard_lock_recovers_after_termination() {
+  local holder next
+  setup_dashboard_lock_test || return 0
+  TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 &
+  holder=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$holder" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/holder.entered"
+  dashboard_lock_kill_tree "$holder"
+  wait "$holder" 2>/dev/null || true
+  DASHBOARD_LOCK_TEST_PIDS=()
+  (run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus && : >"$TEST_TMPDIR/done") &
+  next=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$next" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/done"
+  wait "$next"
+  DASHBOARD_LOCK_TEST_PIDS=()
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_dashboard_lock_cancelled_waiter_and_surviving_child() {
+  local holder waiter next child holder_pid acquisition= command_name status=0
+  setup_dashboard_lock_test || return 0
+  TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 &
+  holder=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$holder" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/holder.entered"
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 &
+  waiter=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$waiter" )
+  sleep 0.1
+  for child in $(dashboard_lock_process_tree "$waiter"); do
+    command_name="$(ps -p "$child" -o comm=)"
+    case "$command_name" in
+      *lockf|*flock|*perl*) acquisition="$child"; break ;;
+    esac
+  done
+  [[ -n "$acquisition" ]] || fail "expected a waiting lock utility"
+  kill -TERM "$acquisition"
+  wait "$waiter" 2>/dev/null || status=$?
+  [[ "$status" -ne 0 ]] || fail "cancelled acquisition must not report success"
+  DASHBOARD_LOCK_TEST_PIDS=( "$holder" )
+  holder_pid="$(ps -axo pid=,ppid= | awk -v parent="$holder" '$2 == parent { print $1; exit }')"
+  [[ -n "$holder_pid" ]] || fail "expected a controller process"
+  for child in $(ps -axo pid=,ppid= | awk -v parent="$holder_pid" '$2 == parent { print $1 }'); do
+    DASHBOARD_LOCK_TEST_PIDS+=( "$child" )
+  done
+  kill -KILL "$holder_pid"
+  wait "$holder" 2>/dev/null || true
+  (run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus && : >"$TEST_TMPDIR/done") &
+  next=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$next" )
+  sleep 0.1
+  assert_not_exists "$TEST_TMPDIR/done"
+  assert_eq 1 "$(awk '/^mode=health$/ { count++ } END { print count+0 }' "$TEST_TMPDIR/osascript.log")" \
+    "a waiter must not enter the protected operation"
+  : >"$TEST_TMPDIR/holder.release"
+  dashboard_lock_wait_file "$TEST_TMPDIR/done"
+  wait "$next"
+  DASHBOARD_LOCK_TEST_PIDS=()
+}
+
+test_dashboard_lock_independent_state_files() {
+  local holder next
+  setup_dashboard_lock_test || return 0
+  cp "$TEST_TMPDIR/dashboard.state" "$TEST_TMPDIR/other.state"
+  TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 &
+  holder=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$holder" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/holder.entered"
+  (TAW_AGENT_DASHBOARD_STATE_FILE="$TEST_TMPDIR/other.state" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus && : >"$TEST_TMPDIR/done") &
+  next=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$next" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/done"
+  wait "$next"
+  : >"$TEST_TMPDIR/holder.release"
+  wait "$holder"
+  DASHBOARD_LOCK_TEST_PIDS=()
+}
+
+test_dashboard_lock_failure_does_not_run_operation() {
+  local status=0
+  setup_dashboard_lock_test || return 0
+  mkdir "$TEST_TMPDIR/dashboard.state.lock"
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus >/dev/null 2>&1 || status=$?
+  [[ "$status" -ne 0 ]] || fail "expected lock acquisition failure"
+  [[ ! -s "$TEST_TMPDIR/osascript.log" ]] || fail "failed locking must not run operations"
+}
+
+test_dashboard_queued_toggles_recheck_state() {
+  local first second
+  setup_dashboard_toggle_test || return 0
+  TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle >/dev/null 2>&1 &
+  first=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$first" )
+  dashboard_lock_wait_file "$TEST_TMPDIR/holder.entered"
+  (TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle && : >"$TEST_TMPDIR/done") &
+  second=$!
+  DASHBOARD_LOCK_TEST_PIDS+=( "$second" )
+  sleep 0.1
+  assert_eq 1 "$(awk '/^mode=health$/ { count++ } END { print count+0 }' "$TEST_TMPDIR/osascript.log")" \
+    "queued toggles must check state only after acquiring the lock"
+  : >"$TEST_TMPDIR/holder.release"
+  dashboard_lock_wait_file "$TEST_TMPDIR/done"
+  wait "$first"
+  wait "$second"
+  DASHBOARD_LOCK_TEST_PIDS=()
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" $'window\told-window'
+  assert_eq 2 "$(awk '/^mode=focus$/ { count++ } END { print count+0 }' "$TEST_TMPDIR/osascript.log")" \
+    "queued toggles must focus the existing dashboard"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_dashboard_toggle_reports_successful_result() {
+  local result status=0
+  setup_dashboard_toggle_test || return 0
+  result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+  assert_eq focused "$result" "expected a successful focus result"
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" close
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" kill-session -t agents
+  result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result 2>/dev/null)" || status=$?
+  [[ "$status" -ne 0 ]] || fail "expected no-agent toggle to fail"
+  assert_eq '' "$result" "failed toggles must not report success"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  result="$(TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+  assert_eq opened "$result" "expected a successful open result"
+  result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle)"
+  assert_eq '' "$result" "ordinary toggles must remain quiet"
+}
+
+test_dashboard_workspace_routing_requires_successful_result() {
+  local line capture=0 outcome
+  local script="$TEST_TMPDIR/launch.bash" home="$TEST_TMPDIR/home"
+  mkdir -p "$home/.zfuns" "$TEST_TMPDIR/bin"
+  : >"$script"
+  while IFS= read -r line; do
+    if [[ "$line" = "cmd-alt-space = '''exec-and-forget" ]]; then
+      capture=1
+      continue
+    fi
+    if [[ "$capture" = 1 ]]; then
+      [[ "$line" = "'''" ]] && break
+      printf '%s\n' "$line" >>"$script"
+    fi
+  done <"$REPO_ROOT/home/.config/aerospace/aerospace.toml"
+  [[ -s "$script" ]] || fail "expected a direct AeroSpace launcher"
+  cat >"$home/.zfuns/taw-agent-dashboard" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" = 'toggle --print-result' ]] || exit 2
+[[ "$TEST_OUTCOME" != failure ]] || exit 1
+printf '%s\n' "$TEST_OUTCOME"
+EOF
+  cat >"$TEST_TMPDIR/bin/aerospace" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_ROUTING_LOG"
+EOF
+  chmod +x "$home/.zfuns/taw-agent-dashboard" "$TEST_TMPDIR/bin/aerospace"
+  for outcome in opened focused closed failure; do
+    : >"$TEST_TMPDIR/routing.log"
+    HOME="$home" PATH="$TEST_TMPDIR/bin:$PATH" TEST_OUTCOME="$outcome" \
+      TEST_ROUTING_LOG="$TEST_TMPDIR/routing.log" bash "$script"
+    if [[ "$outcome" = opened || "$outcome" = focused ]]; then
+      assert_file_contents "$TEST_TMPDIR/routing.log" $'move-node-to-workspace A\nworkspace A'
+    else
+      [[ ! -s "$TEST_TMPDIR/routing.log" ]] || fail "$outcome must not move another window"
+    fi
+  done
+}
+
+setup_dashboard_toggle_test() {
+  setup_dashboard_lock_test || return 1
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  rm "$TEST_TMPDIR/dashboard.state"
+  TAW_FAKE_GHOSTTY_BUILD=$'old-window\nold-terminal' run_dashboard "$DASHBOARD_LOCK_WRAPPER" open
+  : >"$TEST_TMPDIR/osascript.log"
+  : >"$TEST_TMPDIR/tmux.log"
+}
+
+test_dashboard_toggle_reconciles_missing_contents() {
+  local result session problem
+  setup_dashboard_toggle_test || return 0
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' "$TEST_TMPDIR/dashboard.state")"
+  for problem in terminal session; do
+    if [[ "$problem" = session ]]; then
+      "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" kill-session -t "=$session"
+    fi
+    result="$(TAW_FAKE_GHOSTTY_MISSING_TERMINAL="$([[ "$problem" = terminal ]] && printf 1 || printf 0)" \
+      TAW_FAKE_GHOSTTY_BUILD="$problem-window"$'\n'"$problem-terminal" \
+      run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+    assert_eq focused "$result"
+    assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" $'window\t'"$problem-window"
+    assert_dashboard_file_contains "$TEST_TMPDIR/osascript.log" "target=$problem-window"
+    "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"
+    "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+  done
+  assert_eq 2 "$(grep -c '^mode=build$' "$TEST_TMPDIR/osascript.log")"
+}
+
+test_dashboard_default_toggle_and_argument_validation() {
+  local result status
+  setup_dashboard_toggle_test || return 0
+  result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER")"
+  assert_eq '' "$result" "the default focus must remain quiet"
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" close
+  result="$(TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' run_dashboard "$DASHBOARD_LOCK_WRAPPER")"
+  assert_eq '' "$result" "the default open must remain quiet"
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" $'window\tnew-window'
+  status=0
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle unexpected >/dev/null 2>&1 || status=$?
+  assert_eq 2 "$status"
+  status=0
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" --print-result >/dev/null 2>&1 || status=$?
+  assert_eq 2 "$status"
+}
+
+test_dashboard_repeated_toggles_preserve_window_and_sessions() {
+  local result attempt original_state session
+  setup_dashboard_toggle_test || return 0
+  original_state="$(cat "$TEST_TMPDIR/dashboard.state")"
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' "$TEST_TMPDIR/dashboard.state")"
+  for attempt in 1 2; do
+    result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+    assert_eq focused "$result"
+    assert_eq "$original_state" "$(cat "$TEST_TMPDIR/dashboard.state")"
+    "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"
+  done
+  if grep -Eq '^mode=(build|close)$' "$TEST_TMPDIR/osascript.log" \
+    || grep -Eq '^(kill-session|new-session) ' "$TEST_TMPDIR/tmux.log"; then
+    fail "repeated toggles must retain the existing window and sessions"
+  fi
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" close
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"; then
+    fail "explicit close must remove the private view session"
+  fi
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_dashboard_toggle_preserves_state_on_health_or_focus_failure() {
+  local result status failure original_state health_error terminal_error focus_error focus_result
+  setup_dashboard_toggle_test || return 0
+  original_state="$(cat "$TEST_TMPDIR/dashboard.state")"
+  for failure in health terminals focus missing-window; do
+    health_error=0 terminal_error=0 focus_error=0 focus_result=1 status=0
+    case "$failure" in
+      health) health_error=1 ;;
+      terminals) terminal_error=1 ;;
+      focus) focus_error=1 ;;
+      missing-window) focus_result=0 ;;
+    esac
+    result="$(TAW_FAKE_GHOSTTY_HEALTH_ERROR="$health_error" \
+      TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR="$terminal_error" \
+      TAW_FAKE_GHOSTTY_FOCUS_ERROR="$focus_error" TAW_FAKE_GHOSTTY_FOCUS_RESULT="$focus_result" \
+      run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result 2>/dev/null)" || status=$?
+    [[ "$status" -ne 0 ]] || fail "$failure must fail the toggle"
+    assert_eq '' "$result" "failed toggles must not report success"
+    assert_eq "$original_state" "$(cat "$TEST_TMPDIR/dashboard.state")"
+  done
+  if grep -Eq '^mode=(build|close)$' "$TEST_TMPDIR/osascript.log"; then
+    fail "failed health or focus must not rebuild or close the dashboard"
+  fi
+}
+
+test_dashboard_toggle_recovers_missing_window() {
+  local result
+  setup_dashboard_lock_test || return 0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  result="$(TAW_FAKE_GHOSTTY_MISSING_WINDOW=old-window \
+    TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+  assert_eq opened "$result"
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" $'window\tnew-window'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_dashboard_discovers_agents_without_utf8_locale() {
+  local result
+  setup_dashboard_lock_test || return 0
+  rm "$TEST_TMPDIR/dashboard.state"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  result="$(LANG=C LC_ALL=C LC_CTYPE=C TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+  assert_eq opened "$result" "expected agent discovery and view creation in an ASCII locale"
+  LANG=C LC_ALL=C LC_CTYPE=C run_dashboard "$DASHBOARD_LOCK_WRAPPER" close
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_dashboard_zsh_autoload_dispatches_to_bash() {
+  local home="$TEST_TMPDIR/home" entry="$TEST_TMPDIR/zsh-entry"
+  command -v zsh >/dev/null 2>&1 || return 0
+  setup_dashboard_lock_test || return 0
+  mkdir -p "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s view 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t view @taw_agent_dashboard_session 1
+  cat >"$entry" <<'EOF'
+#!/usr/bin/env zsh
+fpath=( "$HOME/.zfuns" $fpath )
+autoload -U taw-agent-dashboard
+for attempt in 1 2; do
+  taw-agent-dashboard "$@" || exit $?
+  [[ ! -o nounset ]] || exit 70
+  (( ${+functions[cleanup_pending_sessions]} == 0 )) || exit 71
+done
+print -r -- 'shell preserved'
+EOF
+  chmod +x "$entry"
+  assert_eq 'shell preserved' "$(HOME="$home" DASHBOARD_SCRIPT="$entry" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" close)"
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t view; then
+    fail "autoloaded close must remove the private view"
+  fi
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_case "agent dashboard: toggle reconciles missing dashboard contents" test_dashboard_toggle_reconciles_missing_contents
+test_case "agent dashboard: default toggle preserves argument validation" test_dashboard_default_toggle_and_argument_validation
+test_case "agent dashboard: Zsh autoload dispatches to Bash" test_dashboard_zsh_autoload_dispatches_to_bash
+test_case "agent dashboard: discovers agents without UTF-8 locale" test_dashboard_discovers_agents_without_utf8_locale
+test_case "agent dashboard: repeated toggles retain window and sessions" test_dashboard_repeated_toggles_preserve_window_and_sessions
+test_case "agent dashboard: toggle preserves state on health or focus failure" test_dashboard_toggle_preserves_state_on_health_or_focus_failure
+test_case "agent dashboard: toggle recovers a missing window" test_dashboard_toggle_recovers_missing_window
+test_case "agent dashboard: workspace routing requires successful open or focus" test_dashboard_workspace_routing_requires_successful_result
+test_case "agent dashboard: toggle reports only successful outcomes" test_dashboard_toggle_reports_successful_result
+
+test_dashboard_legacy_darwin_lockf_preserves_children() {
+  local legacy="$TEST_TMPDIR/legacy-lockf" log="$TEST_TMPDIR/legacy-lockf.log"
+  [[ "$(uname -s)" = Darwin ]] || return 0
+  cat >"$legacy" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" = '-s 9' ]] || exit 1
+printf 'descriptor unsupported\n' >>"$TAW_LEGACY_LOCKF_LOG"
+exit 64
+EOF
+  chmod +x "$legacy"
+  TAW_AGENT_DASHBOARD_LOCKF="$legacy" TAW_LEGACY_LOCKF_LOG="$log" \
+    test_dashboard_lock_cancelled_waiter_and_surviving_child
+  assert_dashboard_file_contains "$log" 'descriptor unsupported'
+}
+
+test_dashboard_darwin_lockf_failure_has_no_fallback() {
+  local utility="$TEST_TMPDIR/failing-lockf" status=0
+  [[ "$(uname -s)" = Darwin ]] || return 0
+  setup_dashboard_lock_test || return 0
+  printf '#!/usr/bin/env bash\nexit 73\n' >"$utility"
+  chmod +x "$utility"
+  TAW_AGENT_DASHBOARD_LOCKF="$utility" run_dashboard "$DASHBOARD_LOCK_WRAPPER" focus \
+    >/dev/null 2>&1 || status=$?
+  assert_eq 73 "$status"
+  [[ ! -s "$TEST_TMPDIR/osascript.log" ]] || fail 'lock failure must not run the operation'
+}
+
+test_case "agent dashboard: legacy Darwin lockf preserves surviving children" test_dashboard_legacy_darwin_lockf_preserves_children
+test_case "agent dashboard: Darwin lockf errors do not fall back" test_dashboard_darwin_lockf_failure_has_no_fallback
+test_case "agent dashboard: lock recovers after forced termination" test_dashboard_lock_recovers_after_termination
+test_case "agent dashboard: lock cancellation preserves surviving operations" test_dashboard_lock_cancelled_waiter_and_surviving_child
+test_case "agent dashboard: lock failure performs no operation" test_dashboard_lock_failure_does_not_run_operation
+test_case "agent dashboard: locks independent state files separately" test_dashboard_lock_independent_state_files
+test_case "agent dashboard: queued toggles recheck state under lock" test_dashboard_queued_toggles_recheck_state
 
 test_case "agent dashboard: namespaces state by tmux server" \
   test_dashboard_namespaces_default_state_by_tmux_server

@@ -411,18 +411,35 @@ tmux represents linked windows as one shared object.
 
 ## Ghostty Agent Dashboard
 
-On macOS, `taw-agents` toggles a Ghostty window containing one adaptive split
+On macOS, `taw-agents` opens or focuses a Ghostty window containing one adaptive split
 per supported agent window. The same controller is available as:
 
 ```bash
-taw-agents                         # toggle
-taw-agent-dashboard open|focus|sync|close
+taw-agents                         # open or focus
+taw-agent-dashboard open|focus|sync|toggle|close
 ```
 
-Inside tmux, Ctrl+Option+G toggles the dashboard without a prefix.
-Ghostty also maps Command+Option+Space to that tmux binding. To use the
-same shortcut from other macOS apps, assign it to a macOS Shortcut that
-runs `taw-agent-dashboard toggle`.
+Inside tmux, Ctrl+Option+A opens or focuses the dashboard without a prefix.
+AeroSpace runs the controller directly with Command+Option+Space in its main
+binding mode. It moves the dashboard to workspace A only after a successful
+open or focus; a failed operation leaves other windows in place.
+This global shortcut also works in Ghostty after detaching from tmux and
+does not require a macOS Shortcut.
+
+For workspace routing, use `taw-agent-dashboard toggle --print-result`.
+It prints `opened` or `focused` after a successful operation. Move the focused
+window only for either successful result; a failed toggle produces no result.
+Repeated toggles retain the same dashboard window, splits, and private tmux
+sessions when healthy; missing terminals or views are reconciled before focus.
+Use `taw-agent-dashboard close` to close it explicitly.
+
+Dashboard operations serialize through a persistent file beside the state
+file, using macOS `lockf` (bundled Perl's `flock` on older macOS) or `flock`
+on other systems. The OS releases the lock when the operation and its
+subprocesses close their descriptors, even
+after forced termination. Keep the lock file in place; its existence does
+not mean the dashboard is locked. Waiting requests can be cancelled without
+leaving a tmux lock queue behind.
 
 The dashboard is built from the managed `agents` session. Each split attaches
 to a private, marked tmux view session that links one `agents` window, so
