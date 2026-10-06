@@ -430,7 +430,8 @@ For workspace routing, use `taw-agent-dashboard toggle --print-result`.
 It prints `opened` or `focused` after a successful operation. Move the focused
 window only for either successful result; a failed toggle produces no result.
 Repeated toggles retain the same dashboard window, splits, and private tmux
-sessions. Use `taw-agent-dashboard close` to close it explicitly.
+sessions when healthy; missing terminals or views are reconciled before focus.
+Use `taw-agent-dashboard close` to close it explicitly.
 
 Dashboard operations serialize through a persistent file beside the state
 file, using macOS `lockf` or `flock` on other systems. The OS releases the

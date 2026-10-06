@@ -949,6 +949,8 @@ toggle_dashboard() {
   local print_result="${1:-}" result health_status
 
   if load_state && dashboard_is_live; then
+    sync_dashboard || return
+    load_state && state_has_dashboard || return 1
     focus_dashboard || return
     result=focused
   else
@@ -1002,7 +1004,7 @@ case "${1:-toggle}" in
     with_lock focus_existing_dashboard
     ;;
   toggle)
-    [[ $# -eq 1 || ( $# -eq 2 && "$2" = --print-result ) ]] || { usage; exit 2; }
+    [[ $# -le 1 || ( $# -eq 2 && "$2" = --print-result ) ]] || { usage; exit 2; }
     tmux_available || exit 0
     with_lock toggle_dashboard "${2:-}"
     ;;

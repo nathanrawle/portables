@@ -608,6 +608,9 @@ test_dashboard_preserves_explicitly_closed_views() {
   run_dashboard "$wrapper" sync
   assert_eq "$build_count" "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
     "expected sync not to reopen an explicitly closed view"
+  assert_eq focused "$(run_dashboard "$wrapper" toggle --print-result)"
+  assert_eq "$build_count" "$(grep -Fc 'mode=build' "$TEST_TMPDIR/osascript.log")" \
+    "expected toggle not to reopen an explicitly closed view"
   if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session \
     -t "=$session" 2>/dev/null; then
     fail "expected the explicitly closed view session to stay closed"
@@ -2027,10 +2030,7 @@ test_dashboard_lock_failure_does_not_run_operation() {
 
 test_dashboard_queued_toggles_recheck_state() {
   local first second
-  setup_dashboard_lock_test || return 0
-  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
-  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
-  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  setup_dashboard_toggle_test || return 0
   TAW_FAKE_GHOSTTY_HEALTH_GATE="$TEST_TMPDIR/holder" \
     run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle >/dev/null 2>&1 &
   first=$!
@@ -2056,10 +2056,11 @@ test_dashboard_queued_toggles_recheck_state() {
 
 test_dashboard_toggle_reports_successful_result() {
   local result status=0
-  setup_dashboard_lock_test || return 0
+  setup_dashboard_toggle_test || return 0
   result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
   assert_eq focused "$result" "expected a successful focus result"
   run_dashboard "$DASHBOARD_LOCK_WRAPPER" close
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" kill-session -t agents
   result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result 2>/dev/null)" || status=$?
   [[ "$status" -ne 0 ]] || fail "expected no-agent toggle to fail"
   assert_eq '' "$result" "failed toggles must not report success"
@@ -2112,17 +2113,64 @@ EOF
   done
 }
 
+setup_dashboard_toggle_test() {
+  setup_dashboard_lock_test || return 1
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  rm "$TEST_TMPDIR/dashboard.state"
+  TAW_FAKE_GHOSTTY_BUILD=$'old-window\nold-terminal' run_dashboard "$DASHBOARD_LOCK_WRAPPER" open
+  : >"$TEST_TMPDIR/osascript.log"
+  : >"$TEST_TMPDIR/tmux.log"
+}
+
+test_dashboard_toggle_reconciles_missing_contents() {
+  local result session problem
+  setup_dashboard_toggle_test || return 0
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' "$TEST_TMPDIR/dashboard.state")"
+  for problem in terminal session; do
+    if [[ "$problem" = session ]]; then
+      "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" kill-session -t "=$session"
+    fi
+    result="$(TAW_FAKE_GHOSTTY_MISSING_TERMINAL="$([[ "$problem" = terminal ]] && printf 1 || printf 0)" \
+      TAW_FAKE_GHOSTTY_BUILD="$problem-window"$'\n'"$problem-terminal" \
+      run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+    assert_eq focused "$result"
+    assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" $'window\t'"$problem-window"
+    assert_dashboard_file_contains "$TEST_TMPDIR/osascript.log" "target=$problem-window"
+    "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"
+    "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+  done
+  assert_eq 2 "$(grep -c '^mode=build$' "$TEST_TMPDIR/osascript.log")"
+}
+
+test_dashboard_default_toggle_and_argument_validation() {
+  local result status
+  setup_dashboard_toggle_test || return 0
+  result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER")"
+  assert_eq '' "$result" "the default focus must remain quiet"
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" close
+  result="$(TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' run_dashboard "$DASHBOARD_LOCK_WRAPPER")"
+  assert_eq '' "$result" "the default open must remain quiet"
+  assert_dashboard_file_contains "$TEST_TMPDIR/dashboard.state" $'window\tnew-window'
+  status=0
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle unexpected >/dev/null 2>&1 || status=$?
+  assert_eq 2 "$status"
+  status=0
+  run_dashboard "$DASHBOARD_LOCK_WRAPPER" --print-result >/dev/null 2>&1 || status=$?
+  assert_eq 2 "$status"
+}
+
 test_dashboard_repeated_toggles_preserve_window_and_sessions() {
-  local result attempt original_state
-  setup_dashboard_lock_test || return 0
-  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s view 'sleep 300'
-  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t view @taw_agent_dashboard_session 1
+  local result attempt original_state session
+  setup_dashboard_toggle_test || return 0
   original_state="$(cat "$TEST_TMPDIR/dashboard.state")"
+  session="$(awk -F '\t' '$1 == "terminal" { print $3 }' "$TEST_TMPDIR/dashboard.state")"
   for attempt in 1 2; do
     result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
     assert_eq focused "$result"
     assert_eq "$original_state" "$(cat "$TEST_TMPDIR/dashboard.state")"
-    "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t view
+    "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"
   done
   if grep -Eq '^mode=(build|close)$' "$TEST_TMPDIR/osascript.log" \
     || grep -Eq '^(kill-session|new-session) ' "$TEST_TMPDIR/tmux.log"; then
@@ -2130,24 +2178,26 @@ test_dashboard_repeated_toggles_preserve_window_and_sessions() {
   fi
   run_dashboard "$DASHBOARD_LOCK_WRAPPER" close
   assert_not_exists "$TEST_TMPDIR/dashboard.state"
-  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t view; then
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t "=$session"; then
     fail "explicit close must remove the private view session"
   fi
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
 test_dashboard_toggle_preserves_state_on_health_or_focus_failure() {
-  local result status failure original_state health_error focus_error focus_result
-  setup_dashboard_lock_test || return 0
+  local result status failure original_state health_error terminal_error focus_error focus_result
+  setup_dashboard_toggle_test || return 0
   original_state="$(cat "$TEST_TMPDIR/dashboard.state")"
-  for failure in health focus missing-window; do
-    health_error=0 focus_error=0 focus_result=1 status=0
+  for failure in health terminals focus missing-window; do
+    health_error=0 terminal_error=0 focus_error=0 focus_result=1 status=0
     case "$failure" in
       health) health_error=1 ;;
+      terminals) terminal_error=1 ;;
       focus) focus_error=1 ;;
       missing-window) focus_result=0 ;;
     esac
     result="$(TAW_FAKE_GHOSTTY_HEALTH_ERROR="$health_error" \
+      TAW_FAKE_GHOSTTY_TERMINALS_HEALTH_ERROR="$terminal_error" \
       TAW_FAKE_GHOSTTY_FOCUS_ERROR="$focus_error" TAW_FAKE_GHOSTTY_FOCUS_RESULT="$focus_result" \
       run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result 2>/dev/null)" || status=$?
     [[ "$status" -ne 0 ]] || fail "$failure must fail the toggle"
@@ -2217,6 +2267,8 @@ EOF
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
+test_case "agent dashboard: toggle reconciles missing dashboard contents" test_dashboard_toggle_reconciles_missing_contents
+test_case "agent dashboard: default toggle preserves argument validation" test_dashboard_default_toggle_and_argument_validation
 test_case "agent dashboard: Zsh autoload dispatches to Bash" test_dashboard_zsh_autoload_dispatches_to_bash
 test_case "agent dashboard: discovers agents without UTF-8 locale" test_dashboard_discovers_agents_without_utf8_locale
 test_case "agent dashboard: repeated toggles retain window and sessions" test_dashboard_repeated_toggles_preserve_window_and_sessions
