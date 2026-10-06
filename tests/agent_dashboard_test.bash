@@ -11,6 +11,12 @@ make_dashboard_tmux_wrapper() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+tmux_flags=()
+if [[ "${1:-}" = -u ]]; then
+  tmux_flags+=( -u )
+  shift
+fi
+
 {
   first=1
   for arg in "$@"; do
@@ -55,7 +61,7 @@ if [[ "${TAW_DASHBOARD_FAIL_KILL_SESSION_ONCE:-0}" = 1 \
   : >"${TAW_DASHBOARD_KILL_FAILURE_MARKER}"
   exit 1
 fi
-exec "$TAW_DASHBOARD_REAL_TMUX" -L "$TAW_DASHBOARD_SOCKET" -f /dev/null "$@"
+exec "$TAW_DASHBOARD_REAL_TMUX" -L "$TAW_DASHBOARD_SOCKET" -f /dev/null "${tmux_flags[@]}" "$@"
 EOF
   chmod +x "$bin/tmux"
   cat >"$bin/mv" <<'EOF'
@@ -2092,6 +2098,22 @@ EOF
   done
 }
 
+test_dashboard_discovers_agents_without_utf8_locale() {
+  local result
+  setup_dashboard_lock_test || return 0
+  rm "$TEST_TMPDIR/dashboard.state"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  result="$(LANG=C LC_ALL=C LC_CTYPE=C TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+  assert_eq opened "$result" "expected agent discovery and view creation in an ASCII locale"
+  LANG=C LC_ALL=C LC_CTYPE=C run_dashboard "$DASHBOARD_LOCK_WRAPPER" close
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_case "agent dashboard: discovers agents without UTF-8 locale" test_dashboard_discovers_agents_without_utf8_locale
 test_case "agent dashboard: workspace routing requires successful open" test_dashboard_workspace_routing_requires_open_result
 test_case "agent dashboard: toggle reports only successful outcomes" test_dashboard_toggle_reports_successful_result
 

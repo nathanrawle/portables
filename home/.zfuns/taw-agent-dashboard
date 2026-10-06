@@ -15,7 +15,7 @@ DASHBOARD_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 DASHBOARD_SERVER_KEY="${TMUX:-}"
 DASHBOARD_SERVER_KEY="${DASHBOARD_SERVER_KEY%%,*}"
 if [[ -z "$DASHBOARD_SERVER_KEY" ]] && command -v tmux >/dev/null 2>&1; then
-  DASHBOARD_SERVER_KEY="$(tmux display-message -p '#{socket_path}' 2>/dev/null || true)"
+  DASHBOARD_SERVER_KEY="$(tmux -u display-message -p '#{socket_path}' 2>/dev/null || true)"
 fi
 DASHBOARD_SERVER_KEY="${DASHBOARD_SERVER_KEY//\//_}"
 DASHBOARD_SERVER_KEY="${DASHBOARD_SERVER_KEY//:/_}"
@@ -55,7 +55,7 @@ locate_managed_session() {
   local managed_id= named_id=
 
   MANAGED_SESSION_ID=
-  sessions="$(tmux list-sessions \
+  sessions="$(tmux -u list-sessions \
     -F $'#{session_id}\t#{session_name}\t#{@taw_agent_link_session}' 2>/dev/null)" \
     || return 2
 
@@ -82,7 +82,7 @@ collect_desired_windows() {
     status=$?
     return "$status"
   }
-  windows="$(tmux list-windows -t "$MANAGED_SESSION_ID" -F '#{window_id}' 2>/dev/null)" \
+  windows="$(tmux -u list-windows -t "$MANAGED_SESSION_ID" -F '#{window_id}' 2>/dev/null)" \
     || return 2
   while IFS= read -r window; do
     [[ -n "$window" ]] && DESIRED_WINDOWS+=( "$window" )
@@ -247,18 +247,18 @@ state_matches_desired() {
     [[ "${STATE_SOURCE_WINDOWS[$i]}" = "${DESIRED_WINDOWS[$i]}" ]] || return 1
     session="${STATE_SESSIONS[$i]}"
     tmux has-session -t "=$session" >/dev/null 2>&1 || return 1
-    marker="$(tmux show-option -qv -t "$session" \
+    marker="$(tmux -u show-option -qv -t "$session" \
       "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" || return 1
-    source="$(tmux show-option -qv -t "$session" \
+    source="$(tmux -u show-option -qv -t "$session" \
       "$DASHBOARD_SOURCE_WINDOW_OPTION" 2>/dev/null)" || return 1
     [[ "$marker" = 1 && "$source" = "${STATE_SOURCE_WINDOWS[$i]}" ]] \
       || return 1
-    active_window="$(tmux display-message -p -t "$session:" '#{window_id}' \
+    active_window="$(tmux -u display-message -p -t "$session:" '#{window_id}' \
       2>/dev/null)" || return 1
     if [[ "$active_window" != "${STATE_SOURCE_WINDOWS[$i]}" ]]; then
       tmux select-window -t "$session:${STATE_SOURCE_WINDOWS[$i]}" \
         >/dev/null 2>&1 || return 1
-      active_window="$(tmux display-message -p -t "$session:" '#{window_id}' \
+      active_window="$(tmux -u display-message -p -t "$session:" '#{window_id}' \
         2>/dev/null)" || return 1
       [[ "$active_window" = "${STATE_SOURCE_WINDOWS[$i]}" ]] || return 1
     fi
@@ -413,9 +413,9 @@ view_session_name() {
   candidate="$base"
   suffix=1
   while tmux has-session -t "=$candidate" >/dev/null 2>&1; do
-    marker="$(tmux show-option -qv -t "$candidate" "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" \
+    marker="$(tmux -u show-option -qv -t "$candidate" "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" \
       || marker=
-    source="$(tmux show-option -qv -t "$candidate" \
+    source="$(tmux -u show-option -qv -t "$candidate" \
       "$DASHBOARD_SOURCE_WINDOW_OPTION" 2>/dev/null)" || source=
     if [[ "$marker" = 1 && "$source" = "$source_window" ]]; then
       printf '%s\n' "$candidate"
@@ -439,7 +439,7 @@ ensure_view_session() {
     return 0
   fi
 
-  created="$(tmux new-session -d -P -F $'#{session_id}\t#{window_index}' \
+  created="$(tmux -u new-session -d -P -F $'#{session_id}\t#{window_index}' \
     -s "$session_name" -c "$source_path" 2>/dev/null)" || return 1
   session_id="${created%%"$tab"*}"
   window_index="${created#*"$tab"}"
@@ -477,13 +477,13 @@ destroy_view_session() {
   local session_name="$1" marker actual sessions
 
   if ! tmux has-session -t "=$session_name" >/dev/null 2>&1; then
-    sessions="$(tmux list-sessions -F '#{session_name}' 2>/dev/null)" || return 1
+    sessions="$(tmux -u list-sessions -F '#{session_name}' 2>/dev/null)" || return 1
     while IFS= read -r actual; do
       [[ "$actual" = "$session_name" ]] && return 1
     done <<<"$sessions"
     return 0
   fi
-  marker="$(tmux show-option -qv -t "$session_name" "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" \
+  marker="$(tmux -u show-option -qv -t "$session_name" "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" \
     || marker=
   [[ "$marker" = 1 ]] || return 1
   tmux kill-session -t "=$session_name" >/dev/null 2>&1
@@ -617,7 +617,7 @@ create_dashboard() {
 
   VIEW_SESSIONS=()
   for window in "${DESIRED_WINDOWS[@]}"; do
-    source_path="$(tmux display-message -p -t "$MANAGED_SESSION_ID:$window" \
+    source_path="$(tmux -u display-message -p -t "$MANAGED_SESSION_ID:$window" \
       '#{pane_current_path}' 2>/dev/null)" || {
         cleanup_created_view_sessions
         return 1
@@ -865,13 +865,13 @@ unlink_dashboard_window() {
   local -a remaining_terminals remaining_sessions remaining_sources
   local -a old_terminals old_sessions old_sources old_exclusions
 
-  session_name="$(tmux display-message -p -t "$session_target" '#{session_name}' \
+  session_name="$(tmux -u display-message -p -t "$session_target" '#{session_name}' \
     2>/dev/null)" || return 0
   [[ -n "$session_name" ]] || return 0
-  marker="$(tmux show-option -qv -t "$session_target" \
+  marker="$(tmux -u show-option -qv -t "$session_target" \
     "$DASHBOARD_SESSION_MARKER" 2>/dev/null)" || marker=
   [[ "$marker" = 1 ]] || return 0
-  source="$(tmux show-option -qv -t "$session_target" \
+  source="$(tmux -u show-option -qv -t "$session_target" \
     "$DASHBOARD_SOURCE_WINDOW_OPTION" 2>/dev/null)" || source=
   [[ "$source" = "$2" ]] || return 0
 
