@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# Zsh autoloads this directory, so dispatch before Bash code changes the caller's shell.
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  command bash "$HOME/.zfuns/taw-agent-dashboard" "$@"
+  return $?
+fi
+
 set -u
 
 usage() {

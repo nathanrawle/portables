@@ -2188,6 +2188,36 @@ test_dashboard_discovers_agents_without_utf8_locale() {
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
+test_dashboard_zsh_autoload_dispatches_to_bash() {
+  local home="$TEST_TMPDIR/home" entry="$TEST_TMPDIR/zsh-entry"
+  command -v zsh >/dev/null 2>&1 || return 0
+  setup_dashboard_lock_test || return 0
+  mkdir -p "$home/.zfuns"
+  ln -s "$DASHBOARD_SCRIPT" "$home/.zfuns/taw-agent-dashboard"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s view 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t view @taw_agent_dashboard_session 1
+  cat >"$entry" <<'EOF'
+#!/usr/bin/env zsh
+fpath=( "$HOME/.zfuns" $fpath )
+autoload -U taw-agent-dashboard
+for attempt in 1 2; do
+  taw-agent-dashboard "$@" || exit $?
+  [[ ! -o nounset ]] || exit 70
+  (( ${+functions[cleanup_pending_sessions]} == 0 )) || exit 71
+done
+print -r -- 'shell preserved'
+EOF
+  chmod +x "$entry"
+  assert_eq 'shell preserved' "$(HOME="$home" DASHBOARD_SCRIPT="$entry" \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" close)"
+  assert_not_exists "$TEST_TMPDIR/dashboard.state"
+  if "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t view; then
+    fail "autoloaded close must remove the private view"
+  fi
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
+}
+
+test_case "agent dashboard: Zsh autoload dispatches to Bash" test_dashboard_zsh_autoload_dispatches_to_bash
 test_case "agent dashboard: discovers agents without UTF-8 locale" test_dashboard_discovers_agents_without_utf8_locale
 test_case "agent dashboard: repeated toggles retain window and sessions" test_dashboard_repeated_toggles_preserve_window_and_sessions
 test_case "agent dashboard: toggle preserves state on health or focus failure" test_dashboard_toggle_preserves_state_on_health_or_focus_failure
