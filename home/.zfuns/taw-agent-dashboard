@@ -534,7 +534,10 @@ dashboard_terminals_are_live() {
 }
 
 focus_dashboard() {
-  dashboard_script focus "$STATE_WINDOW_ID" >/dev/null
+  local result
+
+  result="$(dashboard_script focus "$STATE_WINDOW_ID")" || return 1
+  [[ "$result" = 1 ]]
 }
 
 focus_existing_dashboard() {
@@ -937,12 +940,14 @@ unlink_dashboard_window() {
 }
 
 toggle_dashboard() {
-  local print_result="${1:-}" result
+  local print_result="${1:-}" result health_status
 
   if load_state && dashboard_is_live; then
-    close_dashboard || return
-    result=closed
+    focus_dashboard || return
+    result=focused
   else
+    health_status=$?
+    [[ "$health_status" -eq 2 ]] && return 1
     open_dashboard || return
     result=opened
   fi

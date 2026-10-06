@@ -20,7 +20,8 @@ outer.right = 0
 
 [mode.main.binding]
 cmd-alt-space = '''exec-and-forget
-if result="$("$HOME/.zfuns/taw-agent-dashboard" toggle --print-result)" && [ "$result" = opened ]; then
+if result="$("$HOME/.zfuns/taw-agent-dashboard" toggle --print-result)" &&
+    { [ "$result" = opened ] || [ "$result" = focused ]; }; then
     aerospace move-node-to-workspace A
     aerospace workspace A
 fi

@@ -411,24 +411,26 @@ tmux represents linked windows as one shared object.
 
 ## Ghostty Agent Dashboard
 
-On macOS, `taw-agents` toggles a Ghostty window containing one adaptive split
+On macOS, `taw-agents` opens or focuses a Ghostty window containing one adaptive split
 per supported agent window. The same controller is available as:
 
 ```bash
-taw-agents                         # toggle
+taw-agents                         # open or focus
 taw-agent-dashboard open|focus|sync|toggle|close
 ```
 
-Inside tmux, Ctrl+Option+A toggles the dashboard without a prefix.
+Inside tmux, Ctrl+Option+A opens or focuses the dashboard without a prefix.
 AeroSpace runs the controller directly with Command+Option+Space in its main
 binding mode. It moves the dashboard to workspace A only after a successful
-open; closing it or failing to open it leaves other windows in place.
+open or focus; a failed operation leaves other windows in place.
 This global shortcut also works in Ghostty after detaching from tmux and
 does not require a macOS Shortcut.
 
 For workspace routing, use `taw-agent-dashboard toggle --print-result`.
-It prints `opened` or `closed` after a successful operation. Move the focused
-window only when the result is `opened`; a failed toggle produces no result.
+It prints `opened` or `focused` after a successful operation. Move the focused
+window only for either successful result; a failed toggle produces no result.
+Repeated toggles retain the same dashboard window, splits, and private tmux
+sessions. Use `taw-agent-dashboard close` to close it explicitly.
 
 Dashboard operations serialize through a persistent file beside the state
 file, using macOS `lockf` or `flock` on other systems. The OS releases the
