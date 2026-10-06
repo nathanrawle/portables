@@ -420,10 +420,15 @@ taw-agent-dashboard open|focus|sync|toggle|close
 ```
 
 Inside tmux, Ctrl+Option+A toggles the dashboard without a prefix.
-AeroSpace maps Command+Option+Space in every binding mode to the macOS
-Shortcut named `Toggle Agent Dashboard`. That Shortcut must run
-`taw-agent-dashboard toggle`; its own keyboard assignment should be empty.
-This global shortcut also works in Ghostty after detaching from tmux.
+AeroSpace runs the controller directly with Command+Option+Space in every
+binding mode. It moves the dashboard to workspace A only after a successful
+open; closing it or failing to open it leaves other windows in place.
+This global shortcut also works in Ghostty after detaching from tmux and
+does not require a macOS Shortcut.
+
+For workspace routing, use `taw-agent-dashboard toggle --print-result`.
+It prints `opened` or `closed` after a successful operation. Move the focused
+window only when the result is `opened`; a failed toggle produces no result.
 
 Dashboard operations serialize through a persistent file beside the state
 file, using macOS `lockf` or `flock` on other systems. The OS releases the

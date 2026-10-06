@@ -2035,6 +2035,66 @@ test_dashboard_queued_toggles_recheck_state() {
   "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" has-session -t source
 }
 
+test_dashboard_toggle_reports_successful_result() {
+  local result status=0
+  setup_dashboard_lock_test || return 0
+  result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+  assert_eq closed "$result" "expected a successful close result"
+  result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result 2>/dev/null)" || status=$?
+  [[ "$status" -ne 0 ]] || fail "expected no-agent toggle to fail"
+  assert_eq '' "$result" "failed toggles must not report success"
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" new-session -d -s agents 'sleep 300'
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" link-window -k -s source:0 -t agents:0
+  "$DASHBOARD_REAL_TMUX" -L "$DASHBOARD_SOCKET" set-option -t agents @taw_agent_link_session 1
+  result="$(TAW_FAKE_GHOSTTY_BUILD=$'new-window\nnew-terminal' \
+    run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle --print-result)"
+  assert_eq opened "$result" "expected a successful open result"
+  result="$(run_dashboard "$DASHBOARD_LOCK_WRAPPER" toggle)"
+  assert_eq '' "$result" "ordinary toggles must remain quiet"
+}
+
+test_dashboard_workspace_routing_requires_open_result() {
+  local line capture=0 outcome
+  local script="$TEST_TMPDIR/launch.bash" home="$TEST_TMPDIR/home"
+  mkdir -p "$home/.zfuns" "$TEST_TMPDIR/bin"
+  : >"$script"
+  while IFS= read -r line; do
+    if [[ "$line" = "cmd-alt-space = '''exec-and-forget" ]]; then
+      capture=1
+      continue
+    fi
+    if [[ "$capture" = 1 ]]; then
+      [[ "$line" = "'''" ]] && break
+      printf '%s\n' "$line" >>"$script"
+    fi
+  done <"$REPO_ROOT/home/.config/aerospace/aerospace.toml"
+  [[ -s "$script" ]] || fail "expected a direct AeroSpace launcher"
+  cat >"$home/.zfuns/taw-agent-dashboard" <<'EOF'
+#!/usr/bin/env bash
+[[ "$*" = 'toggle --print-result' ]] || exit 2
+[[ "$TEST_OUTCOME" != failure ]] || exit 1
+printf '%s\n' "$TEST_OUTCOME"
+EOF
+  cat >"$TEST_TMPDIR/bin/aerospace" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$TEST_ROUTING_LOG"
+EOF
+  chmod +x "$home/.zfuns/taw-agent-dashboard" "$TEST_TMPDIR/bin/aerospace"
+  for outcome in opened closed failure; do
+    : >"$TEST_TMPDIR/routing.log"
+    HOME="$home" PATH="$TEST_TMPDIR/bin:$PATH" TEST_OUTCOME="$outcome" \
+      TEST_ROUTING_LOG="$TEST_TMPDIR/routing.log" bash "$script"
+    if [[ "$outcome" = opened ]]; then
+      assert_file_contents "$TEST_TMPDIR/routing.log" $'move-node-to-workspace A\nworkspace A'
+    else
+      [[ ! -s "$TEST_TMPDIR/routing.log" ]] || fail "$outcome must not move another window"
+    fi
+  done
+}
+
+test_case "agent dashboard: workspace routing requires successful open" test_dashboard_workspace_routing_requires_open_result
+test_case "agent dashboard: toggle reports only successful outcomes" test_dashboard_toggle_reports_successful_result
+
 test_case "agent dashboard: lock recovers after forced termination" test_dashboard_lock_recovers_after_termination
 test_case "agent dashboard: lock cancellation preserves surviving operations" test_dashboard_lock_cancelled_waiter_and_surviving_child
 test_case "agent dashboard: lock failure performs no operation" test_dashboard_lock_failure_does_not_run_operation

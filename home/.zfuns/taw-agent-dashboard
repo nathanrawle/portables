@@ -4,6 +4,7 @@ set -u
 
 usage() {
   printf 'usage: taw-agent-dashboard [open|focus|sync|toggle|close|unlink]\n' >&2
+  printf '       taw-agent-dashboard toggle --print-result\n' >&2
 }
 
 AGENT_SESSION_NAME=agents
@@ -936,11 +937,16 @@ unlink_dashboard_window() {
 }
 
 toggle_dashboard() {
+  local print_result="${1:-}" result
+
   if load_state && dashboard_is_live; then
-    close_dashboard
+    close_dashboard || return
+    result=closed
   else
-    open_dashboard
+    open_dashboard || return
+    result=opened
   fi
+  [[ "$print_result" != --print-result ]] || printf '%s\n' "$result"
 }
 
 with_lock() (
@@ -985,8 +991,9 @@ case "${1:-toggle}" in
     with_lock focus_existing_dashboard
     ;;
   toggle)
+    [[ $# -eq 1 || ( $# -eq 2 && "$2" = --print-result ) ]] || { usage; exit 2; }
     tmux_available || exit 0
-    with_lock toggle_dashboard
+    with_lock toggle_dashboard "${2:-}"
     ;;
   close)
     tmux_available || exit 0
