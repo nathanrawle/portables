@@ -272,7 +272,8 @@ if.app-id = 'net.whatsapp.WhatsApp'
 run = ['move-node-to-workspace W']
 
 [[on-window-detected]]
-if.app-id = 'com.microsoft.Teams2'
+# if.app-id = 'com.microsoft.Teams2'
+if.window-title-regex-substring = 'Microsoft Teams'
 run = ['move-node-to-workspace M']
 
 [[on-window-detected]]
