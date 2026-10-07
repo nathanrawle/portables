@@ -25,14 +25,24 @@ if (( worktree_index )); then
     (( tree_hash = (tree_hash * 31 + char_code) % 2147483647 ))
   done
   tree=${trees[$(( tree_hash % $#trees + 1 ))]}
+  dirarry[worktree_index]=$tree
+fi
 
+# Short contracted paths retain context that anchoring would discard.
+if (( $#dirarry <= 3 )); then
+  print -r -- "${(j:/:)dirarry}"
+  exit
+fi
+
+if (( worktree_index )); then
   anchor_index=$(( worktree_index - 1 ))
   (( anchor_index < 1 )) && anchor_index=1
   display=("$tree")
   (( worktree_index > 1 )) && display=("${dirarry[anchor_index]}" "$tree")
   tail_index=$(( worktree_index + 1 ))
 elif repo_root=$(git -C "${~1}" rev-parse --show-toplevel 2>/dev/null); then
-  input_path=${${~1}:A}
+  input_path=${~1}
+  input_path=${input_path:A}
   repo_root=${repo_root:A}
   repo_suffix=${input_path#"$repo_root"}
   suffix_parts=()
@@ -53,11 +63,6 @@ if (( anchor_index )); then
     display+=("${(@)dirarry[tail_index,-1]}")
   fi
   print -r -- "${(j:/:)display}"
-  exit
-fi
-
-if (( $#dirarry <= 3 )); then
-  print -r -- "${(j:/:)dirarry}"
   exit
 fi
 
