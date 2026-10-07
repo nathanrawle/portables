@@ -80,6 +80,9 @@ test_named_aliases_contract_before_shortening() {
   setup_repo
   repo="$(cd "$TEST_TMPDIR/repo" && pwd -P)"
   printf 'hash -d code=%q\n' "${repo%/*}" >"$TEST_TMPDIR/home/.named-dirs.zsh"
+  assert_eq "~code/repo" "$(run_wspath "$repo")"
+  assert_eq "~code/repo/a" "$(run_wspath "$repo/a")"
+  assert_eq "repo/a/b" "$(run_wspath "$repo/a/b")"
   assert_eq "repo/…/b/src" "$(run_wspath "$repo/a/b/src")"
 
   printf 'hash -d project=%q\n' "$repo" >"$TEST_TMPDIR/home/.named-dirs.zsh"
@@ -91,6 +94,52 @@ test_named_aliases_contract_before_shortening() {
   printf 'hash -d src=%q\n' "$repo/a" >"$TEST_TMPDIR/home/.named-dirs.zsh"
   assert_eq "~src/b/c" "$(run_wspath "$repo/a/b/c")"
   assert_eq "~src/…/c/d" "$(run_wspath "$repo/a/b/c/d")"
+}
+
+test_short_home_and_named_git_paths_keep_context() {
+  local repo
+
+  mkdir -p "$TEST_TMPDIR/home/code"
+  printf 'hash -d code="$HOME/code"\n' >"$TEST_TMPDIR/home/.named-dirs.zsh"
+  for repo in rig autoplatform; do
+    git init -q "$TEST_TMPDIR/home/code/$repo"
+    assert_eq "~code/$repo" "$(run_wspath "$TEST_TMPDIR/home/code/$repo")"
+  done
+
+  git init -q "$TEST_TMPDIR/home/project"
+  mkdir -p "$TEST_TMPDIR/home/project/src/module"
+  assert_eq "~/project/src" "$(run_wspath "$TEST_TMPDIR/home/project/src")"
+  assert_eq "project/src/module" \
+    "$(run_wspath "$TEST_TMPDIR/home/project/src/module")"
+}
+
+test_worktree_examples_and_short_named_paths() {
+  local output tree
+
+  mkdir -p "$TEST_TMPDIR/home/code"
+  printf 'hash -d code="$HOME/code"\nhash -d arrow="$HOME/code/arrow"\n' \
+    >"$TEST_TMPDIR/home/.named-dirs.zsh"
+
+  output="$(run_wspath "$TEST_TMPDIR/home/code/managed-platforms/.worktrees/my-feature")"
+  assert_contains_tree "$output"
+  tree="${output#managed-platforms/}"
+  tree="${tree%/my-feature}"
+  assert_eq "managed-platforms/$tree/my-feature" "$output"
+
+  output="$(run_wspath "$TEST_TMPDIR/home/code/arrow/.worktrees/feat/BCOP-123/implement-the-thing/infra")"
+  assert_contains_tree "$output"
+  [[ "$output" == '~arrow/'*'/…/implement-the-thing/infra' ]] || \
+    fail "unexpected named worktree shortening: $output"
+
+  output="$(run_wspath "$TEST_TMPDIR/home/code/arrow/.worktrees/feat")"
+  assert_contains_tree "$output"
+  tree="${output#\~arrow/}"
+  tree="${tree%/feat}"
+  assert_eq "~arrow/$tree/feat" "$output"
+  output="$(run_wspath "$TEST_TMPDIR/home/code/arrow/.worktrees")"
+  assert_contains_tree "$output"
+  [[ "$output" == '~arrow/'* && "$output" != *'.worktrees'* ]] || \
+    fail "unexpected short named worktree path: $output"
 }
 
 test_worktree_shallow_paths_and_aliases() {
@@ -143,6 +192,10 @@ test_case "wspath: similar component is not replaced" \
 test_case "wspath: Git paths anchor at root" test_git_paths_anchor_at_root
 test_case "wspath: named aliases contract before shortening" \
   test_named_aliases_contract_before_shortening
+test_case "wspath: short home and named Git paths keep context" \
+  test_short_home_and_named_git_paths_keep_context
+test_case "wspath: worktree examples and short named paths" \
+  test_worktree_examples_and_short_named_paths
 test_case "wspath: shallow worktrees and named aliases" \
   test_worktree_shallow_paths_and_aliases
 test_case "wspath: failed Git lookup keeps fallback" \
