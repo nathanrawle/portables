@@ -2,8 +2,10 @@
 
 REFRESH_REAL_TMUX=
 REFRESH_REAL_SOCKET=
+REFRESH_QUEUED_HOOK=
 
 cleanup_refresh_tmux() {
+  [[ -z "$REFRESH_QUEUED_HOOK" ]] || kill "$REFRESH_QUEUED_HOOK" >/dev/null 2>&1 || true
   if [[ -n "$REFRESH_REAL_TMUX" && -n "$REFRESH_REAL_SOCKET" ]]; then
     "$REFRESH_REAL_TMUX" -L "$REFRESH_REAL_SOCKET" kill-server >/dev/null 2>&1 || true
   fi
@@ -24,7 +26,7 @@ reset_real_refresh_timer() {
 }
 
 test_real_refresh_lifecycle_and_guard() {
-  local pane root owner window started state meta snapshot guard address i
+  local pane root owner window started state meta snapshot guard address i native_at event_at
 
   REFRESH_REAL_TMUX="$(command -v tmux || true)"
   [[ -n "$REFRESH_REAL_TMUX" ]] || return 0
@@ -36,6 +38,10 @@ test_real_refresh_lifecycle_and_guard() {
   trap cleanup_refresh_tmux EXIT
   cat >"$REFRESH_REAL_BIN/tmux" <<'MOCK'
 #!/usr/bin/env bash
+if [[ "$1" == wait-for && "$2" == -L && "$3" == taw-agent-status \
+  && -n "${REFRESH_QUEUE_MARKER:-}" ]]; then
+  : >"$REFRESH_QUEUE_MARKER"
+fi
 if [[ "${REFRESH_ACK_RACE:-}" == 1 && "$1" == show-option \
   && "${5:-}" == @taw_agent_state ]]; then
   "$REFRESH_REAL_TMUX" -L "$REFRESH_REAL_SOCKET" "$@"
@@ -104,6 +110,29 @@ MOCK
   REFRESH_ACK_RACE=1 run_real_refresh_status acknowledge "$pane"
   assert_eq thinking "$(refresh_tmux show-option -pqv -t "$pane" @taw_agent_state)" \
     'expected delayed acknowledgement to preserve newer thinking state'
+
+  refresh_tmux wait-for -L taw-agent-status
+  REFRESH_QUEUE_MARKER="$TEST_TMPDIR/queued-hook" \
+    run_real_refresh_status hook claude thinking <<< '{}' >"$TEST_TMPDIR/queued-output" 2>&1 &
+  REFRESH_QUEUED_HOOK=$!
+  for ((i = 0; i < 100; i++)); do
+    [[ ! -e "$TEST_TMPDIR/queued-hook" ]] || break
+    sleep 0.02
+  done
+  [[ -e "$TEST_TMPDIR/queued-hook" ]] || fail 'expected thinking hook to wait for status lock'
+  jq '.status = "idle" | .statusUpdatedAt = (now * 1000 | floor)' \
+    "$REFRESH_REAL_CONFIG/sessions/$owner.json" >"$TEST_TMPDIR/record"
+  mv "$TEST_TMPDIR/record" "$REFRESH_REAL_CONFIG/sessions/$owner.json"
+  native_at="$(jq '.statusUpdatedAt' "$REFRESH_REAL_CONFIG/sessions/$owner.json")"
+  refresh_tmux wait-for -U taw-agent-status
+  wait "$REFRESH_QUEUED_HOOK" || fail "$(cat "$TEST_TMPDIR/queued-output")"
+  REFRESH_QUEUED_HOOK=
+  event_at="$(refresh_tmux show-option -pqv -t "$pane" @taw_claude_status | jq '.event_at')"
+  (( event_at < native_at )) || fail 'expected hook receipt time to precede interruption during wait'
+  reset_real_refresh_timer
+  run_real_refresh_status refresh
+  assert_eq idle "$(refresh_tmux show-option -pqv -t "$pane" @taw_agent_state)" \
+    'expected idle transition during a queued thinking hook to recover'
 
   kill "$owner"
   reset_real_refresh_timer

@@ -31,6 +31,7 @@ SOURCE_WINDOW_INDEX=-1
 STATUS_TMUX=(tmux)
 CLAUDE_ROUTE_ROOT=
 CLAUDE_HOOK_SESSION=
+CLAUDE_EVENT_AT=
 CLAUDE_HOOK_FOREGROUND=false
 CLAUDE_START=false
 STATUS_LOCK=taw-agent-status
@@ -47,6 +48,12 @@ with_tmux_lock() (
 
 with_status_lock() {
   with_tmux_lock "$STATUS_LOCK" "$@"
+}
+
+capture_claude_event_time() {
+  command -v jq >/dev/null 2>&1 || return 1
+  # Lock contention must not make an earlier hook appear newer than a native idle transition.
+  CLAUDE_EVENT_AT="$(jq -n 'now * 1000 | floor' 2>/dev/null)"
 }
 
 claude_domain() {
@@ -196,10 +203,11 @@ remember_claude_status() {
   if [[ "$CLAUDE_START" == true || "$CLAUDE_HOOK_FOREGROUND" == true || -z "$session" ]]; then
     session="${CLAUDE_HOOK_SESSION:-$session}"
   fi
-  meta="$(jq -c --arg root "$root" --arg config "$config_dir" --arg session "$session" '
+  meta="$(jq -c --arg root "$root" --arg config "$config_dir" --arg session "$session" \
+    --argjson event_at "$CLAUDE_EVENT_AT" '
     if .session_id != null and .session_id != $session then {} else . end
     | .root = $root | .config_dir = $config | .session_id = $session
-    | .event_at = (now * 1000 | floor)
+    | .event_at = $event_at
   ' <<<"$meta")" || return 0
   if [[ "$(jq -r '.route // empty' <<<"$meta")" == "" ]] \
     && find_claude_record "$pane" "$session" "$config_dir"; then
@@ -741,6 +749,7 @@ case "${1:-}" in
     [[ $# == 3 && "$2" == claude ]] || { usage; exit 2; }
     case "$3" in idle|thinking|waiting) ;; *) usage; exit 2 ;; esac
     tmux_available || exit 0
+    capture_claude_event_time || exit 0
     [[ -n "${TMUX:-}" ]] || STATUS_TMUX=(tmux -L default)
     with_status_lock publish_claude_hook "$3"
     ;;
@@ -750,6 +759,7 @@ case "${1:-}" in
     pane="$(pane_target "${3:-}")" || exit 0
     tmux_available || exit 0
     if [[ "$2" == claude ]]; then
+      capture_claude_event_time || exit 0
       if [[ ! -t 0 ]]; then
         read_claude_payload "$(cat)" || exit 0
       fi
@@ -764,6 +774,9 @@ case "${1:-}" in
     case "$3" in idle|thinking|waiting) ;; *) usage; exit 2 ;; esac
     pane="$(pane_target "${4:-}")" || exit 0
     tmux_available || exit 0
+    if [[ "$2" == claude ]]; then
+      capture_claude_event_time || exit 0
+    fi
     with_status_lock set_status "$2" "$3" "$pane"
     ;;
   acknowledge)
