@@ -19,7 +19,11 @@ printf '%s\n' "$*" >>"$TAW_STATUS_TMUX_LOG"
 if [[ "${1:-}" = show-option ]]; then
   printf '%s\n' "${TAW_STATUS_EXISTING_STATE:-}"
 elif [[ "${1:-}" = display-message ]]; then
-  printf '1234\n'
+  if [[ "$5" == '#{pane_id}' ]]; then
+    printf '%s\n' "$4"
+  else
+    printf '1234\n'
+  fi
 fi
 EOF
   chmod +x "$bin/tmux"
@@ -174,10 +178,32 @@ test_claude_hook_preserves_foreground_path() {
 
   bin="$(make_status_tmux "$TEST_TMPDIR/fake")"
   log="$TEST_TMPDIR/tmux.log"
-  TMUX=/tmp/tmux TMUX_PANE=%3 PATH="$bin" TAW_STATUS_TMUX_LOG="$log" \
+  TMUX=/tmp/tmux TMUX_PANE=%3 PATH="$bin:$PATH" TAW_STATUS_TMUX_LOG="$log" \
     "$AGENT_STATUS" hook claude idle </dev/null
   assert_file_contains "$log" 'set-option -p -t %3 @taw_agent_state idle'
   assert_file_not_contains "$log" '-L default'
+}
+
+test_claude_hook_filters_foreground_children_and_interrupts() {
+  local bin log payload
+
+  bin="$(make_status_tmux "$TEST_TMPDIR/fake")"
+  log="$TEST_TMPDIR/tmux.log"
+  payload='{"hook_event_name":"PostToolUse","agent_id":"child"}'
+  TMUX=/tmp/tmux TMUX_PANE=%3 PATH="$bin:$PATH" TAW_STATUS_TMUX_LOG="$log" \
+    "$AGENT_STATUS" hook claude thinking <<<"$payload"
+  assert_file_not_contains "$log" 'set-option -p'
+
+  payload='{"hook_event_name":"PostToolUseFailure","is_interrupt":true}'
+  TMUX=/tmp/tmux TMUX_PANE=%3 PATH="$bin:$PATH" TAW_STATUS_TMUX_LOG="$log" \
+    "$AGENT_STATUS" hook claude thinking <<<"$payload"
+  assert_file_contains "$log" '@taw_agent_state idle'
+
+  : >"$log"
+  payload='{"hook_event_name":"PostToolUseFailure","is_interrupt":false}'
+  TMUX=/tmp/tmux TMUX_PANE=%3 PATH="$bin:$PATH" TAW_STATUS_TMUX_LOG="$log" \
+    "$AGENT_STATUS" hook claude thinking <<<"$payload"
+  assert_file_contains "$log" '@taw_agent_state thinking'
 }
 
 test_claude_hook_routes_background_states() {
@@ -450,6 +476,8 @@ test_case "agent status: clears pane options" test_agent_status_clears_pane_opti
 test_case "agent status: is quiet without tmux" test_agent_status_is_quiet_without_tmux
 test_case "agent status: rejects invalid arguments" test_agent_status_rejects_invalid_arguments
 test_case "Claude hook: preserves foreground publication" test_claude_hook_preserves_foreground_path
+test_case "Claude hook: filters foreground children and handles interrupted failures" \
+  test_claude_hook_filters_foreground_children_and_interrupts
 test_case "Claude hook: routes background states" test_claude_hook_routes_background_states
 test_case "Claude hook: routes exact session and descendant" test_claude_hook_routes_exact_session_and_descendant
 test_case "Claude hook: rejects invalid payloads" test_claude_hook_rejects_invalid_payloads
