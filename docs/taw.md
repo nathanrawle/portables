@@ -356,9 +356,7 @@ tmux source-file ~/.config/tmux/tmux.conf
 
 Focusing a waiting agent pane changes its marker to `…`. Neither CLI exposes a
 universal event for a permission answer, so `…` means the prompt was seen, not
-that it was answered. The next tool completion or turn stop publishes a new
-state. A process killed without its normal session-end hook may leave metadata
-until its tmux pane closes or another lifecycle event updates it.
+that it was answered. The next tool completion or turn stop publishes a new state.
 
 Claude background workers lose their tmux environment. Their state hooks use
 `taw-agent-status hook claude <idle|thinking|waiting>`, which reads the hook's
@@ -367,12 +365,35 @@ The fallback supports only the default tmux server and reads session records fro
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions/`. It checks process start time,
 process ancestry, window/pane IDs, and the pane's existing Claude ownership before
 publishing. Missing, ambiguous, stale, or incompatible records leave status unchanged;
-background subagent events are ignored. Foreground hooks retain their existing path.
+subagent events are ignored in both foreground and background execution.
 This relies on Claude's internal metadata format, verified on macOS with the current
 sessions; unsupported process domains or changed formats are skipped safely.
 Session-start/end hooks remain foreground-only, so a background worker ending does
-not clear an open interactive pane. Reinstall the hooks after updating Portables;
-already-missed events are not replayed automatically.
+not clear an open interactive pane. Interrupted tool-failure events publish idle;
+ordinary tool failures publish thinking because Claude may continue handling them.
+
+Claude does not emit [`Stop`](https://code.claude.com/docs/en/hooks#stop) on a user
+interruption, and cancelling a running tool does not emit `PostToolUseFailure`.
+A quiet `taw-agent-status refresh` job runs on
+tmux's five-second status refresh while a client is attached. It checks every Claude
+pane, including panes in other windows, and uses validated local session records to
+recover a thinking marker when Claude reports idle. The idle record must be newer
+than the last hook publication; permission/question markers remain unchanged. Checks
+are serialized with hook publication, and recovery verifies the pane, state, and
+publication revision before changing the icon.
+
+The publisher remembers the validated Claude process identity separately from the
+pane's shell process. If Claude exits without `SessionEnd`, or its PID is reused,
+refresh clears its metadata and reconciles the managed agent session. It remembers
+each pane's configuration directory, including `CLAUDE_CONFIG_DIR`. Missing,
+ambiguous, changed, or unsupported records are skipped; untracked process exits
+cannot be inferred safely. Existing panes can acquire an identity from an
+unambiguous validated record. Detached tmux sessions recover after reattachment.
+Codex remains hook-driven.
+
+Install the hooks if not already configured, and reload tmux configuration after
+updating Portables. Normal events are not replayed, but refresh can recover an
+already-stale Claude marker.
 
 The tmux status bars show the same lifecycle state with the Nerd Font glyphs
 from the table above. Each pane tab shows that pane's state on its right-hand

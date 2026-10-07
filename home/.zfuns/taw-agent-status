@@ -9,6 +9,7 @@ usage() {
   printf '       taw-agent-status acknowledge [pane]\n' >&2
   printf '       taw-agent-status clear [pane]\n' >&2
   printf '       taw-agent-status sync\n' >&2
+  printf '       taw-agent-status refresh\n' >&2
   printf '       taw-agent-status unlink <window>\n' >&2
 }
 
@@ -29,6 +30,55 @@ DESIRED_WINDOW_IDS=()
 SOURCE_WINDOW_INDEX=-1
 STATUS_TMUX=(tmux)
 CLAUDE_ROUTE_ROOT=
+CLAUDE_HOOK_SESSION=
+CLAUDE_HOOK_FOREGROUND=false
+CLAUDE_START=false
+STATUS_LOCK=taw-agent-status
+
+with_tmux_lock() (
+  local lock="$1"
+  shift
+
+  "${STATUS_TMUX[@]}" wait-for -L "$lock" >/dev/null 2>&1 || return 0
+  trap '"${STATUS_TMUX[@]}" wait-for -U "$lock" >/dev/null 2>&1 || true' EXIT
+  trap 'exit 0' HUP INT TERM
+  "$@"
+)
+
+with_status_lock() {
+  with_tmux_lock "$STATUS_LOCK" "$@"
+}
+
+claude_domain() {
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) printf 'darwin\n' ;;
+    Linux) printf 'linux\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+process_start() {
+  local started
+
+  started="$(TZ=UTC LC_ALL=C ps -p "$1" -o lstart= 2>/dev/null)" || return 1
+  started="${started#"${started%%[![:space:]]*}"}"
+  started="${started%"${started##*[![:space:]]}"}"
+  [[ -n "$started" ]] || return 1
+  printf '%s\n' "$started"
+}
+
+read_claude_payload() {
+  local payload="$1"
+
+  command -v jq >/dev/null 2>&1 || return 1
+  [[ -n "$payload" ]] || payload='{}'
+  CLAUDE_HOOK_SESSION="$(jq -ser '
+    select(length == 1) | .[0] | select(type == "object")
+    | select(.agent_id == null or .agent_id == "")
+    | (.session_id // "") | select(type == "string")
+    | select(. == "" or test("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"))
+  ' <<<"$payload" 2>/dev/null)"
+}
 
 claude_route_record() {
   local record="$1" session="$2" domain="$3"
@@ -36,7 +86,10 @@ claude_route_record() {
   jq -ser --arg session "$session" --arg domain "$domain" '
     select(length == 1) | .[0]
     | select(type == "object" and .kind == "interactive" and .pidDomain == $domain)
-    | select(.sessionId == $session or .parkedJobId == ($session | split("-")[0]))
+    | select(.sessionId | type == "string")
+    | select(.sessionId | test("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"))
+    | select($session == "" or .sessionId == $session
+      or .parkedJobId == ($session | split("-")[0]))
     | select((.pid | type) == "number" and .pid > 0 and .pid == (.pid | floor))
     | select((.tmux | type) == "string" and (.procStart | type) == "string")
     | [.pid, .tmux, .procStart] | @tsv
@@ -52,11 +105,9 @@ claude_route_valid() {
   [[ "$address" =~ :(@[0-9]+)\.(%[0-9]+)$ ]] || return 1
   window="${BASH_REMATCH[1]}"
   pane="${BASH_REMATCH[2]}"
-  current="$(TZ=UTC LC_ALL=C ps -p "$owner" -o lstart= 2>/dev/null)" || return 1
-  current="${current#"${current%%[![:space:]]*}"}"
-  current="${current%"${current##*[![:space:]]}"}"
+  current="$(process_start "$owner")" || return 1
   [[ -n "$started" && "$current" == "$started" ]] || return 1
-  live="$(tmux -L default display-message -p -t "$pane" \
+  live="$("${STATUS_TMUX[@]}" display-message -p -t "$pane" \
     $'#{pane_id}\t#{window_id}\t#{pane_pid}\t#{@taw_agent}\t#{@taw_agent_pane_pid}' \
     2>/dev/null)" || return 1
   IFS=$'\t' read -r actual_pane actual_window root agent saved_root <<<"$live"
@@ -80,47 +131,182 @@ claude_route_valid() {
 }
 
 publish_claude_hook() {
-  local state="$1" pane session domain record route owner address started
-  local selected_record= selected_route= matches=0
+  local state="$1" pane session owner address started payload
   local config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
+  [[ ! -t 0 ]] || return 0
+  payload="$(cat)" || return 0
+  read_claude_payload "$payload" || return 0
+  [[ -n "$payload" ]] || payload='{}'
+  if [[ "$(jq -r '.hook_event_name == "PostToolUseFailure" and .is_interrupt == true' \
+    <<<"$payload" 2>/dev/null)" == true ]]; then
+    state=idle
+  fi
   if pane="$(pane_target)"; then
+    CLAUDE_HOOK_FOREGROUND=true
     set_status claude "$state" "$pane"
     return 0
   fi
-  command -v jq >/dev/null 2>&1 || return 0
-  [[ ! -t 0 ]] || return 0
-  session="$(jq -ser '
-    select(length == 1) | .[0] | select(type == "object")
-    | select(.agent_id == null or .agent_id == "")
-    | .session_id | select(type == "string")
-    | select(test("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"))
-  ' 2>/dev/null)" || return 0
-  case "$(uname -s 2>/dev/null)" in
-    Darwin) domain=darwin ;;
-    Linux) domain=linux ;;
-    *) return 0 ;;
-  esac
-
+  session="$CLAUDE_HOOK_SESSION"
+  [[ -n "$session" ]] || return 0
   # Detached workers lose tmux routing, but the interactive owner retains the job association.
+  find_claude_record "" "$session" "$config_dir" || return 0
+  IFS=$'\t' read -r owner address started <<<"$CLAUDE_ROUTE"
+  pane="${address##*.}"
+  set_status claude "$state" "$pane" "$CLAUDE_ROUTE_ROOT"
+}
+
+find_claude_record() {
+  local pane="$1" session="$2" config_dir="$3" domain record route owner address started
+  local matches=0
+
+  CLAUDE_RECORD=
+  CLAUDE_ROUTE=
+  domain="$(claude_domain)" || return 1
   for record in "$config_dir"/sessions/[0-9]*.json; do
     [[ -f "$record" ]] || continue
     route="$(claude_route_record "$record" "$session" "$domain")" || continue
     IFS=$'\t' read -r owner address started <<<"$route"
     [[ "${record##*/}" == "$owner.json" ]] || continue
+    [[ -z "$pane" || "${address##*.}" == "$pane" ]] || continue
     claude_route_valid "$route" || continue
     ((matches += 1))
-    selected_record="$record"
-    selected_route="$route"
+    CLAUDE_RECORD="$record"
+    CLAUDE_ROUTE="$route"
   done
-  [[ "$matches" == 1 ]] || return 0
-  route="$(claude_route_record "$selected_record" "$session" "$domain")" || return 0
-  [[ "$route" == "$selected_route" ]] || return 0
-  claude_route_valid "$route" || return 0
-  IFS=$'\t' read -r owner address started <<<"$route"
-  pane="${address##*.}"
-  STATUS_TMUX=(tmux -L default)
-  set_status claude "$state" "$pane" "$CLAUDE_ROUTE_ROOT"
+  [[ "$matches" == 1 ]] || return 1
+  route="$(claude_route_record "$CLAUDE_RECORD" "$session" "$domain")" || return 1
+  [[ "$route" == "$CLAUDE_ROUTE" ]] && claude_route_valid "$route"
+}
+
+remember_claude_status() {
+  local pane="$1" root="$2" meta config_dir session
+
+  command -v jq >/dev/null 2>&1 || return 0
+  meta="$("${STATUS_TMUX[@]}" show-option -pqv -t "$pane" @taw_claude_status 2>/dev/null)"
+  if [[ "$CLAUDE_START" == true ]]; then
+    meta='{}'
+  fi
+  meta="$(jq -ce --arg root "$root" '
+    if type == "object" and .root == $root then . else {} end
+  ' <<<"${meta:-null}" 2>/dev/null)" || meta='{}'
+  config_dir="$(jq -r '.config_dir // empty' <<<"$meta")"
+  config_dir="${CLAUDE_CONFIG_DIR:-${config_dir:-$HOME/.claude}}"
+  session="$(jq -r '.session_id // empty' <<<"$meta")"
+  if [[ "$CLAUDE_START" == true || "$CLAUDE_HOOK_FOREGROUND" == true || -z "$session" ]]; then
+    session="${CLAUDE_HOOK_SESSION:-$session}"
+  fi
+  meta="$(jq -c --arg root "$root" --arg config "$config_dir" --arg session "$session" '
+    if .session_id != null and .session_id != $session then {} else . end
+    | .root = $root | .config_dir = $config | .session_id = $session
+    | .event_at = (now * 1000 | floor)
+  ' <<<"$meta")" || return 0
+  if [[ "$(jq -r '.route // empty' <<<"$meta")" == "" ]] \
+    && find_claude_record "$pane" "$session" "$config_dir"; then
+    meta="$(jq -c --arg route "$CLAUDE_ROUTE" '.route = $route' <<<"$meta")" || return 0
+    if [[ -z "$session" ]]; then
+      session="$(jq -r '.sessionId' "$CLAUDE_RECORD")" || return 0
+      meta="$(jq -c --arg session "$session" '.session_id = $session' <<<"$meta")" || return 0
+    fi
+  fi
+  "${STATUS_TMUX[@]}" set-option -p -t "$pane" @taw_claude_status "$meta" \
+    >/dev/null 2>&1 || true
+}
+
+refresh_claude_pane() {
+  local pane="$1" live root state meta session config_dir saved_route owner address started
+  local current snapshot native_state native_at event_at latest revision guard commands option route
+
+  live="$(tmux display-message -p -t "$pane" \
+    $'#{@taw_agent}\t#{pane_pid}\t#{@taw_agent_pane_pid}\t#{@taw_agent_state}' \
+    2>/dev/null)" || return 0
+  IFS=$'\t' read -r current root owner state <<<"$live"
+  [[ "$current" == claude && "$root" =~ ^[1-9][0-9]*$ && "$root" == "$owner" ]] || return 0
+  case "$state" in idle|thinking|waiting|acknowledged) ;; *) return 0 ;; esac
+  revision="$(tmux show-option -pqv -t "$pane" @taw_agent_revision 2>/dev/null)"
+  [[ -z "$revision" || "$revision" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
+  guard="#{&&:#{==:#{pane_pid},$root},#{&&:#{==:#{@taw_agent},claude},#{&&:#{==:#{@taw_agent_state},$state},#{==:#{@taw_agent_revision},$revision}}}}"
+  meta="$(tmux show-option -pqv -t "$pane" @taw_claude_status 2>/dev/null)"
+  [[ -n "$meta" ]] || meta='{}'
+  meta="$(jq -ce --arg root "$root" '
+    select(type == "object") | select(.root == null or .root == $root)
+    | select((.event_at // 0) | type == "number")
+    | select((.config_dir // "") | type == "string")
+    | select((.session_id // "") | type == "string")
+    | select((.route // "") | type == "string")
+  ' <<<"$meta" 2>/dev/null)" || return 0
+  session="$(jq -r '.session_id // ""' <<<"$meta")"
+  config_dir="$(jq -r '.config_dir // empty' <<<"$meta")"
+  config_dir="${config_dir:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
+  saved_route="$(jq -r '.route // empty' <<<"$meta")"
+  if [[ -n "$saved_route" ]]; then
+    IFS=$'\t' read -r owner address started <<<"$saved_route"
+    [[ "$owner" =~ ^[1-9][0-9]*$ && "${address##*.}" == "$pane" && -n "$started" ]] \
+      || return 0
+    current="$(process_start "$owner")" || current=
+    # An unreadable start time alone is not evidence that a live process exited.
+    if [[ -z "$current" ]] && kill -0 "$owner" 2>/dev/null; then
+      return 0
+    fi
+    if [[ "$current" != "$started" ]]; then
+      commands=
+      for option in @taw_agent_state @taw_agent "$AGENT_PANE_PID_OPTION" \
+        @taw_claude_status @taw_agent_revision; do
+        commands+="set-option -pu -t $pane $option ; "
+      done
+      tmux if-shell -F -t "$pane" "$guard" "$commands" >/dev/null 2>&1 || true
+      return 10
+    fi
+  fi
+  find_claude_record "$pane" "$session" "$config_dir" || return 0
+  [[ -z "$saved_route" || "$saved_route" == "$CLAUDE_ROUTE" ]] || return 0
+  snapshot="$(jq -ce 'select(type == "object")' "$CLAUDE_RECORD" 2>/dev/null)" || return 0
+  route="$(claude_route_record /dev/stdin "$session" "$(claude_domain)" \
+    <<<"$snapshot")" || return 0
+  [[ "$route" == "$CLAUDE_ROUTE" ]] || return 0
+  [[ -n "$session" ]] || session="$(jq -r '.sessionId' <<<"$snapshot")"
+  meta="$(jq -c --arg root "$root" --arg config "$config_dir" --arg route "$CLAUDE_ROUTE" \
+    --arg session "$session" '
+      .root = $root | .config_dir = $config | .route = $route | .session_id = $session
+      | .event_at = (.event_at // 0)
+    ' <<<"$meta")" || return 0
+  tmux set-option -p -t "$pane" @taw_claude_status "$meta" >/dev/null 2>&1 || return 0
+  [[ "$state" == thinking ]] || return 0
+  native_state="$(jq -r '.status // empty' <<<"$snapshot")"
+  [[ "$native_state" == idle ]] || return 0
+  native_at="$(jq -er '.statusUpdatedAt | select(type == "number" and . > 0) | floor' \
+    <<<"$snapshot" 2>/dev/null)" || return 0
+  event_at="$(jq -r '.event_at' <<<"$meta")"
+  [[ "$native_at" =~ ^[0-9]+$ && "$event_at" =~ ^[0-9]+$ ]] || return 0
+  # A record from before the latest prompt must not mark the new turn idle.
+  (( native_at > event_at )) || return 0
+  latest="$(jq -ce 'select(type == "object")' "$CLAUDE_RECORD" 2>/dev/null)" || return 0
+  [[ "$latest" == "$snapshot" ]] || return 0
+  claude_route_valid "$CLAUDE_ROUTE" || return 0
+  tmux if-shell -F -t "$pane" "$guard" \
+    "set-option -p -t $pane @taw_agent_state idle" >/dev/null 2>&1 || true
+}
+
+refresh_claude_status() {
+  local now last panes pane seen=$'\n' cleared=false
+
+  command -v jq >/dev/null 2>&1 || return 0
+  now="$(date +%s)" || return 0
+  last="$(tmux show-option -gqv @taw_agent_refresh_at 2>/dev/null)"
+  if [[ "$last" =~ ^[0-9]+$ ]] && (( now >= last && now - last < 5 )); then
+    return 0
+  fi
+  tmux set-option -g @taw_agent_refresh_at "$now" >/dev/null 2>&1 || return 0
+  panes="$(tmux list-panes -a -F '#{?#{==:#{@taw_agent},claude},#{pane_id},}' \
+    2>/dev/null)" || return 0
+  while IFS= read -r pane; do
+    [[ "$pane" =~ ^%[0-9]+$ && "$seen" != *$'\n'"$pane"$'\n'* ]] || continue
+    seen+="$pane"$'\n'
+    if ! with_status_lock refresh_claude_pane "$pane"; then
+      cleared=true
+    fi
+  done <<<"$panes"
+  [[ "$cleared" != true ]] || sync_agent_session >/dev/null 2>&1 || true
 }
 
 dashboard_state_file() {
@@ -512,19 +698,32 @@ set_status() {
     || return 0
   [[ -n "$pane_pid" ]] || return 0
   [[ -z "${4:-}" || "$pane_pid" == "$4" ]] || return 0
+  if [[ "$agent" == claude ]]; then
+    "${STATUS_TMUX[@]}" set-option -p -t "$pane" @taw_agent_revision \
+      "$(date +%s).$$.$RANDOM" >/dev/null 2>&1 || return 0
+  fi
   "${STATUS_TMUX[@]}" set-option -p -t "$pane" @taw_agent "$agent" >/dev/null 2>&1 || return 0
   "${STATUS_TMUX[@]}" set-option -p -t "$pane" @taw_agent_state "$state" >/dev/null 2>&1 || true
   "${STATUS_TMUX[@]}" set-option -p -t "$pane" "$AGENT_PANE_PID_OPTION" "$pane_pid" \
     >/dev/null 2>&1 || true
+  if [[ "$agent" == claude ]]; then
+    remember_claude_status "$pane" "$pane_pid"
+  else
+    "${STATUS_TMUX[@]}" set-option -pu -t "$pane" @taw_claude_status >/dev/null 2>&1 || true
+    "${STATUS_TMUX[@]}" set-option -pu -t "$pane" @taw_agent_revision >/dev/null 2>&1 || true
+  fi
 }
 
 acknowledge_status() {
   local pane="$1"
   local state
 
+  pane="$(tmux display-message -p -t "$pane" '#{pane_id}' 2>/dev/null)" || return 0
+  [[ "$pane" =~ ^%[0-9]+$ ]] || return 0
   state="$(tmux show-option -pqv -t "$pane" @taw_agent_state 2>/dev/null)" || return 0
   [[ "$state" = waiting ]] || return 0
-  tmux set-option -p -t "$pane" @taw_agent_state acknowledged >/dev/null 2>&1 || true
+  tmux if-shell -F -t "$pane" '#{==:#{@taw_agent_state},waiting}' \
+    "set-option -p -t $pane @taw_agent_state acknowledged" >/dev/null 2>&1 || true
 }
 
 clear_status() {
@@ -533,6 +732,8 @@ clear_status() {
   tmux set-option -pu -t "$pane" @taw_agent_state >/dev/null 2>&1 || true
   tmux set-option -pu -t "$pane" @taw_agent >/dev/null 2>&1 || true
   tmux set-option -pu -t "$pane" "$AGENT_PANE_PID_OPTION" >/dev/null 2>&1 || true
+  tmux set-option -pu -t "$pane" @taw_claude_status >/dev/null 2>&1 || true
+  tmux set-option -pu -t "$pane" @taw_agent_revision >/dev/null 2>&1 || true
 }
 
 case "${1:-}" in
@@ -540,14 +741,21 @@ case "${1:-}" in
     [[ $# == 3 && "$2" == claude ]] || { usage; exit 2; }
     case "$3" in idle|thinking|waiting) ;; *) usage; exit 2 ;; esac
     tmux_available || exit 0
-    publish_claude_hook "$3"
+    [[ -n "${TMUX:-}" ]] || STATUS_TMUX=(tmux -L default)
+    with_status_lock publish_claude_hook "$3"
     ;;
   start)
     [[ $# -ge 2 && $# -le 3 ]] || { usage; exit 2; }
     supported_agent "$2" || { usage; exit 2; }
     pane="$(pane_target "${3:-}")" || exit 0
     tmux_available || exit 0
-    set_status "$2" idle "$pane"
+    if [[ "$2" == claude ]]; then
+      if [[ ! -t 0 ]]; then
+        read_claude_payload "$(cat)" || exit 0
+      fi
+      CLAUDE_START=true
+    fi
+    with_status_lock set_status "$2" idle "$pane"
     sync_agent_session || true
     ;;
   set)
@@ -556,19 +764,19 @@ case "${1:-}" in
     case "$3" in idle|thinking|waiting) ;; *) usage; exit 2 ;; esac
     pane="$(pane_target "${4:-}")" || exit 0
     tmux_available || exit 0
-    set_status "$2" "$3" "$pane"
+    with_status_lock set_status "$2" "$3" "$pane"
     ;;
   acknowledge)
     [[ $# -le 2 ]] || { usage; exit 2; }
     pane="$(pane_target "${2:-}")" || exit 0
     tmux_available || exit 0
-    acknowledge_status "$pane"
+    with_status_lock acknowledge_status "$pane"
     ;;
   clear)
     [[ $# -le 2 ]] || { usage; exit 2; }
     pane="$(pane_target "${2:-}")" || exit 0
     tmux_available || exit 0
-    clear_status "$pane"
+    with_status_lock clear_status "$pane"
     sync_agent_session || true
     ;;
   sync)
@@ -576,6 +784,12 @@ case "${1:-}" in
     [[ -n "${TMUX:-}" ]] || exit 0
     tmux_available || exit 0
     sync_agent_session
+    ;;
+  refresh)
+    [[ $# -eq 1 ]] || { usage; exit 2; }
+    [[ -n "${TMUX:-}" ]] || exit 0
+    tmux_available || exit 0
+    with_tmux_lock taw-agent-refresh refresh_claude_status </dev/null
     ;;
   unlink)
     [[ $# -eq 2 ]] || { usage; exit 2; }
