@@ -100,3 +100,144 @@ test_feature_failed_pane_lifecycle() {
 
 test_case 'tmux features: reload preserves hooks and selected defaults' test_feature_reload_and_options
 test_case 'tmux features: failed panes remain visible and ignore agent priority' test_feature_failed_pane_lifecycle
+
+feature_key() {
+  local table="$1" key="$2"
+  feature_tmux switch-client -c "$TEST_TMUX_CLIENT_NAME" -T "$table"
+  # tmux's CLI treats a bare semicolon as a command separator even inside shell quotes.
+  [[ "$key" != ';' ]] || key='\;'
+  feature_tmux send-keys -K -c "$TEST_TMUX_CLIENT_NAME" "$key"
+}
+
+test_feature_picker_bindings() {
+  local pane original table key expected exit_key
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_feature_server
+  start_tmux_test_client "$FEATURE_SOCKET" features 120,40
+  trap 'feature_tmux kill-server >/dev/null 2>&1 || true; stop_tmux_test_client' EXIT
+  pane="$(feature_tmux display-message -p '#{pane_id}')"
+  original="$pane"
+  feature_tmux set-buffer 'picker fixture'
+  while read -r table key expected; do
+    feature_key "$table" "$key" >"$TEST_TMPDIR/key-output"
+    pane="$(feature_tmux display-message -p '#{pane_id}')"
+    # Control clients receive list output directly instead of opening a view in the pane.
+    if [[ "$expected" == key-list ]]; then
+      [[ "$(cat "$TEST_TMPDIR/key-output")" == *'List key bindings'* ]] || fail 'keymap sheet must list bindings'
+      assert_eq '' "$(feature_tmux display-message -p -t "$pane" '#{pane_mode}')"
+      continue
+    fi
+    assert_eq "$expected" "$(feature_tmux display-message -p -t "$pane" '#{pane_mode}')" \
+      "$table $key must open its picker through client key dispatch"
+    exit_key=q
+    [[ "$expected" != switch-mode ]] || exit_key=Escape
+    feature_tmux send-keys -K -c "$TEST_TMUX_CLIENT_NAME" "$exit_key"
+    assert_eq "$original" "$(feature_tmux display-message -p '#{pane_id}')" "$key must return to the source pane"
+    assert_eq '' "$(feature_tmux display-message -p -t "$original" '#{pane_mode}')" "$key must exit cleanly"
+  done <<'KEYS'
+root C-Enter tree-mode
+prefix s tree-mode
+prefix w tree-mode
+prefix = buffer-mode
+prefix D client-mode
+prefix C options-mode
+prefix ? key-list
+prefix Tab switch-mode
+prefix BTab switch-mode
+KEYS
+}
+
+test_feature_navigation_and_split_bindings() {
+  local first second pane key before path window
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_feature_server
+  start_tmux_test_client "$FEATURE_SOCKET" features 120,40
+  trap 'feature_tmux kill-server >/dev/null 2>&1 || true; stop_tmux_test_client' EXIT
+  feature_tmux set-option default-command 'sleep 120'
+  first="$(feature_tmux display-message -p '#{window_id}')"
+  second="$(feature_tmux new-window -P -F '#{window_id}')"
+  feature_key root C-M-left
+  assert_eq "$first" "$(feature_tmux display-message -p '#{window_id}')"
+  feature_key root C-M-right
+  assert_eq "$second" "$(feature_tmux display-message -p '#{window_id}')"
+  feature_key root C-M-h
+  assert_eq "$first" "$(feature_tmux display-message -p '#{window_id}')"
+  feature_key root C-M-o
+  assert_eq "$second" "$(feature_tmux display-message -p '#{window_id}')"
+  feature_key root C-M-j
+  assert_eq "$first" "$(feature_tmux display-message -p '#{window_id}')"
+  feature_key root C-M-k
+  assert_eq "$second" "$(feature_tmux display-message -p '#{window_id}')"
+
+  while IFS= read -r key; do
+    pane="$(feature_tmux new-window -P -F '#{pane_id}')"
+    path="$(feature_tmux display-message -p -t "$pane" '#{pane_current_path}')"
+    feature_key prefix "$key"
+    assert_eq 2 "$(feature_tmux display-message -p '#{window_panes}')" "prefix $key must split"
+    assert_eq "$path" "$(feature_tmux display-message -p '#{pane_current_path}')" "$key must retain the directory"
+  done <<'KEYS'
+'
+"
+-
+_
+;
+:
+|
+\
+KEYS
+  before="$(feature_tmux list-panes -F '#{pane_id}:#{pane_pid}' | sort)"
+  feature_key root C-j
+  assert_eq 1 "$(feature_tmux display-message -p '#{pane_index}')"
+  feature_key root C-k
+  assert_eq 2 "$(feature_tmux display-message -p '#{pane_index}')"
+  feature_key root C-h
+  assert_eq 1 "$(feature_tmux display-message -p '#{pane_index}')"
+  feature_key root C-right
+  assert_eq 2 "$(feature_tmux display-message -p '#{pane_index}')"
+  feature_key root C-left
+  assert_eq 1 "$(feature_tmux display-message -p '#{pane_index}')"
+  pane="$(feature_tmux display-message -p '#{pane_id}')"
+  feature_key root C-S-right
+  assert_eq "$pane" "$(feature_tmux display-message -p '#{pane_id}')"
+  assert_eq 2 "$(feature_tmux display-message -p '#{pane_index}')"
+  assert_eq "$before" "$(feature_tmux list-panes -F '#{pane_id}:#{pane_pid}' | sort)" 'swapping must preserve processes'
+}
+
+test_case 'tmux features: native picker bindings execute through client keys' test_feature_picker_bindings
+test_case 'tmux features: navigation and split bindings preserve targets and processes' test_feature_navigation_and_split_bindings
+
+test_feature_prefix_resize_bindings() {
+  local pane floating size key direction amount before
+  command -v tmux >/dev/null 2>&1 || return 0
+  setup_feature_server
+  start_tmux_test_client "$FEATURE_SOCKET" features 120,40
+  trap 'feature_tmux kill-server >/dev/null 2>&1 || true; stop_tmux_test_client' EXIT
+  feature_tmux set-option default-command 'sleep 120'
+  while read -r key direction amount; do
+    pane="$(feature_tmux new-window -P -F '#{pane_id}')"
+    if [[ "$direction" == width ]]; then
+      pane="$(feature_tmux split-window -h -P -F '#{pane_id}' -t "$pane")"
+    else
+      pane="$(feature_tmux split-window -P -F '#{pane_id}' -t "$pane")"
+    fi
+    size="$(feature_tmux display-message -p -t "$pane" "#{pane_$direction}")"
+    feature_key prefix "$key"
+    assert_eq "$((size + amount))" "$(feature_tmux display-message -p -t "$pane" "#{pane_$direction}")" \
+      "prefix $key must expand a tiled pane toward its neighbor"
+    floating="$(feature_tmux new-pane -A -B single -x 40 -y 20 -X 15 -Y 5 -P -F '#{pane_id}')"
+    before="$(feature_tmux list-panes -F '#{?pane_floating_flag,,#{pane_id}:#{pane_width}:#{pane_height}}')"
+    size="$(feature_tmux display-message -p -t "$floating" "#{pane_$direction}")"
+    feature_key prefix "$key"
+    assert_eq "$((size - amount))" "$(feature_tmux display-message -p -t "$floating" "#{pane_$direction}")" \
+      "prefix $key must shrink a floating pane"
+    assert_eq "$before" "$(feature_tmux list-panes -F '#{?pane_floating_flag,,#{pane_id}:#{pane_width}:#{pane_height}}')" \
+      'floating resizing must preserve tiled panes'
+  done <<'KEYS'
+M-Up height 5
+M-Left width 5
+C-Up height 1
+C-Left width 1
+KEYS
+}
+
+test_case 'tmux features: prefix resizing distinguishes floating and tiled panes' test_feature_prefix_resize_bindings
