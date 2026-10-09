@@ -80,24 +80,29 @@ pane is already outside every relevant split group at that edge. Further
 presses leave the layout and zoom state unchanged. Single-pane windows also
 stay unchanged.
 
-Reshaping supports tiled windows using the legacy checksummed layout format,
-validated with tmux 3.6b and 3.7c. JSON layouts emitted by tmux 3.8 release
-candidates are unsupported: the helper exits with status 2 and reports
-`reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts`.
-Rejection preserves pane order, running processes, layout, focus, zoom and origin
-hints. JSON support requires separate work, including reliable failure rollback.
+Reshaping requires tmux 3.8 or newer and `jq`. The helper reads and writes native
+version-2 JSON layouts. Pane IDs, indices and running programs survive; layout
+application uses tmux's pane indices because embedded pane IDs are ignored by
+the native parser. Malformed layouts, unsupported versions and snapshots that
+do not match the current pane indices are rejected before changing the window.
 
-If a window contains
-any floating pane, the helper exits with status 2 and reports
-`reshape-pane: windows containing floating panes are not supported`, even when
-the active pane is tiled. The window, focus, zoom and origin hints stay unchanged.
-Remove or move the floating panes out of the window before reshaping it.
+Floating panes can coexist with tiled panes. Reshaping moves only the tiled
+tree and preserves floating positions, dimensions and stacking. With a floating
+pane active, Shift+arrow instead moves it by five cells. Directly invoking the
+helper on a floating pane reports `reshape-pane: use move-pane to move a floating pane`.
 
-Pane IDs and running programs survive. The moved pane stays focused; successful
-movement reveals a zoomed window's new layout. Each successful move finishes
-with `select-layout -E` twice on the moved pane, like two presses of prefix+E.
-This equalises nearby groups, rather than every group recursively. A failed
-layout application restores the original pane order, layout, focus and zoom.
+The moved pane stays focused; successful movement reveals a zoomed window's new
+layout. Each successful move finishes with two local equalization passes, like
+two presses of prefix+E. A pass starts at the pane's nearest split group and
+walks outward until a group's allocation changes. This equalizes nearby groups,
+rather than every group recursively, while reserving the space each branch needs.
+A failed layout application restores the original JSON layout, focus, zoom and
+origin hint, including floating geometry and stacking.
+
+Prefix+E and the tiled Ctrl+`.` height toggle also use this helper. tmux 3.8's
+native `select-layout -E` skips nested containers when counting siblings and can
+leave panes extending beyond the window; the helper includes those containers
+when distributing space. Single-pane and boundary no-ops preserve zoom.
 
 Ctrl+Shift+Left/Right retains the original pane swaps. The prefix is
 Ctrl+backslash. For manual resizing, prefix then Ctrl+arrow adjusts by one cell,
@@ -113,3 +118,6 @@ bash ./symlinks --force .config/tmux/tmux.conf .config/tmux/reshape-pane
 Then reload with prefix followed by `r`. `relink` instead uses the checkout
 identified by `$PORTABLES`. Once the helper is linked to this checkout, edits
 to it take effect on the next keypress.
+
+See [tmux 3.8 features](tmux-features.md) for floating terminals, sizing shortcuts,
+copy mode, clipboard behavior and the other additions since 3.6b.
