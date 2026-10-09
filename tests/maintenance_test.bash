@@ -820,7 +820,9 @@ test_maintenance_machine_env_preserves_home_conflict() {
   maintenance_fixture
   printf 'local machine settings\n' >"$HOME/.maintenance-test.env"
   printf '[[ "$1" != config ]] || echo configured >>"$TRACE"\n' >"$FIXTURE/machine-tools/a.sh"
-  if bash "$FIXTURE/instantiate"; then fail 'conflicting home machine environment accepted'; fi
+  if LINK_CONFLICT_MODE=skip bash "$FIXTURE/instantiate"; then
+    fail 'conflicting home machine environment accepted'
+  fi
   assert_file_contents "$HOME/.maintenance-test.env" 'local machine settings'
   assert_eq configured "$(tail -1 "$TRACE")"
 }
@@ -933,7 +935,7 @@ test_maintenance_relink_help_skips_restart() {
   cat >"$TEST_TMPDIR/wrapper-help.zsh" <<'EOF'
 fpath=( "$WRAPPER_REPO/home/.zfuns" $fpath )
 autoload -Uz relink
-relink --force --help
+relink --no-clobber --help
 print "RESULT:return:${?}:end"
 EOF
   zsh -fc '
@@ -1241,3 +1243,28 @@ EOF
 
 test_case 'maintenance: Python creates Monty before using it as uv working directory' test_maintenance_python_creates_fresh_monty_directory
 test_case 'maintenance: stale metadata preserves installed requirements' test_maintenance_stale_metadata_allows_installed_requirements
+
+test_maintenance_tmux_minimum_version() {
+  local version output
+  maintenance_fixture
+  cp "$REPO_ROOT/machine-tools/tmux.sh" "$FIXTURE/machine-tools/"
+  cat >"$TEST_TMPDIR/bin/tmux" <<'EOF'
+#!/bin/sh
+printf 'tmux %s\n' "$TMUX_TEST_VERSION"
+EOF
+  chmod +x "$TEST_TMPDIR/bin/tmux"
+  for version in 3.8 3.10 4.0; do
+    output="$(TMUX_TEST_VERSION="$version" bash "$FIXTURE/machine-tools/tmux.sh" config 2>&1)" || fail "$output"
+  done
+  for version in 3.6b 3.7c 3.8-rc3 next; do
+    if output="$(TMUX_TEST_VERSION="$version" bash "$FIXTURE/machine-tools/tmux.sh" config 2>&1)"; then
+      fail "unsupported tmux version accepted: $version"
+    fi
+    [[ "$output" == *'tmux 3.8 or newer required'* ]] || fail "missing version diagnostic: $output"
+    if TMUX_TEST_VERSION="$version" bash "$FIXTURE/machine-tools/tmux.sh" install >"$TEST_TMPDIR/install-output" 2>&1; then
+      fail "installation skipped the tmux minimum version: $version"
+    fi
+  done
+}
+
+test_case 'maintenance: tmux requires stable 3.8 or newer' test_maintenance_tmux_minimum_version

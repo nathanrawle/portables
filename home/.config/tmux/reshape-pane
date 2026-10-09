@@ -5,7 +5,7 @@ set -euo pipefail
 pane="$1"
 direction="$2"
 case "$direction" in
-  left|right|up|down) ;;
+  left|right|up|down|equalize) ;;
   *) printf 'Unknown pane direction: %s\n' "$direction" >&2; exit 2 ;;
 esac
 
@@ -13,59 +13,63 @@ read -r window zoomed original_hint < <(
   tmux display-message -p -t "$pane" '#{window_id} #{window_zoomed_flag} #{@reshape_origin}'
 )
 original_layout="$(tmux display-message -p -t "$pane" '#{window_layout}')"
-if [[ "$original_layout" == '{'* ]]; then
-  printf 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts\n' >&2
+command -v jq >/dev/null 2>&1 || {
+  printf 'reshape-pane: jq is required for tmux JSON layouts\n' >&2
+  exit 2
+}
+if ! rows="$(jq -er '
+  def integer: type == "number" and . == floor;
+  def cell:
+    type == "object"
+    and (.w | integer and . >= 1) and (.h | integer and . >= 1)
+    and (.x | integer) and (.y | integer)
+    and (if .t == "p" then
+      (has("c") | not) and (.I | type == "string" and test("^%[0-9]+$"))
+      and (.i | integer and . >= 0)
+      and (if has("z") then (.z | integer and . >= 0) else true end)
+      and (if has("a") then (.a | type == "boolean") else true end)
+      and (if has("l") then (.l | integer and . >= 0) else true end)
+    elif .t == "h" or .t == "v" then
+      (.c | type == "array" and length > 0 and all(.[]; cell))
+      and (. as $node | [.c[] | select(has("z") | not)] as $tiles
+        | ($tiles | length) > 0
+        and (if .t == "h" then
+          ($tiles | map(.w) | add) + ($tiles | length) - 1 == .w
+          and all($tiles[]; .h == $node.h)
+        else
+          ($tiles | map(.h) | add) + ($tiles | length) - 1 == .h
+          and all($tiles[]; .w == $node.w)
+        end))
+    else false end);
+  def walk_cells($path; $parent):
+    if .t == "p" and has("z") then empty
+    else
+      ([$path, $parent, .t, .w, .h, (.I // "-"), (.i // -1)] | @tsv),
+      (.c // [] | to_entries[] | .key as $key
+        | .value | walk_cells($path + "." + ($key | tostring); $path))
+    end;
+  select(.V == 2 and (.L | cell))
+  | [.. | objects | select(.t == "p")] as $panes
+  | select(($panes | map(.I) | unique | length) == ($panes | length))
+  | select(($panes | map(.i) | unique | length) == ($panes | length))
+  | .L | walk_cells("r"; "-")
+' <<<"$original_layout" 2>/dev/null)"; then
+  printf 'reshape-pane: invalid or unsupported tmux JSON layout\n' >&2
   exit 2
 fi
-if [[ "$original_layout" == *'<'* ]]; then
-  printf 'reshape-pane: windows containing floating panes are not supported\n' >&2
+if [[ "$(tmux display-message -p -t "$pane" '#{pane_floating_flag}')" == 1 ]]; then
+  printf 'reshape-pane: use move-pane to move a floating pane\n' >&2
   exit 2
 fi
-original_order="$(tmux list-panes -t "$window" -F '#{pane_id}')"
+original_order="$(tmux list-panes -t "$window" -F $'#{pane_id}\t#{pane_index}')"
+layout_order="$(jq -r '[.. | objects | select(.t == "p")] | sort_by(.i)[] | [.I, .i] | @tsv' <<<"$original_layout")"
+if [[ "$layout_order" != "$original_order" ]]; then
+  printf 'reshape-pane: layout does not match current panes\n' >&2
+  exit 2
+fi
 
-transformation="$(awk -v active="${pane#%}" -v direction="$direction" -v hint="$original_hint" -v zoomed="$zoomed" '
+transformation="$(awk -F '\t' -v active="${pane#%}" -v direction="$direction" -v hint="$original_hint" '
 function invalid() { print "Invalid pane layout" > "/dev/stderr"; exit 1 }
-function number(    value) {
-  if (!match(substr(text, pos), /^[0-9]+/)) invalid()
-  value = substr(text, pos, RLENGTH) + 0
-  pos += RLENGTH
-  return value
-}
-function expect(char) {
-  if (substr(text, pos++, 1) != char) invalid()
-}
-function parse(owner,    node, char, closing, i, descendant, span, across) {
-  node = ++nodes
-  parent[node] = owner
-  width[node] = number(); expect("x"); height[node] = number()
-  expect(","); number(); expect(","); number()
-  char = substr(text, pos, 1)
-  if (char == "{" || char == "[") {
-    kind[node] = char; pos++
-    closing = char == "{" ? "}" : "]"
-    do {
-      child[node, ++count[node]] = parse(node)
-      char = substr(text, pos++, 1)
-    } while (char == ",")
-    if (char != closing || count[node] < 2) invalid()
-    # Zoom hides floating flags, but saved floating cells still violate tiled dimensions.
-    if (zoomed) {
-      span = count[node] - 1
-      for (i = 1; i <= count[node]; i++) {
-        descendant = child[node, i]
-        span += kind[node] == "{" ? width[descendant] : height[descendant]
-        across = kind[node] == "{" ? height[descendant] != height[node] : width[descendant] != width[node]
-        if (across) floating = 1
-      }
-      if (span != (kind[node] == "{" ? width[node] : height[node])) floating = 1
-    }
-  } else {
-    expect(","); id[node] = number()
-    leaf[id[node]] = node
-    if (id[node] == active) source = node
-  }
-  return node
-}
 function position(node,    owner, i) {
   owner = parent[node]
   for (i = 1; i <= count[owner]; i++) if (child[owner, i] == node) return i
@@ -181,47 +185,80 @@ function measure(node,    i, descendant, w, h, mw, mh) {
   width[node] = w; height[node] = h
   minimum_width[node] = mw; minimum_height[node] = mh
 }
-function render(node, w, h, x, y,    out, i, descendant, available, total, amount, used, weight, required, minimum) {
+function render(node, w, h, x, y,    out, i, descendant, available, total, amount, used, weight, required, minimum, balanced, remainder) {
   if (w < minimum_width[node] || h < minimum_height[node]) invalid()
-  out = w "x" h "," x "," y
+  width[node] = w; height[node] = h
+  out = "{\"w\":" w ",\"h\":" h ",\"x\":" x ",\"y\":" y
   if (!kind[node]) {
-    order = order (order == "" ? "" : "\n") "%" id[node]
-    return out "," id[node]
+    return out ",\"t\":\"p\",\"I\":\"%" id[node] "\",\"i\":" pane_index[node] "}"
   }
   available = (kind[node] == "{" ? w : h) - count[node] + 1
+  balanced = equalized[node]
+  for (i = 1; i <= count[node]; i++) {
+    descendant = child[node, i]
+    minimum = kind[node] == "{" ? minimum_width[descendant] : minimum_height[descendant]
+    if (minimum > int(available / count[node])) balanced = 0
+  }
   total = 0; required = 0
   for (i = 1; i <= count[node]; i++) {
     descendant = child[node, i]
     minimum = kind[node] == "{" ? minimum_width[descendant] : minimum_height[descendant]
     required += minimum
-    weight = (kind[node] == "{" ? width[descendant] : height[descendant]) - minimum
+    weight = equalized[node] ? 1 : (kind[node] == "{" ? width[descendant] : height[descendant]) - minimum
     if (weight > 0) total += weight
   }
-  used = 0; out = out kind[node]
+  used = 0; out = out ",\"t\":\"" (kind[node] == "{" ? "h" : "v") "\",\"c\":["
+  remainder = available % count[node]
   for (i = 1; i <= count[node]; i++) {
     descendant = child[node, i]
     minimum = kind[node] == "{" ? minimum_width[descendant] : minimum_height[descendant]
-    weight = (kind[node] == "{" ? width[descendant] : height[descendant]) - minimum
+    weight = equalized[node] ? 1 : (kind[node] == "{" ? width[descendant] : height[descendant]) - minimum
     if (weight < 0) weight = 0
     # Reserving branch minima prevents rounding from rejecting layouts that fit.
     amount = minimum
     if (total) amount += int((available - required) * weight / total)
     else amount += int((available - required) / count[node])
+    if (balanced) amount = int(available / count[node]) + (i <= remainder)
     if (i == count[node]) amount = available - used
     if (i > 1) out = out ","
     if (kind[node] == "{") out = out render(descendant, amount, h, x + used + i - 1, y)
     else out = out render(descendant, w, amount, x, y + used + i - 1)
     used += amount
   }
-  return out (kind[node] == "{" ? "}" : "]")
+  return out "]}"
+}
+function equalize_once(    owner, i, before, after) {
+  owner = parent[source]
+  while (owner) {
+    before = ""
+    for (i = 1; i <= count[owner]; i++)
+      before = before ":" (kind[owner] == "{" ? width[child[owner, i]] : height[child[owner, i]])
+    # Nested containers must share the allocation instead of being skipped as in tmux 3.8.
+    equalized[owner] = 1
+    body = render(root, root_width, root_height, 0, 0)
+    after = ""
+    for (i = 1; i <= count[owner]; i++)
+      after = after ":" (kind[owner] == "{" ? width[child[owner, i]] : height[child[owner, i]])
+    if (before != after) return
+    owner = parent[owner]
+  }
 }
 {
-  text = substr($0, 6); pos = 1
-  root = parse(0)
-  if (pos != length(text) + 1 || !source) invalid()
-  if (floating) {
-    print "reshape-pane: windows containing floating panes are not supported" > "/dev/stderr"
-    exit 2
+  node = ++nodes; lookup[$1] = node
+  parent[node] = $2 == "-" ? 0 : lookup[$2]
+  width[node] = $4; height[node] = $5
+  if (parent[node]) child[parent[node], ++count[parent[node]]] = node
+  else root = node
+  if ($3 == "p") {
+    id[node] = substr($6, 2) + 0; pane_index[node] = $7
+    leaf[id[node]] = node
+    if (id[node] == active) source = node
+  } else kind[node] = $3 == "h" ? "{" : "["
+}
+END {
+  if (!root || !source) invalid()
+  for (node = 1; node <= nodes; node++) {
+    if (kind[node] && !count[node]) invalid()
   }
   root_width = width[root]; root_height = height[root]
   axis = direction == "left" || direction == "right" ? "{" : "["
@@ -231,7 +268,9 @@ function render(node, w, h, x, y,    out, i, descendant, available, total, amoun
   hint_valid = valid_origin()
   owner = parent[source]
   if (!owner) unchanged()
-  if (kind[owner] != axis) {
+  if (direction == "equalize") {
+    next_hint = hint_valid ? hint : ""
+  } else if (kind[owner] != axis) {
     # Pairing locally avoids lifting across unrelated sibling regions.
     if (count[owner] > 2) {
       slot = position(source)
@@ -264,57 +303,54 @@ function render(node, w, h, x, y,    out, i, descendant, available, total, amoun
   root = normalize(root)
   measure(root)
   body = render(root, root_width, root_height, 0, 0)
+  equalize_once()
+  if (direction != "equalize") equalize_once()
   print next_hint
   print body
-  print order
-}' <<<"$original_layout")"
+}' <<<"$rows")"
 next_hint="${transformation%%$'\n'*}"
 if [[ "$transformation" != *$'\n'* ]]; then
   if [[ "$next_hint" != "$original_hint" ]]; then tmux set-option -pu -t "$pane" @reshape_origin; fi
   exit 0
 fi
-transformation="${transformation#*$'\n'}"
-body="${transformation%%$'\n'*}"
-desired_order="${transformation#*$'\n'}"
-checksum=0
-for ((i = 0; i < ${#body}; i++)); do
-  printf -v code '%d' "'${body:i:1}"
-  checksum=$(( ((checksum >> 1) + ((checksum & 1) << 15) + code) & 65535 ))
-done
-printf -v new_layout '%04x,%s' "$checksum" "$body"
-
-reorder_panes() {
-  local desired="$1" expected actual index=0
-  while IFS= read -r expected; do
-    index=$((index + 1))
-    actual="$(tmux list-panes -t "$window" -F '#{pane_id}' | sed -n "${index}p")" || return 1
-    [[ -n "$actual" ]] || return 1
-    if [[ "$actual" != "$expected" ]]; then
-      tmux swap-pane -d -s "$expected" -t "$actual" || return 1
-    fi
-  done <<<"$desired"
-}
+body="${transformation#*$'\n'}"
+new_layout="$(jq -cn --argjson original "$original_layout" --argjson tiled "$body" '
+  ($original | [.. | objects | select(.t == "p")]) as $panes
+  | ($panes | map(select(has("z")))) as $floating
+  | def metadata:
+      if .t == "p" then
+        .I as $id | . + ($panes[] | select(.I == $id) | {a, l} | with_entries(select(.value != null)))
+      else .c |= map(metadata) end;
+  ($tiled | metadata) as $tree
+  | {V: 2, L: (if ($floating | length) == 0 then $tree
+      elif $tree.t == "p" then
+        {t: "h", w: $tree.w, h: $tree.h, x: 0, y: 0, c: ([$tree] + $floating)}
+      else $tree | .c += $floating end)}
+')"
+if [[ "$(tmux display-message -p -t "$pane" '#{window_layout}')" != "$original_layout" ]]; then
+  printf 'reshape-pane: layout changed before application\n' >&2
+  exit 1
+fi
 
 restore_layout() {
   local status=$?
   trap - EXIT
   if [[ "$status" -ne 0 ]]; then
-    if ! reorder_panes "$original_order" || ! tmux select-layout -t "$window" "$original_layout"; then
+    if ! tmux select-layout -t "$window" "$original_layout"; then
       printf 'reshape-pane: could not restore the original layout\n' >&2
     fi
     tmux select-pane -t "$pane" || true
     if [[ "$zoomed" -eq 1 ]]; then tmux resize-pane -Z -t "$pane" || true; fi
+    if [[ -n "$original_hint" ]]; then
+      tmux set-option -p -t "$pane" @reshape_origin "$original_hint" || true
+    else tmux set-option -pu -t "$pane" @reshape_origin || true; fi
   fi
   exit "$status"
 }
 trap restore_layout EXIT
 [[ "$zoomed" -eq 0 ]] || tmux resize-pane -Z -t "$pane"
-# Saved tmux layouts assign panes by list order, rather than their embedded IDs.
-reorder_panes "$desired_order"
 tmux select-layout -t "$window" "$new_layout"
 tmux select-pane -t "$pane"
-tmux select-layout -E -t "$pane"
-tmux select-layout -E -t "$pane"
 if [[ "$next_hint" != "$original_hint" ]]; then
   if [[ -n "$next_hint" ]]; then
     tmux set-option -p -t "$pane" @reshape_origin "$next_hint"

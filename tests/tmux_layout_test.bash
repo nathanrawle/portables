@@ -1,4 +1,5 @@
 TMUX_LAYOUT_SOCKET=
+. "$TESTS_DIR/lib/tmux_client.bash"
 
 layout_tmux() {
   tmux -L "$TMUX_LAYOUT_SOCKET" "$@"
@@ -17,13 +18,13 @@ setup_layout_server() {
 }
 
 run_layout_binding() {
-  local key="$1" pane="$2"
+  local key="$1" pane="$2" table="${3:-root}"
   layout_tmux select-window -t "$pane"
   layout_tmux select-pane -t "$pane"
   # list-keys escapes outer command separators that source-file needs to execute directly.
-  layout_tmux list-keys -T root | \
+  layout_tmux list-keys -T "$table" | \
     awk -v key="$key" 'tolower($4) == tolower(key)' | \
-    sed -E 's/^bind-key[[:space:]]+-T[[:space:]]+root[[:space:]]+[^[:space:]]+[[:space:]]+//; s/\\;/;/g' \
+    sed -E 's/^bind-key[[:space:]]+-T[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+//; s/\\;/;/g' \
     >"$TEST_TMPDIR/binding.conf"
   [[ -s "$TEST_TMPDIR/binding.conf" ]] || fail "missing loaded binding: $key"
   layout_tmux source-file -t "$pane" "$TEST_TMPDIR/binding.conf"
@@ -36,8 +37,6 @@ create_transition_layout() {
   TWO="$(layout_tmux split-window -d "$across" -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
   THREE="$(layout_tmux split-window -d "$within" -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
   FOUR="$(layout_tmux split-window -d "$across" -f -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
-  layout_tmux select-layout -E -t "$FOUR"
-  layout_tmux select-layout -E -t "$FOUR"
 }
 
 assert_transition_layout() {
@@ -75,7 +74,7 @@ assert_transition_layout() {
         }
         print ""
       }')"
-  assert_eq "$expected" "$actual" 'unexpected transition layout'
+  assert_eq "$expected" "$actual" "unexpected transition layout: $(layout_tmux display-message -p -t "$FOUR" '#{window_layout}')"
 }
 
 test_layout_entry_first_transition_sequences() {
@@ -142,14 +141,16 @@ test_layout_zoom_and_marked_pane() {
 }
 
 test_layout_failure_restores_order_geometry_and_zoom() {
-  local real_tmux before order zoom socket helper
+  local real_tmux before order zoom socket helper floating floating_before
   command -v tmux >/dev/null 2>&1 || return 0
   setup_layout_server
   create_transition_layout horizontal rollback
+  floating="$(layout_tmux new-pane -Ad -t "$FOUR" -P -F '#{pane_id}' 'sleep 120')"
   layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
   layout_tmux select-pane -t "$FOUR"
   layout_tmux resize-pane -Z -t "$FOUR"
   before="$(layout_tmux display-message -p -t "$FOUR" '#{window_layout}')"
+  floating_before="$(floating_layout_state)"
   order="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}')"
   socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
   real_tmux="$(command -v tmux)"
@@ -158,6 +159,7 @@ test_layout_failure_restores_order_geometry_and_zoom() {
   cat >"$TEST_TMPDIR/bin/tmux" <<'WRAPPER'
 #!/usr/bin/env bash
 if [[ "$1" == select-layout && ! -e "$FAIL_MARKER" ]]; then
+  "$REAL_TMUX" "$@" || exit
   touch "$FAIL_MARKER"
   exit 1
 fi
@@ -173,6 +175,7 @@ WRAPPER
   assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{window_zoomed_flag}')"
   assert_eq 1 "$(layout_tmux display-message -p -t "$FOUR" '#{pane_active}')"
   assert_eq "left $TWO" "$(origin_hint "$FOUR")" 'failed movement should preserve the hint'
+  assert_eq "$floating_before" "$(floating_layout_state)" 'rollback should restore floating stacking and geometry'
 }
 
 test_layout_equivalent_nested_containers() {
@@ -291,9 +294,7 @@ test_layout_larger_groups_pair_locally() {
     TWO="$(layout_tmux split-window -d "$across" -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
     FOUR="$(layout_tmux split-window -d "$within" -P -F '#{pane_id}' -t "$TWO" 'sleep 120')"
     THREE="$(layout_tmux split-window -d "$across" -f -P -F '#{pane_id}' -t "$ONE" 'sleep 120')"
-    layout_tmux select-layout -E -t "$THREE"
-    layout_tmux select-layout -E -t "$THREE"
-    before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
+        before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}' | sort)"
     assert_transition_layout '123|143' "$axis"
     for step in 0 1 2 3; do
       if [[ "$step" -lt 2 ]]; then run_layout_binding "$forward" "$FOUR"
@@ -429,11 +430,10 @@ layout_window_state() {
     -F '#{pane_id}:#{pane_pid}:#{pane_active}:#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}:#{@reshape_origin}'
 }
 
-test_layout_floating_suffix_is_rejected_without_mutation() {
-  local before socket real_tmux status
-  command -v tmux >/dev/null 2>&1 || return 0
+test_layout_unsupported_json_is_rejected_without_mutation() {
+  local before socket real_tmux status fixture
   setup_layout_server
-  create_transition_layout horizontal floating-suffix
+  create_transition_layout horizontal unsupported-json
   layout_tmux select-pane -t "$FOUR"
   layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
   layout_tmux resize-pane -Z -t "$FOUR"
@@ -444,127 +444,118 @@ test_layout_floating_suffix_is_rejected_without_mutation() {
   cat >"$TEST_TMPDIR/bin/tmux" <<'WRAPPER'
 #!/usr/bin/env bash
 if [[ "$1" == display-message && "$*" == *'#{window_layout}'* ]]; then
-  layout="$("$REAL_TMUX" "$@")" || exit
-  printf '%s<20x10,4,2,999999>\n' "$layout"
+  printf '%s\n' "$LAYOUT_FIXTURE"
   exit 0
 fi
 exec "$REAL_TMUX" "$@"
 WRAPPER
   chmod +x "$TEST_TMPDIR/bin/tmux"
-  status=0
-  TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
-    "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left \
-    >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
-  assert_eq 2 "$status"
-  assert_eq 'reshape-pane: windows containing floating panes are not supported' \
-    "$(cat "$TEST_TMPDIR/diagnostics")"
-  assert_eq "$before" "$(layout_window_state)" 'unsupported layout should preserve all pane state'
-}
-
-test_layout_real_floating_window_is_preserved() {
-  local floating pane direction before socket status
-  command -v tmux >/dev/null 2>&1 || return 0
-  setup_layout_server
-  if ! layout_tmux list-commands | rg '^new-pane ' >/dev/null; then return 0; fi
-  if [[ "$(layout_tmux display-message -p -t layout:1 '#{window_layout}')" == '{'* ]]; then return 0; fi
-  create_transition_layout horizontal real-floating
-  floating="$(layout_tmux new-pane -d -t "$FOUR" -P -F '#{pane_id}' 'sleep 120')"
-  assert_eq 1 "$(layout_tmux display-message -p -t "$floating" '#{pane_floating_flag}')"
-  socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
-  layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
-  layout_tmux set-option -p -t "$floating" @reshape_origin "up $ONE"
-  for pane in "$FOUR" "$floating"; do
-    layout_tmux select-window -t "$pane"
-    layout_tmux select-pane -t "$pane"
-    if [[ "$pane" == "$FOUR" ]]; then
-      direction=left
-      layout_tmux resize-pane -Z -t "$pane"
-    else direction=up; fi
-    before="$(layout_window_state)"
+  for fixture in '{"V":3,"L":{}}' '{"V":2,"L":{"t":"p","w":"bad"}}' '0000,legacy'; do
     status=0
-    TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$pane" "$direction" \
+    TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
+      LAYOUT_FIXTURE="$fixture" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left \
       >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
     assert_eq 2 "$status"
-    assert_eq 'reshape-pane: windows containing floating panes are not supported' \
-      "$(cat "$TEST_TMPDIR/diagnostics")"
-    assert_eq "$before" "$(layout_window_state)" 'floating windows should remain unchanged'
-    if [[ "$pane" == "$FOUR" ]]; then layout_tmux resize-pane -Z -t "$pane"; fi
+    assert_eq 'reshape-pane: invalid or unsupported tmux JSON layout' "$(cat "$TEST_TMPDIR/diagnostics")"
+    assert_eq "$before" "$(layout_window_state)" 'rejection should preserve all pane state'
   done
-  layout_tmux kill-pane -t "$floating"
-  layout_tmux set-option -pu -t "$FOUR" @reshape_origin
-  layout_tmux select-pane -t "$FOUR"
-  TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left
-  assert_transition_layout '122|134' horizontal
 }
 
-assert_layout_binding_diagnostic() {
-  local key="$1" pane="$2" output
-  run_layout_binding "$key" "$pane" >"$TEST_TMPDIR/binding-diagnostics" 2>&1 || true
-  output="$(cat "$TEST_TMPDIR/binding-diagnostics")"
-  if [[ "$output" != *'tmux JSON layouts are not supported'* ]]; then
-    output="$(layout_tmux capture-pane -pMJ -t "$pane")"
-  fi
-  [[ "$output" == *'tmux JSON layouts are not supported'* ]] \
-    || fail "expected the loaded binding to show the JSON diagnostic: $output"
+floating_layout_state() {
+  layout_tmux display-message -p -t "$FOUR" '#{window_layout}' | \
+    jq -c '[.. | objects | select(.t == "p" and has("z"))] | sort_by(.I) | map(del(.a, .l))'
 }
 
-test_layout_json_format_is_rejected_without_mutation() {
-  local before socket real_tmux status
-  command -v tmux >/dev/null 2>&1 || return 0
+test_layout_mixed_floating_windows() {
+  local floating other before identities tiled socket status zoomed
   setup_layout_server
-  create_transition_layout horizontal json-format
-  layout_tmux select-pane -t "$FOUR"
-  layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
-  layout_tmux resize-pane -Z -t "$FOUR"
-  before="$(layout_window_state)"
-  socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
-  real_tmux="$(command -v tmux)"
-  mkdir -p "$TEST_TMPDIR/bin"
-  cat >"$TEST_TMPDIR/bin/tmux" <<'WRAPPER'
-#!/usr/bin/env bash
-if [[ "$1" == display-message && "$*" == *'#{window_layout}'* ]]; then
-  printf '%s\n' '{"V":2,"L":{"t":"p","w":180,"h":60,"x":0,"y":0,"I":"%0"}}'
-  exit 0
-fi
-exec "$REAL_TMUX" "$@"
-WRAPPER
-  chmod +x "$TEST_TMPDIR/bin/tmux"
-  status=0
-  TMUX="$socket,0,0" PATH="$TEST_TMPDIR/bin:$PATH" REAL_TMUX="$real_tmux" \
-    "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left \
-    >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
-  assert_eq 2 "$status"
-  assert_eq 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts' \
-    "$(cat "$TEST_TMPDIR/diagnostics")"
-  assert_eq "$before" "$(layout_window_state)" 'JSON rejection should preserve all pane state'
-  layout_tmux set-environment -t layout PATH "$TEST_TMPDIR/bin:$PATH"
-  layout_tmux set-environment -t layout REAL_TMUX "$real_tmux"
-  assert_layout_binding_diagnostic S-left "$FOUR"
-  assert_eq "$before" "$(layout_window_state)" 'the loaded rejection binding should preserve state'
-}
-
-test_layout_real_json_window_is_preserved() {
-  local socket before status zoomed
-  command -v tmux >/dev/null 2>&1 || return 0
-  setup_layout_server
-  if [[ "$(layout_tmux display-message -p -t layout:1 '#{window_layout}')" != '{'* ]]; then return 0; fi
-  create_transition_layout horizontal real-json
-  layout_tmux select-pane -t "$FOUR"
-  layout_tmux set-option -p -t "$FOUR" @reshape_origin "left $TWO"
+  create_transition_layout horizontal mixed
+  floating="$(layout_tmux new-pane -Ad -t "$FOUR" -x 40 -y 15 -X 10 -Y 5 -P -F '#{pane_id}' 'sleep 120')"
+  other="$(layout_tmux new-pane -d -t "$FOUR" -x 35 -y 12 -X 30 -Y 10 -P -F '#{pane_id}' 'sleep 120')"
+  before="$(floating_layout_state)"
+  identities="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}:#{pane_index}')"
   socket="$(layout_tmux display-message -p -t "$FOUR" '#{socket_path}')"
   for zoomed in 0 1; do
+    layout_tmux select-pane -t "$FOUR"
     if [[ "$zoomed" == 1 ]]; then layout_tmux resize-pane -Z -t "$FOUR"; fi
-    before="$(layout_window_state)"
-    status=0
-    TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$FOUR" left \
-      >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
-    assert_eq 2 "$status"
-    assert_eq 'reshape-pane: tmux JSON layouts are not supported; use a tmux version with legacy layouts' \
-      "$(cat "$TEST_TMPDIR/diagnostics")"
-    assert_eq "$before" "$(layout_window_state)" 'real JSON windows should remain unchanged'
-    assert_layout_binding_diagnostic S-left "$FOUR"
-    assert_eq "$before" "$(layout_window_state)" 'real JSON rejection through the binding should preserve state'
+    run_layout_binding S-left "$FOUR"
+    assert_eq "$before" "$(floating_layout_state)" 'floating geometry and stacking must survive reshaping'
+    assert_eq "$identities" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}:#{pane_index}')"
+    assert_eq 0 "$(layout_tmux display-message -p -t "$FOUR" '#{window_zoomed_flag}')"
+    run_layout_binding S-right "$FOUR"
   done
+  layout_tmux select-pane -t "$floating"
+  before="$(layout_window_state)"
+  status=0
+  TMUX="$socket,0,0" "$REPO_ROOT/home/.config/tmux/reshape-pane" "$floating" left \
+    >"$TEST_TMPDIR/diagnostics" 2>&1 || status=$?
+  assert_eq 2 "$status"
+  assert_eq 'reshape-pane: use move-pane to move a floating pane' "$(cat "$TEST_TMPDIR/diagnostics")"
+  assert_eq "$before" "$(layout_window_state)" 'direct helper rejection must preserve floating panes'
+}
+
+test_layout_floating_controls_preserve_tiles() {
+  local floating before x y width height expanded
+  setup_layout_server
+  create_transition_layout horizontal floating-controls
+  floating="$(layout_tmux new-pane -Ad -t "$FOUR" -B single -x 45 -y 15 -X 20 -Y 10 -P -F '#{pane_id}' 'sleep 120')"
+  before="$(layout_tmux list-panes -t "$FOUR" -F '#{?pane_floating_flag,,#{pane_id}:#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}}')"
+  read -r x y width height < <(layout_tmux display-message -p -t "$floating" '#{pane_left} #{pane_top} #{pane_width} #{pane_height}')
+  run_layout_binding S-right "$floating"
+  assert_eq "$((x + 5))" "$(layout_tmux display-message -p -t "$floating" '#{pane_left}')"
+  run_layout_binding S-down "$floating"
+  assert_eq "$((y + 5))" "$(layout_tmux display-message -p -t "$floating" '#{pane_top}')"
+  run_layout_binding C-= "$floating"
+  assert_eq "$((width + 20))" "$(pane_sizing_dimension "$floating" width)"
+  run_layout_binding C-- "$floating"
+  assert_eq "$width" "$(pane_sizing_dimension "$floating" width)"
+  run_layout_binding C-. "$floating"
+  expanded="$(pane_sizing_dimension "$floating" height)"
+  [[ "$expanded" -gt "$height" ]] || fail 'floating height should expand'
+  run_layout_binding C-. "$floating"
+  assert_eq "$height" "$(pane_sizing_dimension "$floating" height)"
+  run_layout_binding C-, "$floating"
+  width="$(pane_sizing_dimension "$floating" width)"
+  run_layout_binding C-, "$floating"
+  [[ "$(pane_sizing_dimension "$floating" width)" -gt "$width" ]] || fail 'floating width should advance to the next preset'
+  assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{?pane_floating_flag,,#{pane_id}:#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}}')"
+}
+
+test_layout_floating_terminal_binding_and_toggle() {
+  local pane floating before bindings path
+  setup_layout_server
+  start_tmux_test_client "$TMUX_LAYOUT_SOCKET" layout
+  trap 'layout_tmux kill-server >/dev/null 2>&1 || true; stop_tmux_test_client' EXIT
+  pane="$(layout_tmux display-message -p '#{pane_id}')"
+  path="$(layout_tmux display-message -p -t "$pane" '#{pane_current_path}')"
+  layout_tmux set-option default-command 'sleep 120'
+  before="$(layout_tmux display-message -p -t "$pane" '#{pane_pid}')"
+  run_layout_binding T "$pane" prefix
+  floating="$(layout_tmux display-message -p '#{pane_id}')"
+  assert_eq 1 "$(layout_tmux display-message -p -t "$floating" '#{pane_floating_flag}')"
+  assert_eq "$path" "$(layout_tmux display-message -p -t "$floating" '#{pane_current_path}')"
+  assert_eq "$before" "$(layout_tmux display-message -p -t "$pane" '#{pane_pid}')"
+  run_layout_binding @ "$floating" prefix
+  assert_eq 0 "$(layout_tmux display-message -p -t "$floating" '#{pane_floating_flag}')"
+  run_layout_binding @ "$floating" prefix
+  assert_eq 1 "$(layout_tmux display-message -p -t "$floating" '#{pane_floating_flag}')"
+  bindings="$(layout_tmux list-keys -T prefix)"
+  [[ "$bindings" == *'M-t'*'select-pane -T'* ]] || fail 'pane title prompt should remain available on Alt+t'
+  [[ "$(layout_tmux list-keys -T prefix G)" == *'switch-client -T move'* ]] || fail 'G should use the native move table'
+  [[ "$(layout_tmux list-keys -T prefix t)" == *display-popup* ]] || fail 't should retain the terminal popup'
+  [[ "$(layout_tmux list-keys -T prefix g)" == *lazygit* ]] || fail 'g should retain lazygit'
+}
+
+test_layout_local_equalization_keeps_nested_geometry_valid() {
+  local before after pane
+  setup_layout_server
+  create_transition_layout horizontal equalize
+  before="$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}:#{pane_index}')"
+  run_layout_binding E "$FOUR" prefix
+  after="$(layout_tmux display-message -p -t "$FOUR" '#{window_layout}')"
+  layout_tmux select-layout -t "$FOUR" "$after"
+  assert_eq "$after" "$(layout_tmux display-message -p -t "$FOUR" '#{window_layout}')" 'equalized layout must survive a native JSON round trip'
+  assert_eq "$before" "$(layout_tmux list-panes -t "$FOUR" -F '#{pane_id}:#{pane_pid}:#{pane_index}')"
 }
 
 test_layout_minimum_panes_can_be_reshaped() {
@@ -768,10 +759,11 @@ test_case 'tmux layout: local pairing can target a neighbouring group' test_layo
 test_case 'tmux layout: origin guides the next reverse entry in all directions' test_layout_origin_guides_next_reverse_entry
 test_case 'tmux layout: stale origins fall back to structural selection' test_layout_stale_origins_fall_back
 test_case 'tmux layout: origin hints are bounded and pane scoped' test_layout_origin_is_bounded_and_pane_scoped
-test_case 'tmux layout: floating suffix reports the tiled-window limitation without mutation' test_layout_floating_suffix_is_rejected_without_mutation
-test_case 'tmux layout: real floating windows preserve state until the floating pane is removed' test_layout_real_floating_window_is_preserved
-test_case 'tmux layout: JSON layouts report the unsupported format without mutation' test_layout_json_format_is_rejected_without_mutation
-test_case 'tmux layout: real JSON windows preserve state with and without zoom' test_layout_real_json_window_is_preserved
+test_case 'tmux layout: mixed floating windows preserve geometry, stacking and identities' test_layout_mixed_floating_windows
+test_case 'tmux layout: malformed and unsupported JSON preserves state' test_layout_unsupported_json_is_rejected_without_mutation
+test_case 'tmux layout: floating movement and sizing preserve tiled geometry' test_layout_floating_controls_preserve_tiles
+test_case 'tmux layout: floating terminal, title prompt and native toggle bindings' test_layout_floating_terminal_binding_and_toggle
+test_case 'tmux layout: local equalization produces valid nested geometry' test_layout_local_equalization_keeps_nested_geometry_valid
 test_case 'tmux layout: minimum panes can be reshaped in all directions' test_layout_minimum_panes_can_be_reshaped
 test_case 'tmux layout: insufficient space preserves state' test_layout_insufficient_space_preserves_state
 test_case 'tmux layout: nested branch minimum is reserved' test_layout_nested_branch_minimum_is_reserved
