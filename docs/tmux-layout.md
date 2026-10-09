@@ -112,7 +112,7 @@ tmux command prompt (prefix then Ctrl+backslash), entering `resize-pane -x 33%`.
 To use this checkout, run from its root:
 
 ```bash
-bash ./symlinks --force .config/tmux/tmux.conf .config/tmux/reshape-pane
+bash ./symlinks .config/tmux/tmux.conf .config/tmux/reshape-pane
 ```
 
 Then reload with prefix followed by `r`. `relink` instead uses the checkout

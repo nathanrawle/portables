@@ -820,7 +820,9 @@ test_maintenance_machine_env_preserves_home_conflict() {
   maintenance_fixture
   printf 'local machine settings\n' >"$HOME/.maintenance-test.env"
   printf '[[ "$1" != config ]] || echo configured >>"$TRACE"\n' >"$FIXTURE/machine-tools/a.sh"
-  if bash "$FIXTURE/instantiate"; then fail 'conflicting home machine environment accepted'; fi
+  if LINK_CONFLICT_MODE=skip bash "$FIXTURE/instantiate"; then
+    fail 'conflicting home machine environment accepted'
+  fi
   assert_file_contents "$HOME/.maintenance-test.env" 'local machine settings'
   assert_eq configured "$(tail -1 "$TRACE")"
 }
