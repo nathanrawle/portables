@@ -462,7 +462,7 @@ test_real_tmux_prefix_session_does_not_count_as_exact_match() {
   assert_file_contains "$log" $'attach-session\t-t\t'"$session_id"
 }
 
-test_real_tmux_uses_created_session_id_after_name_normalization() {
+test_real_tmux_preserves_dotted_name_and_uses_created_session_id() {
   local repo repo_real real_tmux fake_bin no_fzf_path log socket session_id
 
   real_tmux="$(command -v tmux || true)"
@@ -485,16 +485,16 @@ test_real_tmux_uses_created_session_id_after_name_normalization() {
     TAW_RUN_PATH="$no_fzf_path" \
     run_taw "$repo" -p "$repo"
 
-  session_id="$(real_tmux_session_id "$real_tmux" "$socket" foo_bar)"
-  assert_eq "🏡 foo_bar" "$("$real_tmux" -L "$socket" display-message -p -t "$session_id:" '#{window_name}')" \
-    "expected first window name to match the normalized session name"
+  session_id="$(real_tmux_session_id "$real_tmux" "$socket" foo.bar)"
+  assert_eq "🏡 foo.bar" "$("$real_tmux" -L "$socket" display-message -p -t "$session_id:" '#{window_name}')" \
+    "expected first window name to match the preserved session name"
   assert_file_contains "$log" $'new-session\t-d\t-P\t-F\t#{session_id}\t#{session_name}\t#{window_id}\t#{pane_id}\t-s\tfoo.bar'
   assert_file_contains "$log" $'attach-session\t-t\t'"$session_id"
   assert_file_not_contains "$log" $'attach-session\t-t\tfoo.bar'
 }
 
-test_real_tmux_normalized_session_collision_fails_clearly() {
-  local repo real_tmux fake_bin no_fzf_path log socket output session_count
+test_real_tmux_distinguishes_dotted_and_underscore_names() {
+  local repo real_tmux fake_bin no_fzf_path log socket session_count session_id original
 
   real_tmux="$(command -v tmux || true)"
   [[ -n "$real_tmux" ]] || return 0
@@ -510,17 +510,18 @@ test_real_tmux_normalized_session_collision_fails_clearly() {
 
   "$real_tmux" -L "$socket" -f /dev/null new-session -d -s foo_bar \
     zsh >/dev/null 2>&1
-  if output="$(EDITOR=zsh TAW_REAL_TMUX_BIN="$real_tmux" \
+  original="$("$real_tmux" -L "$socket" list-panes -t foo_bar -F '#{pane_id}:#{pane_pid}')"
+  EDITOR=zsh TAW_REAL_TMUX_BIN="$real_tmux" \
     TAW_REAL_TMUX_SOCKET="$socket" TAW_FAKE_TMUX_BIN="$fake_bin" TAW_TMUX_LOG="$log" \
     TAW_RUN_PATH="$no_fzf_path" \
-    run_taw "$repo" -p "$repo" 2>&1)"; then
-    fail "expected normalized tmux session name collision to fail"
-  fi
+    run_taw "$repo" -p "$repo"
 
-  assert_string_contains "$output" "could not create tmux session: foo.bar"
+  session_id="$(real_tmux_session_id "$real_tmux" "$socket" foo.bar)"
   session_count="$("$real_tmux" -L "$socket" list-sessions -F '#{session_id}' | wc -l | tr -d ' ')"
-  assert_eq "1" "$session_count" "expected the collision not to create another session"
-  assert_file_not_contains "$log" $'attach-session\t'
+  assert_eq "2" "$session_count" "dotted and underscore names must remain distinct"
+  assert_eq "$original" "$("$real_tmux" -L "$socket" list-panes -t foo_bar -F '#{pane_id}:#{pane_pid}')" \
+    'creating a dotted session must preserve the underscore session'
+  assert_file_contains "$log" $'attach-session\t-t\t'"$session_id"
 }
 
 test_real_tmux_existing_window_preserves_active_pane() {
@@ -5795,10 +5796,10 @@ test_case "taw: new-session window uses home emoji and session name regardless o
   test_new_session_window_uses_home_and_session_name
 test_case "taw: real tmux does not prefix-match session names" \
   test_real_tmux_prefix_session_does_not_count_as_exact_match
-test_case "taw: real tmux uses created session ID after name normalization" \
-  test_real_tmux_uses_created_session_id_after_name_normalization
-test_case "taw: real tmux reports normalized session name collisions" \
-  test_real_tmux_normalized_session_collision_fails_clearly
+test_case "taw: real tmux preserves dotted names and uses created session IDs" \
+  test_real_tmux_preserves_dotted_name_and_uses_created_session_id
+test_case "taw: real tmux distinguishes dotted and underscore session names" \
+  test_real_tmux_distinguishes_dotted_and_underscore_names
 test_case "taw: real tmux preserves active pane when reusing a window" \
   test_real_tmux_existing_window_preserves_active_pane
 test_case "taw: global gitignore excludes managed worktrees" \
