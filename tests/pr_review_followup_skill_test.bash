@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/lib/harness.bash"
-
 skill_fixture() {
   local skill_root="$TEST_TMPDIR/skill"
   mkdir -p "$skill_root/scripts" "$TEST_TMPDIR/bin"
@@ -97,5 +95,3 @@ test_case 'pr review skill: compact state follows the tracked request' test_pr_r
 test_case 'pr review skill: malformed bot logins are rejected' test_pr_review_state_rejects_malformed_bot_logins
 test_case 'pr review skill: tracked comments require an ID' test_pr_review_state_rejects_invalid_reaction_target
 test_case 'pr review skill: automatic reviews track the PR body' test_pr_review_state_queries_pr_body_for_automatic_reviews
-
-finish_tests

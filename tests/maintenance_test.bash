@@ -933,7 +933,7 @@ test_maintenance_relink_help_skips_restart() {
   cat >"$TEST_TMPDIR/wrapper-help.zsh" <<'EOF'
 fpath=( "$WRAPPER_REPO/home/.zfuns" $fpath )
 autoload -Uz relink
-relink --force --help
+relink --no-clobber --help
 print "RESULT:return:${?}:end"
 EOF
   zsh -fc '

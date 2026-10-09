@@ -2,6 +2,23 @@
 
 RUNNER_UNDER_TEST="$REPO_ROOT/tests/run"
 
+test_runner_preserves_results_across_skill_module() {
+  local test_file output jobs
+  test_file="$TEST_TMPDIR/earlier_test.bash"
+  cat >"$test_file" <<'EOF'
+test_fixture_failure() { fail 'earlier failure must remain visible'; }
+test_case 'fixture: earlier failure' test_fixture_failure
+EOF
+  for jobs in 1 2; do
+    if output="$("$RUNNER_UNDER_TEST" --jobs "$jobs" --filter 'fixture:' \
+      "$test_file" "$REPO_ROOT/tests/pr_review_followup_skill_test.bash" 2>&1)"; then
+      fail 'loading the skill test module erased an earlier failure'
+    fi
+    assert_runner_output_contains "$output" 'earlier failure must remain visible'
+    assert_runner_output_contains "$output" '1 test(s), 1 failure(s)'
+  done
+}
+
 runner_fixture_is_running() {
   local pid="$1" state
 
@@ -263,3 +280,5 @@ test_case 'test runner: fixture liveness distinguishes zombies' \
   test_runner_fixture_liveness_handles_zombies
 test_case 'test runner: does not leak job override' \
   test_runner_does_not_leak_job_override
+test_case 'test runner: skill module preserves earlier failures and counts' \
+  test_runner_preserves_results_across_skill_module
