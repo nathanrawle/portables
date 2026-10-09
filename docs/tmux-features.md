@@ -126,7 +126,8 @@ agent indicators. Agent membership remains available until the retained pane is
 closed; respawning and moving panes triggers reconciliation through native events.
 
 The custom orange/blue status palette stays in place. tmux's built-in modes use
-its detected light/dark theme, and messages retain an orange fill across the row.
+terminal ANSI colors, and messages retain an orange fill across the row.
+Popups use the terminal's default background to preserve transparency.
 New clickable pane ranges and floating title-bar controls work with the existing
 two-row status layout.
 
