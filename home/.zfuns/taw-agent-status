@@ -602,6 +602,20 @@ reconcile_agent_session() {
   locate_agent_session || return $?
   collect_source_windows || return 1
 
+  current_windows=
+  if [[ -n "$AGENT_SESSION_ID" ]]; then
+    current_windows="$(tmux list-windows -t "$AGENT_SESSION_ID" -F '#{window_id}' 2>/dev/null)" || return 1
+    while IFS= read -r current; do
+      [[ -n "$current" ]] || continue
+      if ! array_contains "$current" "${DESIRED_WINDOW_IDS[@]+"${DESIRED_WINDOW_IDS[@]}"}"; then
+        # Retained failures must stay readable after the exiting agent clears its metadata.
+        if [[ "$(tmux display-message -p -t "$current" '#{P:#{pane_dead}}')" == *1* ]]; then
+          DESIRED_WINDOW_IDS+=( "$current" )
+        fi
+      fi
+    done <<<"$current_windows"
+  fi
+
   if (( ${#DESIRED_WINDOW_IDS[@]} == 0 )); then
     if [[ -n "$AGENT_SESSION_ID" ]]; then
       tmux kill-session -t "$AGENT_SESSION_ID" >/dev/null || return 1
@@ -611,10 +625,9 @@ reconcile_agent_session() {
 
   if [[ -z "$AGENT_SESSION_ID" ]]; then
     create_agent_session "${DESIRED_WINDOW_IDS[0]}" || return 1
+    current_windows="$(tmux list-windows -t "$AGENT_SESSION_ID" -F '#{window_id}' 2>/dev/null)" || return 1
   fi
 
-  current_windows="$(tmux list-windows -t "$AGENT_SESSION_ID" \
-    -F '#{window_id}' 2>/dev/null)" || return 1
   current_ids=()
   while IFS= read -r current; do
     [[ -n "$current" ]] && current_ids+=( "$current" )
@@ -676,7 +689,6 @@ unlink_agent_window() (
   collect_source_windows || return 1
   source_window_index "$window" || return 0
   fingerprint="${SOURCE_WINDOW_MEMBERS[$SOURCE_WINDOW_INDEX]}"
-  [[ -n "$fingerprint" ]] || return 0
   linked_windows="$(tmux list-windows -t "$AGENT_SESSION_ID" \
     -F '#{window_id}' 2>/dev/null)" || return 1
   linked_ids=()
@@ -685,8 +697,10 @@ unlink_agent_window() (
   done <<<"$linked_windows"
   array_contains "$window" "${linked_ids[@]+"${linked_ids[@]}"}" || return 0
 
-  tmux set-option -w -t "$window" "$AGENT_SUPPRESSION_OPTION" "$fingerprint" \
-    >/dev/null || return 1
+  if [[ -n "$fingerprint" ]]; then
+    tmux set-option -w -t "$window" "$AGENT_SUPPRESSION_OPTION" "$fingerprint" \
+      >/dev/null || return 1
+  fi
   if ! tmux unlink-window -t "$AGENT_SESSION_ID:$window" >/dev/null; then
     tmux set-option -wu -t "$window" "$AGENT_SUPPRESSION_OPTION" \
       >/dev/null 2>&1 || true
@@ -730,7 +744,7 @@ acknowledge_status() {
   [[ "$pane" =~ ^%[0-9]+$ ]] || return 0
   state="$(tmux show-option -pqv -t "$pane" @taw_agent_state 2>/dev/null)" || return 0
   [[ "$state" = waiting ]] || return 0
-  tmux if-shell -F -t "$pane" '#{==:#{@taw_agent_state},waiting}' \
+  tmux if-shell -F -t "$pane" '#{&&:#{!:#{pane_dead}},#{==:#{@taw_agent_state},waiting}}' \
     "set-option -p -t $pane @taw_agent_state acknowledged" >/dev/null 2>&1 || true
 }
 
