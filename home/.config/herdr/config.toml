@@ -1,0 +1,120 @@
+onboarding = false
+
+[theme]
+name = "tokyo-night"
+auto_switch = false
+
+[terminal]
+new_cwd = "follow"
+
+[ui]
+status_indicators = "dots"
+agent_panel_sort = "spaces"
+
+[ui.toast]
+delivery = "off"
+
+[keys]
+prefix = "ctrl+backslash"
+
+new_workspace = ["prefix+shift+n", "ctrl+alt+n"]
+rename_workspace = ["prefix+shift+w", "prefix+$"]
+workspace_picker = ["prefix+w", "ctrl+f"]
+previous_workspace = "ctrl+alt+up"
+next_workspace = "ctrl+alt+down"
+goto = "ctrl+enter"
+
+new_tab = "prefix+c"
+previous_tab = ["prefix+p", "ctrl+alt+left"]
+next_tab = ["prefix+n", "ctrl+alt+right"]
+move_tab_previous = "ctrl+shift+alt+left"
+move_tab_next = "ctrl+shift+alt+right"
+switch_tab = "prefix+1..9"
+rename_tab = ["prefix+shift+t", "prefix+comma"]
+close_tab = ["prefix+shift+x", "ctrl+q", "prefix+ampersand"]
+
+previous_agent = "ctrl+alt+h"
+next_agent = "ctrl+alt+o"
+
+focus_pane_left = ["prefix+h", "ctrl+left"]
+focus_pane_down = ["prefix+j", "ctrl+down"]
+focus_pane_up = ["prefix+k", "ctrl+up"]
+focus_pane_right = ["prefix+l", "ctrl+right"]
+swap_pane_left = ["prefix+shift+h", "ctrl+shift+left"]
+swap_pane_down = ["prefix+shift+j", "ctrl+shift+down"]
+swap_pane_up = ["prefix+shift+k", "ctrl+shift+up"]
+swap_pane_right = ["prefix+shift+l", "ctrl+shift+right"]
+cycle_pane_previous = ["prefix+shift+tab", "ctrl+h"]
+cycle_pane_next = ["prefix+tab", "ctrl+o"]
+rename_pane = ["prefix+shift+p", "prefix+alt+t"]
+split_vertical = "prefix+semicolon"
+split_horizontal = ["prefix+minus", "prefix+quote"]
+close_pane = "prefix+x"
+zoom = "prefix+z"
+copy_mode = "prefix+["
+resize_pane_left = "prefix+alt+left"
+resize_pane_down = "prefix+alt+down"
+resize_pane_up = "prefix+alt+up"
+resize_pane_right = "prefix+alt+right"
+resize_mode = "prefix+shift+r"
+reload_config = "prefix+r"
+detach = "prefix+d"
+
+# Letter-based agent jumps require commands because native indexed bindings accept digits only.
+[[keys.command]]
+key = "ctrl+alt+j"
+type = "shell"
+command = '''target=$("${HERDR_BIN_PATH:-herdr}" agent list | jq -er '.result.agents[0].pane_id // empty') && exec "${HERDR_BIN_PATH:-herdr}" agent focus "$target"'''
+description = "focus agent 1"
+
+[[keys.command]]
+key = "ctrl+alt+k"
+type = "shell"
+command = '''target=$("${HERDR_BIN_PATH:-herdr}" agent list | jq -er '.result.agents[1].pane_id // empty') && exec "${HERDR_BIN_PATH:-herdr}" agent focus "$target"'''
+description = "focus agent 2"
+
+[[keys.command]]
+key = "ctrl+alt+l"
+type = "shell"
+command = '''target=$("${HERDR_BIN_PATH:-herdr}" agent list | jq -er '.result.agents[2].pane_id // empty') && exec "${HERDR_BIN_PATH:-herdr}" agent focus "$target"'''
+description = "focus agent 3"
+
+[[keys.command]]
+key = ["ctrl+alt+semicolon", "ctrl+alt+colon"]
+type = "shell"
+command = '''target=$("${HERDR_BIN_PATH:-herdr}" agent list | jq -er '.result.agents[3].pane_id // empty') && exec "${HERDR_BIN_PATH:-herdr}" agent focus "$target"'''
+description = "focus agent 4"
+
+[[keys.command]]
+key = "prefix+g"
+type = "popup"
+command = "lazygit"
+width = "90%"
+height = "90%"
+description = "open lazygit"
+
+[[keys.command]]
+key = "prefix+t"
+type = "popup"
+command = '''exec "${SHELL:-/bin/sh}"'''
+width = "70%"
+height = "70%"
+description = "open scratch terminal"
+
+[[keys.command]]
+key = "prefix+ctrl+x"
+type = "pane"
+command = "codex --no-daemon"
+description = "launch Codex"
+
+[[keys.command]]
+key = "prefix+ctrl+c"
+type = "pane"
+command = "claude"
+description = "launch Claude"
+
+[[keys.command]]
+key = "prefix+ctrl+g"
+type = "pane"
+command = "gemini"
+description = "launch Gemini"
