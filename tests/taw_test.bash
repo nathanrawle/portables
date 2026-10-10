@@ -4131,6 +4131,43 @@ test_branch_mode_reuses_window_for_assigned_worktree() {
   assert_file_not_contains "$log" $'new-session\t'
 }
 
+test_branch_mode_ignores_workmux_sidebar() {
+  local repo repo_real linked linked_real fake_bin no_fzf_path log sessions panes mode
+
+  repo="$TEST_TMPDIR/repo"
+  linked="$TEST_TMPDIR/develop-worktree"
+  make_git_repo "$repo"
+  git -C "$repo" worktree add "$linked" develop >/dev/null 2>&1
+  repo_real="$(cd "$repo" && pwd -P)"
+  linked_real="$(cd "$linked" && pwd -P)"
+  fake_bin="$(make_fake_tmux "$TEST_TMPDIR/fake")"
+  make_fake_fzf "$fake_bin"
+  no_fzf_path="$(make_path_without_fzf "$fake_bin")"
+  log="$TEST_TMPDIR/tmux.log"
+  sessions=$'repo\t'"$repo_real"$'\n'
+  panes=$'@8\t%8\t'"$linked_real"$'\n'
+
+  for mode in normal peer; do
+    local sidebar_panes="$panes"
+    local -a args=(--mode=branch)
+    if [[ "$mode" == peer ]]; then
+      args+=(--peer)
+      sidebar_panes=$'$1\trepo\t'"$panes"
+    fi
+    : >"$log"
+    EDITOR=vim TAW_TEST_TMUX=/tmp/tmux TAW_FAKE_TMUX_CURRENT_SESSION_ID='$1' \
+      TAW_FAKE_FZF_MATCH=develop TAW_FAKE_TMUX_SESSIONS="$sessions" \
+      TAW_FAKE_TMUX_SIDEBAR_PANES="$sidebar_panes" TAW_FAKE_TMUX_BIN="$fake_bin" \
+      TAW_TMUX_LOG="$log" TAW_RUN_PATH="$no_fzf_path" \
+      run_taw "$repo" "${args[@]}"
+
+    assert_file_contains "$log" '#{!=:#{@workmux_role},sidebar}'
+    assert_file_not_contains "$log" $'select-window\t-t\t@8'
+    assert_file_contains "$log" $'new-window\t'
+    assert_file_not_contains "$log" $'new-session\t'
+  done
+}
+
 test_branch_mode_creates_unassigned_normal_worktree() {
   local repo worktree worktree_real fake_bin no_fzf_path log
 
@@ -6247,3 +6284,6 @@ test_case "taw: legacy removal without selection keeps explicit picker open" \
   test_legacy_removal_without_selection_explicit
 test_case "taw: legacy removal without selection keeps automatic picker open" \
   test_legacy_removal_without_selection_automatic
+
+test_case "taw: branch mode ignores workmux sidebar in normal and peer mode" \
+  test_branch_mode_ignores_workmux_sidebar
