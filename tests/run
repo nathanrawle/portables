@@ -6,13 +6,16 @@ TESTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$TESTS_DIR/.." && pwd)"
 
 export TESTS_DIR REPO_ROOT
+. "$TESTS_DIR/lib/progress.bash"
 
 TESTS_PARALLEL_TMP=
 TESTS_PARALLEL_PIDS=()
 
 cleanup_parallel_tests() {
-  [[ -n "$TESTS_PARALLEL_TMP" && -d "$TESTS_PARALLEL_TMP" ]] \
-    && rm -rf "$TESTS_PARALLEL_TMP"
+  progress_finish error
+  if [[ -n "$TESTS_PARALLEL_TMP" && -d "$TESTS_PARALLEL_TMP" ]]; then
+    rm -rf "$TESTS_PARALLEL_TMP"
+  fi
 }
 
 interrupt_parallel_tests() {
@@ -26,16 +29,20 @@ interrupt_parallel_tests() {
   for pid in "${TESTS_PARALLEL_PIDS[@]}"; do
     wait "$pid" 2>/dev/null || true
   done
+  progress_finish cancelled
   exit "$exit_status"
 }
 
 usage() {
   cat <<'EOF'
-Usage: tests/run [--filter TEXT]... [--jobs N] [test_file ...]
+Usage: tests/run [--filter TEXT]... [--jobs N] [--no-progress]
+                 [--report failed|passed|all|none] [test_file ...]
        tests/run --list [--filter TEXT]... [test_file ...]
 
 With no files or filters, the full suite uses the available logical cores.
 Explicit files and filters run sequentially unless --jobs or TEST_JOBS is set.
+Terminal runs show file-group progress; --no-progress disables it.
+The final report defaults to failed tests and the suite total.
 EOF
 }
 
@@ -50,14 +57,14 @@ detect_test_jobs() {
   printf '%s\n' "$jobs"
 }
 
-run_parallel() {
+run_workers() {
   local jobs="$1"
   shift
   local results_parent results_dir worker_index worker_status monitor_mode=0
   local expected_discovered=-1 expected_matched=-1
   local discovered matched run failed result_count=0 total_run=0 total_failed=0
-  local result status name
-  local -a worker_args pids logs
+  local result status name pid alive progress_dir=
+  local -a worker_args pids logs discovery_args
 
   results_parent="${TMPDIR:-/tmp}"
   results_parent="${results_parent%/}"
@@ -68,6 +75,22 @@ run_parallel() {
   trap 'interrupt_parallel_tests 143' TERM
 
   worker_args=( "$@" )
+  if [[ "$TESTS_PROGRESS_ENABLED" -eq 1 ]]; then
+    discovery_args=( --list --no-progress )
+    if [[ ${#TEST_FILTERS[@]} -gt 0 ]]; then
+      for name in "${TEST_FILTERS[@]}"; do
+        discovery_args+=( --filter "$name" )
+      done
+    fi
+    discovery_args+=( -- "${test_files[@]}" )
+    if ! TESTS_PROGRESS_MANIFEST="$results_dir/manifest" TESTS_WORKER=1 \
+      "$TESTS_DIR/run" "${discovery_args[@]}" >"$results_dir/discovery.log" 2>&1; then
+      cat "$results_dir/discovery.log" >&2
+      return 1
+    fi
+    progress_initialize "$results_dir/manifest"
+    progress_dir="$results_dir"
+  fi
   # Separate process groups let signal handlers stop nested test commands.
   case "$-" in
     *m*) monitor_mode=1 ;;
@@ -76,18 +99,31 @@ run_parallel() {
   for ((worker_index = 0; worker_index < jobs; worker_index++)); do
     logs[$worker_index]="$results_dir/worker-$worker_index.log"
     TESTS_WORKER=1 TESTS_SHARD_COUNT="$jobs" TESTS_SHARD_INDEX="$worker_index" \
-      TESTS_RESULTS_DIR="$results_dir" \
+      TESTS_RESULTS_DIR="$results_dir" TESTS_PROGRESS_DIR="$progress_dir" \
       "$TESTS_DIR/run" "${worker_args[@]}" >"${logs[$worker_index]}" 2>&1 &
     pids[$worker_index]=$!
     TESTS_PARALLEL_PIDS[$worker_index]="${pids[$worker_index]}"
   done
   [[ $monitor_mode -eq 1 ]] || set +m
 
+  if [[ "$TESTS_PROGRESS_ENABLED" -eq 1 ]]; then
+    while :; do
+      progress_collect
+      progress_draw running
+      alive=0
+      for pid in "${pids[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then alive=1; fi
+      done
+      [[ "$alive" -eq 1 ]] || break
+      sleep 0.1
+    done
+  fi
   worker_status=0
   for ((worker_index = 0; worker_index < jobs; worker_index++)); do
     wait "${pids[$worker_index]}" || worker_status=1
   done
   TESTS_PARALLEL_PIDS=()
+  progress_finish finished
   trap - INT TERM
 
   for ((worker_index = 0; worker_index < jobs; worker_index++)); do
@@ -112,8 +148,12 @@ run_parallel() {
 
   shopt -s nullglob
   for result in "$results_dir"/result-*; do
+    [[ "$result" != *.tmp ]] || continue
     result_count=$((result_count + 1))
     IFS=$'\t' read -r status name <"$result"
+    case "$report:$status" in
+      none:*|failed:ok|passed:failed) continue ;;
+    esac
     if [[ "$status" = ok ]]; then
       printf 'ok %d - %s\n' "$result_count" "$name"
     else
@@ -143,6 +183,8 @@ jobs="${TEST_JOBS:-}"
 jobs_set=0
 list_only=0
 files_supplied=0
+report=failed
+no_progress=0
 
 [[ -z "$jobs" ]] || jobs_set=1
 
@@ -172,6 +214,19 @@ while [[ $# -gt 0 ]]; do
       list_only=1
       shift
       ;;
+    --no-progress)
+      no_progress=1
+      shift
+      ;;
+    --report)
+      [[ $# -ge 2 ]] || { printf '%s\n' '--report requires a mode' >&2; exit 2; }
+      report="$2"
+      shift 2
+      ;;
+    --report=*)
+      report="${1#*=}"
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -196,6 +251,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$report" in
+  failed|passed|all|none) ;;
+  *) printf 'invalid report mode: %s\n' "$report" >&2; exit 2 ;;
+esac
 
 if [[ ${#TEST_FILTERS[@]} -gt 0 ]]; then
   for filter in "${TEST_FILTERS[@]}"; do
@@ -239,8 +299,11 @@ if [[ ${#TEST_FILTERS[@]} -gt 0 ]]; then
 fi
 parallel_args+=( --jobs 1 -- "${test_files[@]}" )
 
-if [[ "$jobs" -gt 1 && -z "${TESTS_WORKER:-}" ]]; then
-  run_parallel "$jobs" "${parallel_args[@]}"
+if [[ "$list_only" -eq 0 && -z "${TESTS_WORKER:-}" ]]; then
+  if [[ "$no_progress" -eq 0 && -t 1 && -n "${TERM:-}" && "$TERM" != dumb ]]; then
+    TESTS_PROGRESS_ENABLED=1
+  fi
+  run_workers "$jobs" "${parallel_args[@]}"
   exit
 fi
 
@@ -249,8 +312,10 @@ export TESTS_LIST_ONLY
 
 . "$TESTS_DIR/lib/harness.bash"
 
+TESTS_FILE_INDEX=0
 for test_file in "${test_files[@]}"; do
   . "$test_file"
+  TESTS_FILE_INDEX=$((TESTS_FILE_INDEX + 1))
 done
 
 finish_tests
