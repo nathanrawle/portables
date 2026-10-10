@@ -76,6 +76,10 @@ MOCK
 #!/usr/bin/env bash
 printf 'Darwin\n'
 MOCK
+  cat >"$REFRESH_BIN/date" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "${REFRESH_NOW:-3000}"
+MOCK
   chmod +x "$REFRESH_BIN/"*
   write_refresh_record idle 2000
 }
@@ -120,6 +124,11 @@ test_refresh_recovers_idle_and_deduplicates() {
   : >"$TEST_TMPDIR/tmux.log"
   run_status_refresh
   assert_file_not_contains "$TEST_TMPDIR/tmux.log" list-panes
+  REFRESH_NOW=3004 run_status_refresh
+  assert_file_not_contains "$TEST_TMPDIR/tmux.log" list-panes
+  : >"$TEST_TMPDIR/tmux.log"
+  REFRESH_NOW=3005 run_status_refresh
+  assert_file_contains "$TEST_TMPDIR/tmux.log" list-panes
 }
 
 test_refresh_preserves_active_and_prompt_states() {
