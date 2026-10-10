@@ -1,0 +1,7 @@
+nerdfont: true
+agent: codex --no-daemon
+base_branch: auto
+worktree_dir: .worktrees
+mode: window
+window_placement: rightmost
+status_format: false
