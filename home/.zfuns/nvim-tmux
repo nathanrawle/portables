@@ -70,7 +70,7 @@ rpc() {
   local socket="$1"
   local expression="$2"
 
-  nvim --server "$socket" --remote-expr "$expression" </dev/null 2>/dev/null
+  nvim --headless --server "$socket" --remote-expr "$expression" </dev/null 2>/dev/null
 }
 
 valid_socket() {

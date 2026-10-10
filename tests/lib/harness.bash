@@ -83,20 +83,26 @@ write_test_result() {
   {
     printf '%s\t%s\n' "$status" "$name"
     [[ -z "$output" ]] || printf '%s\n' "$output"
-  } >"$result_path"
+  } >"$result_path.tmp"
+  # Readers must not mistake a partially written result for a completed case.
+  mv "$result_path.tmp" "$result_path"
 }
 
 test_case() {
   local name="$1"
   local fn="$2"
-  local test_tmp output rc status
+  local test_tmp output rc status started_path
 
   TESTS_DISCOVERED=$((TESTS_DISCOVERED + 1))
   test_name_matches_filters "$name" || return 0
   TESTS_MATCHED=$((TESTS_MATCHED + 1))
 
   if [[ "${TESTS_LIST_ONLY:-0}" -eq 1 ]]; then
-    printf '%s\n' "$name"
+    if [[ -n "${TESTS_PROGRESS_MANIFEST:-}" ]]; then
+      printf '%d\t%d\n' "$TESTS_MATCHED" "$TESTS_FILE_INDEX" >>"$TESTS_PROGRESS_MANIFEST"
+    else
+      printf '%s\n' "$name"
+    fi
     return 0
   fi
 
@@ -109,12 +115,18 @@ test_case() {
   test_tmp="$TESTS_TMP_ROOT/test-$TESTS_DISCOVERED"
   mkdir -p "$test_tmp"
 
+  if [[ -n "${TESTS_PROGRESS_DIR:-}" ]]; then
+    printf -v started_path '%s/started-%06d' "$TESTS_PROGRESS_DIR" "$TESTS_MATCHED"
+    : >"$started_path"
+  fi
+
   set +e
   output="$(
     {
       set -euo pipefail
       export TEST_TMPDIR="$test_tmp"
       unset TEST_JOBS TESTS_WORKER TESTS_SHARD_COUNT TESTS_SHARD_INDEX TESTS_RESULTS_DIR
+      unset TESTS_PROGRESS_MANIFEST TESTS_PROGRESS_DIR TESTS_FILE_INDEX
       "$fn"
     } 2>&1
   )"
