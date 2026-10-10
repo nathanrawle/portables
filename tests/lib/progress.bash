@@ -33,10 +33,13 @@ progress_dimensions() {
 
 progress_initialize() {
   local manifest="$1" ordinal group other label i
-  local -a file_keys file_groups
+  local -a file_keys file_groups file_labels
   for ((i = 0; i < ${#test_files[@]}; i++)); do
     file_keys[$i]="$(cd -- "$(dirname -- "${test_files[$i]}")" && pwd -P)/${test_files[$i]##*/}"
     file_groups[$i]="$i"
+    label="${test_files[$i]##*/}"
+    label="${label%.*}"
+    file_labels[$i]="${label//_/ }"
     for ((other = 0; other < i; other++)); do
       if [[ "${file_keys[$i]}" == "${file_keys[$other]}" ]]; then
         file_groups[$i]="${file_groups[$other]}"
@@ -55,16 +58,18 @@ progress_initialize() {
     PROGRESS_DONE[$i]=0
     PROGRESS_FAILED[$i]=0
     PROGRESS_STARTED[$i]=0
-    label="${test_files[$i]##*/}"
+    label="${file_labels[$i]}"
     for ((other = 0; other < ${#test_files[@]}; other++)); do
       [[ "$other" != "$i" && ${PROGRESS_TOTAL[$other]:-0} -gt 0 ]] || continue
-      if [[ "$label" == "${test_files[$other]##*/}" ]]; then
-        label="${test_files[$i]}"
+      if [[ "$label" == "${file_labels[$other]}" ]]; then
+        label="$(dirname -- "${test_files[$i]}")/$label"
         break
       fi
     done
     # Shell quoting keeps control characters in supplied filenames out of the terminal.
-    printf -v label '%q' "$label"
+    if [[ "$label" == *[[:cntrl:]]* ]]; then
+      printf -v label '%q' "$label"
+    fi
     PROGRESS_LABELS[$i]="$label"
   done
   progress_dimensions

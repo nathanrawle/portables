@@ -13,6 +13,7 @@ select multiple sets of cases. Explicit files and filters run sequentially by de
 
 Terminal runs show one progress row per selected test file. Rows start queued, spin
 while the group's cases run, and finish with pass/fail and completed/selected counts.
+Group names omit the file extension and replace underscores with spaces, preserving casing.
 Filtered runs include only files with matching cases. Progress combines cases across
 parallel workers. Small terminals use a static group list and final group statuses;
 a resize that causes wrapping or makes the panel too tall also switches to this display.

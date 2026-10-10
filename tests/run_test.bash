@@ -370,22 +370,22 @@ EOF
   trap "$cleanup" EXIT
   for ((attempt = 0; attempt < 200; attempt++)); do
     output="$(cat "$log" 2>/dev/null || true)"
-    [[ "$output" != *RUNNING* || "$output" != *second_test.bash* ]] || break
+    [[ "$output" != *RUNNING* || "$output" != *"second test"* ]] || break
     sleep 0.02
   done
-  assert_runner_output_contains "$output" 'first_test.bash (0/2) QUEUED'
-  assert_runner_output_contains "$output" 'second_test.bash (0/1) QUEUED'
+  assert_runner_output_contains "$output" 'first test (0/2) QUEUED'
+  assert_runner_output_contains "$output" 'second test (0/1) QUEUED'
   assert_runner_output_contains "$output" RUNNING || {
     fail "terminal capture: $output; script output: $(cat "$TEST_TMPDIR/script.log")"
     return 1
   }
-  [[ "$output" != *excluded_test.bash* && "$output" != *'test(s),'* ]] || fail 'selection or live completion is wrong'
+  [[ "$output" != *"excluded test"* && "$output" != *'test(s),'* ]] || fail 'selection or live completion is wrong'
   touch "$release"
   wait "$terminal_pid" || true
   trap - EXIT
   output="$(cat "$log")"
-  assert_runner_output_contains "$output" 'first_test.bash (2/2) FAIL, 1 failed'
-  assert_runner_output_contains "$output" 'second_test.bash (1/1) PASS'
+  assert_runner_output_contains "$output" 'first test (2/2) FAIL, 1 failed'
+  assert_runner_output_contains "$output" 'second test (1/1) PASS'
   assert_runner_output_contains "$output" '3 test(s), 1 failure(s)'
   [[ "$output" != *'fixture: selected'* && "$output" != *'expected fixture failure'* ]] || fail '--report none printed individual results'
 }
@@ -400,19 +400,19 @@ test_runner_terminal_suppression_and_small_panel() {
     --no-progress --report none "$first" >"$TEST_TMPDIR/script.log" 2>&1
   output="$(cat "$log")"
   assert_runner_output_contains "$output" '3 test(s), 0 failure(s)'
-  [[ "$output" != *first_test.bash* && "$output" != *$'\033'* ]] || fail '--no-progress emitted terminal progress'
+  [[ "$output" != *"first test"* && "$output" != *$'\033'* ]] || fail '--no-progress emitted terminal progress'
   RUNNER_MARKER="$TEST_TMPDIR/marker" run_runner_terminal "$log" 1 \
     --report none "$first" "$second" >"$TEST_TMPDIR/script.log" 2>&1
   output="$(cat "$log")"
-  assert_runner_output_contains "$output" 'first_test.bash (0/3) QUEUED'
-  assert_runner_output_contains "$output" 'first_test.bash (3/3) PASS'
-  assert_runner_output_contains "$output" 'second_test.bash (3/3) PASS'
+  assert_runner_output_contains "$output" 'first test (0/3) QUEUED'
+  assert_runner_output_contains "$output" 'first test (3/3) PASS'
+  assert_runner_output_contains "$output" 'second test (3/3) PASS'
   [[ "$output" != *$'\033'* ]] || fail 'small terminal attempted cursor updates'
   RUNNER_MARKER="$TEST_TMPDIR/marker" run_runner_terminal "$log" 1 \
     --report none "$first" "$TEST_TMPDIR/./first_test.bash" >"$TEST_TMPDIR/script.log" 2>&1
   output="$(cat "$log")"
-  assert_runner_output_contains "$output" 'first_test.bash (0/6) QUEUED'
-  assert_runner_output_contains "$output" 'first_test.bash (6/6) PASS'
+  assert_runner_output_contains "$output" 'first test (0/6) QUEUED'
+  assert_runner_output_contains "$output" 'first test (6/6) PASS'
   assert_eq 1 "$(grep -c QUEUED "$log")" 'the same file must form one group'
 }
 
@@ -426,7 +426,7 @@ test_case 'fixture: unreachable case' test_fixture_pass
 EOF
   run_runner_terminal "$log" 24 --report none "$test_file" >"$TEST_TMPDIR/script.log" 2>&1 || true
   output="$(cat "$log")"
-  assert_runner_output_contains "$output" 'crash_test.bash (0/1) ERROR'
+  assert_runner_output_contains "$output" 'crash test (0/1) ERROR'
   assert_runner_output_contains "$output" 'test worker 0 did not report results'
 }
 
@@ -436,11 +436,11 @@ test_runner_progress_resize_and_cancellation() {
   TESTS_PROGRESS_ENABLED=1
   TESTS_PARALLEL_TMP="$TEST_TMPDIR"
   mkdir -p "$TEST_TMPDIR/other"
-  test_files=( "$TEST_TMPDIR/same_test.bash" "$TEST_TMPDIR/other/same_test.bash" )
+  test_files=( "$TEST_TMPDIR/Same_Test.bash" "$TEST_TMPDIR/other/Same_Test.bash" )
   printf '1\t0\n2\t1\n' >"$TEST_TMPDIR/manifest"
   progress_dimensions() { PROGRESS_HEIGHT=24; PROGRESS_WIDTH=100; }
   progress_initialize "$TEST_TMPDIR/manifest" >/dev/null
-  assert_eq "$TEST_TMPDIR/same_test.bash" "${PROGRESS_LABELS[0]}"
+  assert_eq "$TEST_TMPDIR/Same Test" "${PROGRESS_LABELS[0]}"
   progress_dimensions() { PROGRESS_HEIGHT=1; PROGRESS_WIDTH=40; }
   PROGRESS_RESIZED=1
   output="$(progress_finish cancelled)"
@@ -479,7 +479,7 @@ EOF
   wait "$terminal_pid" || true
   trap - EXIT
   output="$(cat "$log")"
-  assert_runner_output_contains "$output" 'wait_test.bash (0/1) CANCELLED'
+  assert_runner_output_contains "$output" 'wait test (0/1) CANCELLED'
   [[ "$output" != *'test(s),'* ]] || fail 'interrupted terminal run reported completion'
   while IFS=$'\t' read -r kind pid; do
     [[ "$kind" == pid ]] || continue
