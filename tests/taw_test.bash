@@ -3244,6 +3244,8 @@ test_explicit_picker_cancels_while_active_producer_is_idle() {
     printf 'TS_SEARCH_PATHS=("%s")\n' "$elsewhere" >"$config_fifo" &
     writer_pid=$!
     wait "$runner_pid" 2>/dev/null || true
+    # Cancellation can remove the FIFO reader before the fallback writer opens it.
+    kill "$writer_pid" 2>/dev/null || true
     wait "$writer_pid" 2>/dev/null || true
     fail "expected picker cancellation to stop an idle stream promptly"
   fi
