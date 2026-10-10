@@ -317,6 +317,7 @@ run_runner_terminal() {
   cat >"$launcher" <<'EOF'
 #!/usr/bin/env bash
 stty rows "$RUNNER_TERMINAL_ROWS" cols 100
+export RUNNER_TERMINAL_TTY="$(tty)"
 if [[ -n "${RUNNER_TERMINAL_PID_FILE:-}" ]]; then
   printf '%d\n' "$$" >"$RUNNER_TERMINAL_PID_FILE"
 fi
@@ -451,8 +452,9 @@ test_runner_progress_resize_and_cancellation() {
 test_runner_terminal_interrupt_cancels_and_reaps() {
   local test_file="$TEST_TMPDIR/wait_test.bash" fixture="$TEST_TMPDIR/wait-fixture"
   local marker="$TEST_TMPDIR/pids" pid_file="$TEST_TMPDIR/runner-pid"
-  local log="$TEST_TMPDIR/terminal.log" terminal_pid target attempt output cleanup pid kind
+  local log="$TEST_TMPDIR/terminal.log" terminal_pid target attempt output cleanup pid kind bin
   command -v script >/dev/null 2>&1 || return 0
+  bin="$(make_runner_focus_tmux)"
   cat >"$fixture" <<'EOF'
 #!/usr/bin/env bash
 sleep 30 &
@@ -464,7 +466,8 @@ EOF
 test_fixture_wait() { bash "$RUNNER_FIXTURE"; }
 test_case 'fixture: waiting case' test_fixture_wait
 EOF
-  RUNNER_TERMINAL_PID_FILE="$pid_file" RUNNER_FIXTURE="$fixture" RUNNER_MARKER="$marker" \
+  PATH="$bin:$PATH" TMUX=/tmp/focus-fixture TMUX_PANE=%7 RUNNER_FOCUS_MODES=1,7,25,1004 \
+    RUNNER_TERMINAL_PID_FILE="$pid_file" RUNNER_FIXTURE="$fixture" RUNNER_MARKER="$marker" \
     run_runner_terminal "$log" 24 --report none "$test_file" >"$TEST_TMPDIR/script.log" 2>&1 &
   terminal_pid=$!
   printf -v cleanup 'kill %q 2>/dev/null || true; wait %q 2>/dev/null || true' "$terminal_pid" "$terminal_pid"
@@ -480,6 +483,8 @@ EOF
   trap - EXIT
   output="$(cat "$log")"
   assert_runner_output_contains "$output" 'wait test (0/1) CANCELLED'
+  assert_runner_output_contains "$output" $'\033[?1004l'
+  assert_runner_output_contains "$output" $'\033[?1004h'
   [[ "$output" != *'test(s),'* ]] || fail 'interrupted terminal run reported completion'
   while IFS=$'\t' read -r kind pid; do
     [[ "$kind" == pid ]] || continue
@@ -522,6 +527,44 @@ EOF
   fi
 }
 
+make_runner_focus_tmux() {
+  local bin="$TEST_TMPDIR/bin"
+  mkdir -p "$bin"
+  cat >"$bin/tmux" <<'EOF'
+#!/usr/bin/env bash
+printf '%s %s\n' "$RUNNER_TERMINAL_TTY" "$RUNNER_FOCUS_MODES"
+EOF
+  chmod +x "$bin/tmux"
+  printf '%s\n' "$bin"
+}
+
+test_runner_terminal_focus_reporting() {
+  local test_file="$TEST_TMPDIR/focus_test.bash" bin
+  local log="$TEST_TMPDIR/terminal.log" output modes
+  command -v script >/dev/null 2>&1 || return 0
+  bin="$(make_runner_focus_tmux)"
+  cat >"$test_file" <<'EOF'
+test_fixture_pass() { return 0; }
+test_case 'fixture: focus reporting' test_fixture_pass
+EOF
+  for modes in '1,7,25,1004' '1,7,25'; do
+    PATH="$bin:$PATH" TMUX=/tmp/focus-fixture TMUX_PANE=%7 RUNNER_FOCUS_MODES="$modes" \
+      run_runner_terminal "$log" 24 --no-progress "$test_file"
+    output="$(cat "$log")"
+    assert_runner_output_contains "$output" '1 test(s), 0 failure(s)'
+    if [[ "$modes" == *1004* ]]; then
+      assert_runner_output_contains "$output" $'\033[?1004l'
+      assert_runner_output_contains "$output" $'\033[?1004h'
+      [[ "$output" == *$'\033[?1004l'*'test(s),'*$'\033[?1004h'* ]] \
+        || fail 'focus reporting was not restored after the report'
+    else
+      [[ "$output" != *$'\033[?1004'* ]] || fail 'inactive focus reporting was enabled'
+    fi
+  done
+}
+
+test_case 'test runner: terminal focus reporting' \
+  test_runner_terminal_focus_reporting
 test_case 'test runner: isolates worker stdin' \
   test_runner_isolates_worker_stdin
 test_case 'test runner: lists without executing tests' \

@@ -43,6 +43,8 @@ matching test names without progress or a final report.
 
 Test workers receive an empty stdin so tests cannot read input from the invoking
 terminal or pipeline. Supply any input a test needs explicitly within its fixture.
+In tmux, terminal runs temporarily suppress pane focus reports and restore the prior
+enabled state on exit. This also applies with `--no-progress`.
 
 ```bash
 tests/run --report all tests/run_test.bash
