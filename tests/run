@@ -84,7 +84,7 @@ run_workers() {
     fi
     discovery_args+=( -- "${test_files[@]}" )
     if ! TESTS_PROGRESS_MANIFEST="$results_dir/manifest" TESTS_WORKER=1 \
-      "$TESTS_DIR/run" "${discovery_args[@]}" >"$results_dir/discovery.log" 2>&1; then
+      "$TESTS_DIR/run" "${discovery_args[@]}" </dev/null >"$results_dir/discovery.log" 2>&1; then
       cat "$results_dir/discovery.log" >&2
       return 1
     fi
@@ -100,7 +100,7 @@ run_workers() {
     logs[$worker_index]="$results_dir/worker-$worker_index.log"
     TESTS_WORKER=1 TESTS_SHARD_COUNT="$jobs" TESTS_SHARD_INDEX="$worker_index" \
       TESTS_RESULTS_DIR="$results_dir" TESTS_PROGRESS_DIR="$progress_dir" \
-      "$TESTS_DIR/run" "${worker_args[@]}" >"${logs[$worker_index]}" 2>&1 &
+      "$TESTS_DIR/run" "${worker_args[@]}" </dev/null >"${logs[$worker_index]}" 2>&1 &
     pids[$worker_index]=$!
     TESTS_PARALLEL_PIDS[$worker_index]="${pids[$worker_index]}"
   done

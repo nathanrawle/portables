@@ -40,6 +40,9 @@ remain visible in every mode. Successful cases' captured output stays hidden.
 Both `--report MODE` and `--report=MODE` are supported. `--list` continues to print
 matching test names without progress or a final report.
 
+Test workers receive an empty stdin so tests cannot read input from the invoking
+terminal or pipeline. Supply any input a test needs explicitly within its fixture.
+
 ```bash
 tests/run --report all tests/run_test.bash
 tests/run --filter 'branch picker' --report none tests/taw_test.bash

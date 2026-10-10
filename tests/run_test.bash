@@ -494,6 +494,36 @@ EOF
   done <"$marker"
 }
 
+test_runner_isolates_worker_stdin() {
+  local test_file="$TEST_TMPDIR/stdin_test.bash" output remaining jobs
+  local log="$TEST_TMPDIR/terminal.log"
+
+  cat >"$test_file" <<'EOF'
+test_fixture_stdin() {
+  [[ ! -t 0 ]] || fail 'test inherited the terminal stdin'
+  if IFS= read -r input; then
+    fail "test consumed caller input: $input"
+  fi
+}
+test_case 'fixture: isolated stdin' test_fixture_stdin
+EOF
+  printf 'caller input\n' >"$TEST_TMPDIR/input"
+  for jobs in 1 2; do
+    {
+      output="$("$RUNNER_UNDER_TEST" --jobs "$jobs" "$test_file" <&3)"
+      IFS= read -r remaining <&3
+    } 3<"$TEST_TMPDIR/input"
+    assert_eq 'caller input' "$remaining" 'runner consumed caller stdin'
+    assert_runner_output_contains "$output" '1 test(s), 0 failure(s)'
+  done
+  if command -v script >/dev/null 2>&1; then
+    run_runner_terminal "$log" 24 "$test_file"
+    assert_runner_output_contains "$(cat "$log")" '1 test(s), 0 failure(s)'
+  fi
+}
+
+test_case 'test runner: isolates worker stdin' \
+  test_runner_isolates_worker_stdin
 test_case 'test runner: lists without executing tests' \
   test_runner_lists_without_executing
 test_case 'test runner: combines literal filters' \
