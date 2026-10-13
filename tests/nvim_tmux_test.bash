@@ -270,6 +270,7 @@ EOF
   mkdir -p "$stdin_guard_path"
   cat >"$stdin_guard_path/nvim" <<EOF
 #!/usr/bin/env bash
+[[ "\$1" == --headless ]] || exit 1
 if IFS= read -r input; then
   exit 0
 fi
@@ -341,10 +342,10 @@ EOF
   assert_eq "$third_socket" "$(jq -r '.socket' <<<"$output")" \
     "PID selector should choose one of multiple editors in a pane"
 
-  nvim --server "$registered_nested_socket" --remote-send '<Cmd>qa!<CR>'
+  nvim --headless --server "$registered_nested_socket" --remote-send '<Cmd>qa!<CR>'
   wait "$nested_pid" || true
   wait_for_pane_option_value "$editor" @taw_nvim_pid "$third_pid"
-  nvim --server "$third_socket" --remote-send '<Cmd>qa!<CR>'
+  nvim --headless --server "$third_socket" --remote-send '<Cmd>qa!<CR>'
   wait "$third_pid" || true
   wait_for_pane_option_value "$editor" @taw_nvim_pid "$registered_pid"
   output="$(PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
@@ -358,7 +359,7 @@ EOF
 
   cd "$REPO_ROOT"
   run_bridge "$tmux_environment" "$agent" highlight "$first" 2:3 >/dev/null
-  count="$(nvim --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
+  count="$(nvim --headless --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
     --remote-expr "luaeval(\"#vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('taw-agent-nvim'), 0, -1, {})\")")"
   assert_eq 1 "$count" "expected one highlight extmark"
   run_bridge "$tmux_environment" "$agent" open "$second" 3 2 >/dev/null
@@ -376,11 +377,11 @@ EOF
   assert_eq 2 "$(jq -r '.editor.cursor.column' <<<"$output")" \
     "invalid ranges should preserve the cursor column"
   run_bridge "$tmux_environment" "$agent" open "$first" >/dev/null
-  highlight_row="$(nvim --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
+  highlight_row="$(nvim --headless --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
     --remote-expr "luaeval(\"vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('taw-agent-nvim'), 0, -1, {})[1][2]\")")"
   assert_eq 1 "$highlight_row" "invalid ranges should preserve the previous highlights"
   run_bridge "$tmux_environment" "$agent" clear-highlights "$first" >/dev/null
-  count="$(nvim --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
+  count="$(nvim --headless --server "$(jq -r '.socket' <<<"$(run_bridge "$tmux_environment" "$agent" discover)")" \
     --remote-expr "luaeval(\"#vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_create_namespace('taw-agent-nvim'), 0, -1, {})\")")"
   assert_eq 0 "$count" "expected highlights to be cleared"
 
@@ -415,14 +416,14 @@ EOF
 
   if command -v lsof >/dev/null 2>&1; then
     extra_socket="$TEST_TMPDIR/extra-nvim.sock"
-    nvim --server "$registered_socket" --remote-expr "serverstart('$extra_socket')" >/dev/null
+    nvim --headless --server "$registered_socket" --remote-expr "serverstart('$extra_socket')" >/dev/null
     wait_for_socket "$extra_socket"
     output="$(run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
     assert_eq registered "$(jq -r '.source' <<<"$output")" \
       "multiple sockets for one Neovim should prefer its registration"
 
     nested_socket="$TEST_TMPDIR/nested-nvim.sock"
-    nvim --server "$registered_socket" --remote-expr \
+    nvim --headless --server "$registered_socket" --remote-expr \
       "luaeval(\"vim.fn.jobstart({'nvim', '--headless', '-u', 'NONE', '-i', 'NONE', '--listen', _A})\", '$nested_socket')" \
       >/dev/null
     wait_for_socket "$nested_socket"

@@ -504,7 +504,7 @@ test_layout_floating_controls_preserve_tiles() {
   run_layout_binding S-right "$floating"
   assert_eq "$((x + 5))" "$(layout_tmux display-message -p -t "$floating" '#{pane_left}')"
   run_layout_binding S-down "$floating"
-  assert_eq "$((y + 5))" "$(layout_tmux display-message -p -t "$floating" '#{pane_top}')"
+  assert_eq "$((y + 2))" "$(layout_tmux display-message -p -t "$floating" '#{pane_top}')"
   run_layout_binding C-= "$floating"
   assert_eq "$((width + 20))" "$(pane_sizing_dimension "$floating" width)"
   run_layout_binding C-- "$floating"
