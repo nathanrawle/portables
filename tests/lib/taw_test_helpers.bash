@@ -113,6 +113,9 @@ case "${1:-}" in
     if [[ " $* " = *" -a "* ]]; then
       panes="${TAW_FAKE_TMUX_ALL_PANES-}"
     fi
+    if [[ " $* " != *' -f #{!=:#{@workmux_role},sidebar} '* ]]; then
+      panes+="${TAW_FAKE_TMUX_SIDEBAR_PANES-}"
+    fi
     [[ -n "$panes" ]] || exit 1
     printf '%b' "$panes"
     [[ "$panes" = *$'\n' ]] || printf '\n'

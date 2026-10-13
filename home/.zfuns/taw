@@ -2165,8 +2165,10 @@ _taw_existing_tmux_window_for_dir() {
   local _taw_panes _taw_line _taw_window _taw_pane _taw_pane_path _taw_pane_real _taw_window_match=
   local _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
 
+  # Sidebar directories do not identify a worktree window.
   _taw_panes="$(tmux list-panes -s -t "$_taw_session_target:" \
-    -F '#{window_id}	#{pane_id}	#{pane_current_path}' 2>/dev/null)" || return 1
+    -F '#{window_id}	#{pane_id}	#{pane_current_path}' \
+    -f '#{!=:#{@workmux_role},sidebar}' 2>/dev/null)" || return 1
 
   for _taw_line in "${(@f)_taw_panes}"; do
     _taw_window="${_taw_line%%${_taw_tab}*}"
@@ -2193,9 +2195,10 @@ _taw_peer_tmux_window_for_dir() {
   local _taw_pane_real _taw_rest _taw_rank _taw_best_rank=99 _taw_best_session_id
   local _taw_best_window _taw_target_dir="${_taw_window_dir:A}" _taw_tab=$'\t'
 
+  # Sidebar directories do not identify a worktree window.
   _taw_panes="$(tmux list-panes -a \
     -F '#{session_id}	#{session_name}	#{window_id}	#{pane_id}	#{pane_current_path}' \
-    2>/dev/null)" || return 1
+    -f '#{!=:#{@workmux_role},sidebar}' 2>/dev/null)" || return 1
 
   for _taw_line in "${(@f)_taw_panes}"; do
     _taw_session_id="${_taw_line%%${_taw_tab}*}"
