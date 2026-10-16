@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# Zsh autoloads this directory, so dispatch before Bash code changes the caller's shell.
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  command bash "$HOME/.zfuns/nvim-tmux" "$@"
+  return $?
+fi
+
 set -u
 
 usage() {
@@ -321,10 +327,13 @@ run_clear_highlights() {
 }
 
 run_agent_context() {
-  local agent pane_key selected_status summary pids
+  local agent pane_key selected_status summary pids prefix
 
   agent="$1"
   pane_key="${agent}_pane_id"
+  # Agent command shells may omit the hook's PATH and tmux environment.
+  printf -v prefix 'TMUX=%q TMUX_PANE=%q %q' \
+    "$TMUX" "$CALLER_PANE" "$HOME/.zfuns/nvim-tmux"
 
   select_candidate
   selected_status=$?
@@ -332,8 +341,8 @@ run_agent_context() {
     if [[ "$selected_status" -eq 3 ]]; then
       local IFS=,
       pids="${CANDIDATE_PIDS[*]}"
-      printf 'Multiple Neovim instances are available in tmux window %s (PIDs %s). Select one with nvim-tmux --pid PID before relying on editor context.\n' \
-        "$CALLER_WINDOW" "$pids"
+      printf 'Multiple Neovim instances are available in tmux window %s (PIDs %s). Select one with %s --pid PID context before relying on editor context.\n' \
+        "$CALLER_WINDOW" "$pids" "$prefix"
     fi
     return 0
   fi
@@ -353,9 +362,9 @@ run_agent_context() {
       }
     }')"
   printf 'A live Neovim is available in this exact tmux window. Connection context: %s\n' "$summary"
-  printf 'Use nvim-tmux --pane %s --pid %s open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send. Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location. Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane %s --pid %s context.\n' \
-    "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PIDS[SELECTED]}" \
+  printf 'Neovim command prefix: %s --pane %s --pid %s\n' "$prefix" \
     "${CANDIDATE_PANES[SELECTED]}" "${CANDIDATE_PIDS[SELECTED]}"
+  printf 'Append open PATH [LINE [COLUMN]], highlight PATH START:END [...], or clear-highlights [PATH] to this prefix—not direct Ex, Lua, remote-expr, or remote-send. Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location. Only if an initial attempt to reach Neovim fails, refresh by appending context to this prefix.\n'
 }
 
 TARGET_PANE=
