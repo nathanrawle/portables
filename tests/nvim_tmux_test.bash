@@ -190,6 +190,29 @@ test_nvim_tmux_hook_is_quiet_outside_tmux() {
   assert_eq "" "$output" "expected no startup context outside tmux"
 }
 
+test_nvim_tmux_zsh_autoload_preserves_shell() {
+  local home="$TEST_TMPDIR/home with spaces" output
+
+  command -v zsh >/dev/null 2>&1 || return 0
+  mkdir -p "$home/.zfuns"
+  ln -s "$NVIM_TMUX" "$home/.zfuns/nvim-tmux"
+  output="$(HOME="$home" TMUX= TMUX_PANE= zsh -dfc '
+    fpath=( "$HOME/.zfuns" $fpath )
+    autoload -U nvim-tmux
+    for attempt in 1 2; do
+      nvim-tmux codex-context || exit $?
+      nvim-tmux --pid "invalid pid" context 2>"$HOME/error"
+      [[ $? == 2 ]] || exit 70
+      [[ ! -o nounset ]] || exit 71
+      (( ${+functions[run_agent_context]} == 0 )) || exit 72
+      [[ ${TARGET_PID-unset} == unset ]] || exit 73
+    done
+    print -r -- "shell preserved"
+  ')"
+  assert_eq 'shell preserved' "$output"
+  assert_file_contents "$home/error" 'nvim-tmux: invalid PID: invalid pid'
+}
+
 test_nvim_tmux_discovers_and_controls_exact_window() {
   local init first second outside editor agent socket_path tmux_environment output summary count
   local ancestry_output ambiguity_output ambiguity_status other_agent fallback_editor fallback_agent
@@ -197,6 +220,7 @@ test_nvim_tmux_discovers_and_controls_exact_window() {
   local stale_registrations stdin_guard_path real_nvim extra_socket invalid_highlight_status
   local highlight_row nested_pid nested_socket registered_nested_socket third_pid third_socket
   local registration_lock registrations_while_locked
+  local home prefix shell shell_path
 
   command -v tmux >/dev/null 2>&1 || return 0
   command -v nvim >/dev/null 2>&1 || return 0
@@ -237,13 +261,16 @@ EOF
     show-option -pqv -t "$editor" @taw_nvim_pid)"
   registered_registrations="$("$NVIM_TMUX_BIN" -L "$NVIM_TMUX_SOCKET" \
     show-option -pqv -t "$editor" @taw_nvim_registrations)"
-  output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
+  home="$TEST_TMPDIR/home with spaces and 'quotes'"
+  mkdir -p "$home/.zfuns"
+  ln -s "$NVIM_TMUX" "$home/.zfuns/nvim-tmux"
+  output="$(HOME="$home" run_bridge "$tmux_environment" "$agent" codex-context)"
   assert_string_contains "$output" \
     'A live Neovim is available in this exact tmux window. Connection context:'
   assert_string_contains "$output" \
-    "Only if an initial attempt to reach Neovim fails, refresh with: nvim-tmux --pane $editor --pid $registered_pid context."
+    'Only if an initial attempt to reach Neovim fails, refresh by appending context to this prefix.'
   assert_string_contains "$output" \
-    "Use nvim-tmux --pane $editor --pid $registered_pid open, highlight, and clear-highlights—not direct Ex, Lua, remote-expr, or remote-send."
+    'Append open PATH [LINE [COLUMN]], highlight PATH START:END [...], or clear-highlights [PATH] to this prefix—not direct Ex, Lua, remote-expr, or remote-send.'
   assert_string_contains "$output" \
     'Conservatively focus the relevant file and smallest useful line range when it materially helps explain or hand off work; otherwise leave the editor untouched, and clear stale highlights before showing a new location.'
   summary="$(sed -n 's/^A live Neovim is available in this exact tmux window\. Connection context: //p' \
@@ -257,7 +284,29 @@ EOF
   assert_eq false "$(jq -r 'has("editor")' <<<"$summary")" \
     "startup context should not include stale editor state"
 
-  output="$(run_bridge "$tmux_environment" "$agent" claude-context)"
+  prefix="$(sed -n 's/^Neovim command prefix: //p' <<<"$output")"
+  assert_string_contains "$prefix" " --pane $editor --pid $registered_pid"
+  no_lsof_path="$(make_no_lsof_path)"
+  for shell in bash zsh; do
+    shell_path="$(command -v "$shell")" || continue
+    output="$(env -u TMUX -u TMUX_PANE PATH="$no_lsof_path" \
+      "$shell_path" -fc "$prefix context")"
+    assert_eq "$registered_pid" "$(jq -r '.connection.pid' <<<"$output")" \
+      "generated prefix should reach Neovim from $shell without inherited routing"
+  done
+  if command -v zsh >/dev/null 2>&1; then
+    output="$(HOME="$home" TMUX="$tmux_environment" TMUX_PANE="$agent" zsh -dfc '
+      fpath=( "$HOME/.zfuns" $fpath )
+      autoload -U nvim-tmux
+      nvim-tmux --pane "$1" --pid "$2" context
+    ' _ "$editor" "$registered_pid")"
+    assert_eq "$registered_pid" "$(jq -r '.connection.pid' <<<"$output")" \
+      "autoloaded context should use Bash array indexing"
+  fi
+
+  output="$(HOME="$home" run_bridge "$tmux_environment" "$agent" claude-context)"
+  assert_eq "$prefix" "$(sed -n 's/^Neovim command prefix: //p' <<<"$output")" \
+    "Claude should receive the same executable prefix"
   summary="$(sed -n 's/^A live Neovim is available in this exact tmux window\. Connection context: //p' \
     <<<"$output")"
   assert_eq "$agent" "$(jq -r '.routing.claude_pane_id' <<<"$summary")" \
@@ -282,7 +331,6 @@ EOF
   assert_eq "$first" "$(jq -r '.editor.file' <<<"$output")" \
     "RPC client should not inherit caller stdin"
 
-  no_lsof_path="$(make_no_lsof_path)"
   output="$(PATH="$no_lsof_path" run_bridge "$tmux_environment" "$agent" discover)"
   assert_eq registered "$(jq -r '.source' <<<"$output")" \
     "registered discovery should not require lsof"
@@ -410,7 +458,8 @@ EOF
   assert_string_contains "$ambiguity_output" 'multiple Neovim instances found'
   output="$(run_bridge "$tmux_environment" "$agent" codex-context)"
   assert_string_contains "$output" 'Multiple Neovim instances are available'
-  assert_string_contains "$output" 'Select one with nvim-tmux --pid PID'
+  assert_string_contains "$output" 'Select one with TMUX='
+  assert_string_contains "$output" ' --pid PID context before relying on editor context.'
   output="$(run_bridge "$tmux_environment" "$agent" --pane "$editor" discover)"
   assert_eq "$editor" "$(jq -r '.pane_id' <<<"$output")" "explicit pane was not selected"
 
@@ -459,5 +508,7 @@ test_case "agent Neovim: reports context, selection, and diagnostics" \
   test_agent_nvim_lua_context
 test_case "nvim-tmux: startup context is quiet outside tmux" \
   test_nvim_tmux_hook_is_quiet_outside_tmux
+test_case "nvim-tmux: Zsh autoload dispatches to Bash and preserves the caller" \
+  test_nvim_tmux_zsh_autoload_preserves_shell
 test_case "nvim-tmux: discovers and controls only the exact tmux window" \
   test_nvim_tmux_discovers_and_controls_exact_window

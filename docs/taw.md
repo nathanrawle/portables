@@ -527,6 +527,19 @@ context`. The guidance tells Codex or Claude to use the exact Neovim pane
 conservatively for useful visual handoffs and to refresh only after a connection
 attempt fails.
 
+Startup guidance includes a shell-quoted command prefix with the absolute helper
+path, the hook's `TMUX` value, and the resolved caller's `TMUX_PANE`. Use that
+prefix when appending an operation: agent command shells may lack both the
+interactive Zsh functions and the hook's tmux environment. `TMUX` carries the
+tmux server socket path, server PID, and session ID; it is separate from the
+Neovim socket in the connection summary. After a failed connection attempt,
+append `context` to the prefix to refresh. Restart the agent if its caller pane
+or tmux server has gone away. If the sandbox blocks socket or process access,
+the command still requires approved execution outside the sandbox.
+
+Interactive Zsh autoloads `nvim-tmux` from `~/.zfuns`; the helper dispatches to
+Bash before running its implementation so it preserves the calling shell.
+
 The hook is advisory and produces no output outside tmux or when no editor is
 available. The helper exposes fixed operations, but it is not a privilege
 boundary: Codex and Neovim already run as the same operating-system user.
