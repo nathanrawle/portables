@@ -63,8 +63,8 @@ cmd-ctrl-j = 'focus down --boundaries-action wrap-around-the-workspace'
 cmd-ctrl-k = 'focus up --boundaries-action wrap-around-the-workspace'
 cmd-ctrl-l = 'focus right --boundaries-action wrap-around-the-workspace'
 
-ctrl-tab = 'focus right --boundaries-action wrap-around-the-workspace'
-ctrl-shift-tab = 'focus left --boundaries-action wrap-around-the-workspace'
+ctrl-backtick = 'focus right --boundaries-action wrap-around-the-workspace'
+ctrl-shift-backtick = 'focus left --boundaries-action wrap-around-the-workspace'
 
 cmd-ctrl-alt-h = 'join-with left'
 cmd-ctrl-alt-j = 'join-with down'
