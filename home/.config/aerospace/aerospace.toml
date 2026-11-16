@@ -237,7 +237,7 @@ if.app-id = 'com.apple.finder'
 run = ['layout floating']
 
 [[on-window-detected]]
-if.app-id = 'company.thebrowser.Browser'
+if.app-id = 'app.zen-browser.zen'
 run = ['move-node-to-workspace 1']
 
 [[on-window-detected]]
